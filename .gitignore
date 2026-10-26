@@ -1,0 +1,8 @@
+# Artefatos de build do makepkg (caso alguém rode o makepkg direto aqui)
+/*/src/
+/*/pkg/
+/*/*.pkg.tar.*
+/*/*.log
+/*/*.tar.gz
+# Saída do build local com podman
+/out/

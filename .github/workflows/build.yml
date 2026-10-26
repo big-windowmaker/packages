@@ -1,0 +1,120 @@
+# Compila os pacotes alterados (ou todos) num contêiner Manjaro fixado por
+# digest, roda o namcap e publica os pacotes como artefatos do workflow.
+# Este workflow não usa segredos e não publica nada em repositório: a
+# assinatura e o envio para o repositório de pacotes ficam em outro pipeline.
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  detect:
+    name: Detectar pacotes alterados
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      packages: ${{ steps.select.outputs.packages }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: select
+        name: Selecionar diretórios de pacote
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          mapfile -t all < <(find . -mindepth 2 -maxdepth 2 -name PKGBUILD -printf '%h\n' | sed 's|^\./||' | sort)
+
+          base=""
+          case "${EVENT_NAME}" in
+            pull_request) base="${PR_BASE_SHA}" ;;
+            push) base="${PUSH_BEFORE_SHA}" ;;
+          esac
+
+          build_all=0
+          if [[ ! ${base} =~ ^[0-9a-f]{40}$ ]] || [[ ${base} =~ ^0+$ ]] \
+             || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            build_all=1
+          else
+            mapfile -t changed < <(git diff --name-only "${base}" HEAD)
+            for f in "${changed[@]}"; do
+              case "${f}" in
+                ci/*|.github/workflows/*) build_all=1 ;;
+              esac
+            done
+          fi
+
+          selected=()
+          if (( build_all )); then
+            selected=("${all[@]}")
+          else
+            for d in "${all[@]}"; do
+              for f in "${changed[@]}"; do
+                if [[ ${f} == "${d}/"* ]]; then
+                  selected+=("${d}")
+                  break
+                fi
+              done
+            done
+          fi
+
+          # Só nomes simples de diretório chegam à matriz.
+          for d in "${selected[@]}"; do
+            [[ ${d} =~ ^[a-z0-9][a-z0-9._+-]*$ ]] || { echo "nome inválido: ${d}" >&2; exit 1; }
+          done
+
+          if (( ${#selected[@]} )); then
+            json=$(printf '%s\n' "${selected[@]}" | jq -R . | jq -cs .)
+          else
+            json='[]'
+          fi
+          echo "Pacotes selecionados: ${json}"
+          echo "packages=${json}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build ${{ matrix.package }}
+    needs: detect
+    if: needs.detect.outputs.packages != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container:
+      # manjarolinux/base:latest (índice multi-arquitetura, publicado em
+      # 2026-03-22). Atualizar o digest manualmente: o Dependabot não cobre
+      # imagens de `container:`.
+      image: docker.io/manjarolinux/base@sha256:bbf1f1d746f28e138eea610e140d2f28cbb5b7c5da2fbff034b883527aa604e9
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.detect.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: makepkg + namcap
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: bash ci/build-package.sh "${PACKAGE}" "${GITHUB_WORKSPACE}/out"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: packages-${{ matrix.package }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14
