@@ -7,7 +7,7 @@
 # registrados na árvore da v0.8.1, e são ligados via `git config` (padrão Arch).
 pkgname=wlmaker
 pkgver=0.8.1
-pkgrel=1
+pkgrel=2
 _commit=d08e0c08c7a14690c770a576be341f227e5ac2d8
 _libbase_commit=54e60555cae53ad99314c7579dce1ad38373ecaa
 _inih_commit=26254ee9de7681f8825433415443e7116ff24b98
@@ -88,4 +88,14 @@ package() {
 
   # Script de exemplo do upstream, com caminhos específicos do Debian.
   rm -f "$pkgdir/usr/bin/wrap-wlmaker.sh"
+
+  # Os dockapps do wlmaker (wlmclock, wlmbattery...) são clientes Wayland do
+  # protocolo de dock do wlmaker: na sessão X11 e nos outros ambientes eles
+  # não abrem, então só aparecem nos menus da sessão wlmaker.
+  local _desktop
+  for _desktop in "$pkgdir"/usr/share/applications/wlmaker.*.desktop; do
+    [[ -e $_desktop ]] || continue
+    grep -q '^OnlyShowIn=' "$_desktop" ||
+      sed -i '0,/^\[Desktop Entry\]$/s//[Desktop Entry]\nOnlyShowIn=wlmaker;/' "$_desktop"
+  done
 }
