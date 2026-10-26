@@ -1,0 +1,228 @@
+# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+# Partes baseadas nos PKGBUILDs do AUR de cada dockapp.
+
+# Pacote "split" que compila, de uma vez, os dockapps do conjunto curado do Big
+# WindowMaker que não existem nos repositórios Manjaro/BigLinux (relatório
+# analysis/02-x11-wmaker-dockapps.md, seção 4.4). Os nomes dos pacotes são os
+# mesmos do AUR.
+#
+# Fontes:
+#   - git window-maker/dockapps fixado em _commit: libdockapp, wmcpuload,
+#     wmbattery, wmusic, wmshutdown, wmmoonclock e wmcube;
+#   - wmudmount não está no repositório dockapps: usa o tarball oficial da
+#     release 3.0 no SourceForge, com checksum.
+#
+# Versão: o makepkg não permite pkgver diferente por pacote num split, então
+# todos usam a data do commit fixado (AAAAMMDD), que é maior que as versões do
+# AUR. Versões upstream incluídas neste snapshot:
+#   libdockapp 0.7.3, wmcpuload 1.1.1, wmbattery 2.56, wmusic 2.1.1,
+#   wmshutdown 1.6, wmmoonclock 1.30, wmcube 1.0.2, wmudmount 3.0.
+# Se algum dockapp sair deste split no futuro, o pacote separado vai precisar
+# de epoch=1 para não "voltar" de versão.
+#
+# Para atualizar: troque _commit e pkgver (data do commit) e regenere os
+# checksums com ci/update-sums.sh (ver README).
+pkgbase=big-dockapps
+pkgname=(
+  libdockapp
+  wmcpuload
+  wmbattery
+  wmusic
+  wmshutdown
+  wmmoonclock
+  wmcube
+  wmudmount
+)
+_commit=251e851a9d59d8bd0263ba1eebe08196f98f6d0b
+_wmudmount_ver=3.0
+pkgver=20260412
+pkgrel=1
+pkgdesc='Curated Window Maker dockapps for Big WindowMaker'
+arch=(x86_64)
+url='https://www.dockapps.net/'
+license=('GPL-2.0-or-later')
+makedepends=(
+  # comuns (num split, o namcap exige que as depends de todos os pacotes
+  # também estejam em makedepends)
+  cairo
+  git
+  hicolor-icon-theme
+  libx11
+  libxext
+  libxpm
+  # libdockapp (macros m4 do X.Org e mkfontdir exigidos pelo configure)
+  xorg-font-util
+  xorg-mkfontscale
+  # wmbattery
+  upower
+  # wmusic
+  gdk-pixbuf2
+  playerctl
+  # wmshutdown e wmudmount
+  gtk3
+  # wmudmount
+  gcr
+  libnotify
+  libsecret
+  udisks2
+)
+source=(
+  "dockapps::git+https://github.com/window-maker/dockapps.git#commit=${_commit}"
+  "https://downloads.sourceforge.net/project/wmudmount/wmudmount/wmudmount-${_wmudmount_ver}.tar.gz"
+)
+sha256sums=('cc9753fa925323b52110c595f4920da1aec6e1ae124a40be4062048991daed81'
+            '7f1de94264c9593f94337de1ede4bac1d976a03d9af1563b400d46497caaee4e')
+
+# Dockapps do repositório git que usam autotools.
+_autotools=(libdockapp wmcpuload wmbattery wmusic wmshutdown wmmoonclock)
+
+prepare() {
+  cd dockapps
+  local _d
+  for _d in "${_autotools[@]}"; do
+    (cd "${_d}" && autoreconf -fi)
+  done
+}
+
+build() {
+  local _stage="${srcdir}/stage"
+
+  # libdockapp primeiro: wmusic e wmcube ligam contra ela. Instala numa área
+  # temporária para os builds seguintes encontrarem cabeçalhos e biblioteca.
+  cd "${srcdir}/dockapps/libdockapp"
+  ./configure --prefix=/usr --without-font --without-examples
+  make
+  rm -rf "${_stage}"
+  make DESTDIR="${_stage}" install
+
+  local _dockapp_env=(
+    PKG_CONFIG_PATH="${_stage}/usr/lib/pkgconfig"
+    CPPFLAGS="${CPPFLAGS} -I${_stage}/usr/include"
+    LDFLAGS="${LDFLAGS} -L${_stage}/usr/lib"
+  )
+
+  cd "${srcdir}/dockapps/wmcpuload"
+  ./configure --prefix=/usr --mandir=/usr/share/man
+  make
+
+  cd "${srcdir}/dockapps/wmbattery"
+  # UPower é o backend padrão (sem APM/HAL).
+  ./configure --prefix=/usr --mandir=/usr/share/man --enable-upower
+  make
+
+  cd "${srcdir}/dockapps/wmusic"
+  env "${_dockapp_env[@]}" ./configure --prefix=/usr --mandir=/usr/share/man
+  env "${_dockapp_env[@]}" make
+
+  cd "${srcdir}/dockapps/wmshutdown"
+  ./configure --prefix=/usr --mandir=/usr/share/man
+  make
+
+  cd "${srcdir}/dockapps/wmmoonclock"
+  ./configure --prefix=/usr --mandir=/usr/share/man
+  make
+
+  # wmcube usa um Makefile simples; passa as flags do makepkg explicitamente.
+  cd "${srcdir}/dockapps/wmcube/wmcube"
+  make \
+    CFLAGS="${CFLAGS} -Wall" \
+    CPPFLAGS="${CPPFLAGS}" \
+    LDFLAGS="${LDFLAGS}" \
+    INCDIR="-I${_stage}/usr/include" \
+    LIBDIR="-L${_stage}/usr/lib"
+
+  cd "${srcdir}/wmudmount-${_wmudmount_ver}"
+  ./configure --prefix=/usr --mandir=/usr/share/man
+  make
+}
+
+package_libdockapp() {
+  pkgdesc='Library that provides a framework for developing dockapps'
+  url='https://www.dockapps.net/libdockapp'
+  license=('MIT AND GPL-2.0-or-later')
+  depends=(glibc libx11 libxext libxpm)
+
+  cd dockapps/libdockapp
+  make DESTDIR="${pkgdir}" install
+  # Compatibilidade com o AUR: alguns dockapps incluem <dockapp.h> direto.
+  ln -s libdockapp/dockapp.h "${pkgdir}/usr/include/dockapp.h"
+  install -Dm644 COPYING "${pkgdir}/usr/share/licenses/${pkgname}/COPYING"
+}
+
+package_wmcpuload() {
+  pkgdesc='Window Maker dockapp to monitor CPU usage'
+  url='https://www.dockapps.net/wmcpuload'
+  license=('GPL-2.0-or-later')
+  depends=(glibc libx11 libxext libxpm)
+
+  cd dockapps/wmcpuload
+  make DESTDIR="${pkgdir}" install
+}
+
+package_wmbattery() {
+  pkgdesc='Battery monitor dockapp for Window Maker (UPower backend)'
+  url='https://www.dockapps.net/wmbattery'
+  license=('GPL-2.0-only')
+  depends=(glib2 glibc libx11 libxext libxpm upower)
+
+  cd dockapps/wmbattery
+  make DESTDIR="${pkgdir}" install
+}
+
+package_wmusic() {
+  pkgdesc='Dockapp that remote-controls MPRIS-compatible media players'
+  url='https://www.dockapps.net/wmusic'
+  license=('GPL-2.0-or-later')
+  depends=(gdk-pixbuf2 glib2 glibc libdockapp libx11 playerctl)
+
+  cd dockapps/wmusic
+  make DESTDIR="${pkgdir}" install
+}
+
+package_wmshutdown() {
+  pkgdesc='Dockapp for shutting down or rebooting the machine (via logind)'
+  url='https://www.dockapps.net/wmshutdown'
+  license=('GPL-3.0-or-later')
+  depends=(gdk-pixbuf2 glib2 glibc gtk3 hicolor-icon-theme libx11)
+
+  cd dockapps/wmshutdown
+  make DESTDIR="${pkgdir}" install
+}
+
+package_wmmoonclock() {
+  pkgdesc='Dockapp that displays the current phase of the moon'
+  url='https://www.dockapps.net/wmmoonclock'
+  license=('GPL-2.0-or-later')
+  depends=(glibc libx11 libxext libxpm)
+
+  cd dockapps/wmmoonclock
+  make DESTDIR="${pkgdir}" install
+  # A página de manual do upstream se chama wmMoonClock.1.
+  ln -s wmMoonClock.1.gz "${pkgdir}/usr/share/man/man1/wmmoonclock.1.gz"
+}
+
+package_wmcube() {
+  pkgdesc='Dockapp with 3D objects tumbling according to CPU load'
+  url='https://www.dockapps.net/wmcube'
+  license=('GPL-3.0-only')
+  depends=(glibc libdockapp libx11)
+
+  cd dockapps/wmcube
+  install -Dm755 wmcube/wmcube "${pkgdir}/usr/bin/wmcube"
+  install -Dm644 wmcube/wmcube.1 "${pkgdir}/usr/share/man/man1/wmcube.1"
+  install -Dm644 -t "${pkgdir}/usr/share/wmcube" 3D-objects/*.wmc
+  install -Dm644 -t "${pkgdir}/usr/share/doc/wmcube" CHANGES README THANKS
+}
+
+package_wmudmount() {
+  pkgdesc='Filesystem mounter dockapp that uses UDisks2'
+  url='https://sourceforge.net/projects/wmudmount/'
+  license=('GPL-2.0-or-later')
+  depends=(
+    cairo gcr gdk-pixbuf2 glib2 glibc gtk3 hicolor-icon-theme libnotify
+    libsecret libx11 udisks2
+  )
+
+  cd "wmudmount-${_wmudmount_ver}"
+  make DESTDIR="${pkgdir}" install
+}
