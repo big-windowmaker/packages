@@ -32,6 +32,7 @@ pkgname=(
   wmmoonclock
   wmcube
   wmudmount
+  wmnet
 )
 _commit=251e851a9d59d8bd0263ba1eebe08196f98f6d0b
 _wmudmount_ver=3.0
@@ -53,6 +54,8 @@ makedepends=(
   # libdockapp (macros m4 do X.Org e mkfontdir exigidos pelo configure)
   xorg-font-util
   xorg-mkfontscale
+  # wmnet (fonte bitmap 5x8)
+  xorg-fonts-misc
   # wmbattery
   upower
   # wmusic
@@ -74,7 +77,7 @@ sha256sums=('cc9753fa925323b52110c595f4920da1aec6e1ae124a40be4062048991daed81'
             '7f1de94264c9593f94337de1ede4bac1d976a03d9af1563b400d46497caaee4e')
 
 # Dockapps do repositório git que usam autotools.
-_autotools=(libdockapp wmcpuload wmbattery wmusic wmshutdown wmmoonclock)
+_autotools=(libdockapp wmcpuload wmbattery wmusic wmshutdown wmmoonclock wmnet)
 
 prepare() {
   cd dockapps
@@ -132,6 +135,11 @@ build() {
     LIBDIR="-L${_stage}/usr/lib"
 
   cd "${srcdir}/wmudmount-${_wmudmount_ver}"
+  ./configure --prefix=/usr --mandir=/usr/share/man
+  make
+
+  # Substitui o wmnd do biglinux-stable, ligado a uma libsnmp que não existe mais.
+  cd "${srcdir}/dockapps/wmnet"
   ./configure --prefix=/usr --mandir=/usr/share/man
   make
 }
@@ -224,5 +232,17 @@ package_wmudmount() {
   )
 
   cd "wmudmount-${_wmudmount_ver}"
+  make DESTDIR="${pkgdir}" install
+}
+
+package_wmnet() {
+  pkgdesc='Window Maker dockapp to monitor network traffic'
+  url='https://www.dockapps.net/wmnet'
+  license=('GPL-2.0-or-later')
+  # Fonte bitmap "5x8" do servidor X (XLoadFont). O xorg-mkfontscale gera o
+  # fonts.dir; sem ele o servidor X não enxerga as fontes de misc/.
+  depends=(glibc libx11 libxext xorg-fonts-misc xorg-mkfontscale)
+
+  cd dockapps/wmnet
   make DESTDIR="${pkgdir}" install
 }
