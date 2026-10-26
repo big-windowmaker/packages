@@ -1,0 +1,98 @@
+# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+# Baseado no PKGBUILD do Arch Linux (extra/windowmaker):
+# Contributor: Balló György <ballogyor+arch at gmail dot com>
+# Contributor: Daniel Isenmann <daniel@archlinux.org>
+# Contributor: Judd Vinet <jvinet@zeroflux.org>
+
+# Snapshot do branch master do upstream, fixado num commit (ver
+# analysis/02-x11-wmaker-dockapps.md, seção 2.1). Para atualizar: troque
+# _commit, ajuste pkgver para a saída de `git describe --tags` no formato
+# 0.96.0.rN.gHASH e regenere os checksums com ci/update-sums.sh (ver README).
+# Quando a tag wmaker-0.97.0 sair, trocar para `#tag=wmaker-0.97.0`.
+pkgname=windowmaker
+_commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
+pkgver=0.96.0.r130.g558e67f
+pkgrel=1
+pkgdesc='X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)'
+arch=(x86_64)
+url='https://www.windowmaker.org/'
+license=('GPL-2.0-or-later AND WTFPL')
+depends=(
+  bash
+  fontconfig
+  giflib
+  glib2  # libWINGs usa libgobject (via pango)
+  glibc
+  imagemagick
+  libexif
+  libjpeg-turbo
+  libpng
+  libtiff
+  libwebp
+  libx11
+  libxext
+  libxft
+  libxinerama
+  libxmu
+  libxpm
+  libxrandr
+  pango
+  perl
+  xorg-xset
+  # Acréscimos em relação ao Arch (relatório 02, seção 2.3):
+  libxres     # --enable-res (identificação de clientes via XRes)
+  libxkbfile  # --enable-modelock (layout de teclado na barra de título)
+  libjxl      # suporte a JPEG XL no wrlib
+  libarchive  # wmiv: abrir imagens dentro de arquivos compactados
+)
+makedepends=(git)
+conflicts=(windowmaker-git)
+source=("git+https://github.com/window-maker/wmaker.git#commit=${_commit}")
+sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf')
+
+prepare() {
+  cd wmaker
+
+  # Garante que o pkgver declarado corresponde ao commit fixado.
+  local _desc
+  _desc="$(git describe --long --tags --abbrev=7 | sed 's/^wmaker-//;s/\([^-]*-g\)/r\1/;s/-/./g')"
+  if [[ ${_desc} != "${pkgver}" ]]; then
+    echo "pkgver (${pkgver}) não confere com git describe (${_desc})" >&2
+    return 1
+  fi
+
+  # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
+  # sed que o Arch faz na 0.96.0 não é necessário aqui.
+
+  autoreconf -fiv
+}
+
+build() {
+  cd wmaker
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --enable-modelock \
+    --enable-wmreplace \
+    --enable-xinerama \
+    --enable-randr \
+    --enable-usermenu \
+    --enable-pango \
+    --enable-res \
+    LINGUAS="`(cd po ; echo *.po | sed 's/.po//g')`"
+  make
+}
+
+check() {
+  cd wmaker
+  # Verificações do próprio upstream: documentação das opções de linha de
+  # comando, callbacks de defaults e consistência das traduções.
+  make check
+}
+
+package() {
+  cd wmaker
+  make DESTDIR="$pkgdir" install
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/" COPYING.WTFPL
+}
