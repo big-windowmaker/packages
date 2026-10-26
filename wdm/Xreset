@@ -1,0 +1,3 @@
+#!/bin/sh
+# Executado como root quando a sessão termina (X11 ou Wayland).
+exit 0

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Executado como root depois da autenticação e antes da sessão X11.
+# Um código de saída diferente de zero cancela o login.
+exit 0

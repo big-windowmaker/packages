@@ -1,0 +1,1599 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 19:02:25 -0300
+Subject: [PATCH 2/3] =?UTF-8?q?Sess=C3=B5es=20X11=20e=20Wayland=20a=20part?=
+ =?UTF-8?q?ir=20de=20xsessions=20e=20wayland-sessions?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+wdm (daemon):
+- Com DisplayManager*wdmWm vazio (ou "desktop"), a lista de sessões vem
+  dos .desktop de wdmXSessionDirs e wdmWaylandSessionDirs (libwdm,
+  sessions.c: Name localizado, Exec com aspas e códigos de campo, TryExec,
+  Hidden/NoDisplay). O wdmLogin devolve "x11/<id>" ou "wayland/<id>";
+  o daemon procura o id na própria lista e só executa Exec de .desktop
+  instalados. A sessão escolhida fica em wdmSessionStateDir/<usuário>.
+- pam_systemd: XDG_SEAT=seat0, XDG_VTNR (do argumento vtN do Xservers),
+  XDG_SESSION_TYPE, XDG_SESSION_CLASS=user e XDG_SESSION_DESKTOP antes do
+  pam_open_session, cujo erro agora cancela o login. Sem isso a sessão X11
+  ficava sem seat no logind (sem ACLs de dispositivos, polkit inativo).
+- Sessão Wayland: depois da autenticação, o processo da tela pede ao wdm
+  (SIGUSR2) que encerre o servidor X sem reiniciar a tela (estado
+  "handoff"), ativa o VT, abre a sessão PAM com PAM_TTY=ttyN e
+  XDG_SESSION_TYPE=wayland, e executa wdmWaylandSession <Exec> no VT, como
+  líder de sessão com o VT como terminal de controle. Quando a sessão
+  termina, o PAM é fechado e a tela volta com um servidor X novo.
+- Sessão que termina em menos de 10 s (ou Wayland que não pôde iniciar)
+  deixa um aviso em wdmRunDir, mostrado pelo wdmLogin (-e).
+
+libwdm: WDMUnsetEnv() devolvia NULL quando a variável não existia (o
+ambiente inteiro sumia: a sessão Wayland ficava sem XDG_RUNTIME_DIR) e não
+liberava a string removida.
+
+Sessão que termina em menos de 10 s não fica como a lembrada do usuário
+(volta a escolha anterior): uma sessão quebrada não vira o padrão.
+---
+ Makefile.in              |   7 +-
+ include/dm.h             |  16 +-
+ include/wdmsessions.h    |  70 +++++
+ src/libwdm/environment.c |   9 +-
+ src/libwdm/sessions.c    | 600 +++++++++++++++++++++++++++++++++++++++
+ src/wdm/Greet.c          |  61 +++-
+ src/wdm/dm.c             |  76 +++++
+ src/wdm/resource.c       |  22 ++
+ src/wdm/server.c         |  38 +++
+ src/wdm/session.c        | 242 +++++++++++++++-
+ src/wdm/verify.c         | 107 ++++++-
+ 11 files changed, 1230 insertions(+), 18 deletions(-)
+ create mode 100644 include/wdmsessions.h
+ create mode 100644 src/libwdm/sessions.c
+
+diff --git a/Makefile.in b/Makefile.in
+index 14ff75c..68fde29 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -124,6 +124,9 @@ src/libwdm/names.o: src/libwdm/names.c
+ src/libwdm/plcheckers.o: src/libwdm/plcheckers.c include/wdmlib.h
+ 	$(CC) -c $(libwdm_cflags) src/libwdm/plcheckers.c -o src/libwdm/plcheckers.o
+ 
++src/libwdm/sessions.o: src/libwdm/sessions.c include/wdmsessions.h
++	$(CC) -c $(libwdm_cflags) src/libwdm/sessions.c -o src/libwdm/sessions.o
++
+ src/wdm/Greet.o: src/wdm/Greet.c include/dm.h include/wdmconfig.h include/config.h include/greet.h include/wdmlib.h
+ 	$(CC) -c $(wdm_cflags) src/wdm/Greet.c -o src/wdm/Greet.o
+ 
+@@ -248,9 +251,9 @@ $(DESTDIR)$(bindir)/wdmPrefs: bin/wdmPrefs
+ 	$(INSTALL) -d $(@D)
+ 	$(INSTALL_PROGRAM) bin/wdmPrefs $@
+ 
+-bin/libwdm.a: src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o
++bin/libwdm.a: src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/libwdm/sessions.o
+ 	mkdir -p bin
+-	$(ar) cru bin/libwdm.a src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o
++	$(ar) cru bin/libwdm.a src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/libwdm/sessions.o
+ 	$(ranlib) bin/libwdm.a
+ 
+ $(DESTDIR)$(MANDIR)/man1/wdmLogin.1: doc/wdmLogin.man
+diff --git a/include/dm.h b/include/dm.h
+index 2afd1b0..4d85c9e 100644
+--- a/include/dm.h
++++ b/include/dm.h
+@@ -121,7 +121,10 @@ typedef union wait	waitType;
+ # define waitCompose(sig,core,code) ((sig) * 256 + (core) * 128 + (code))
+ # define waitVal(w)	waitCompose(waitSig(w), waitCore(w), waitCode(w))
+ 
+-typedef enum displayStatus { running, notRunning, zombie, phoenix } DisplayStatus;
++/* handoff: the X server was stopped on request of the session process,
++ * which now runs a Wayland session on the same VT; the display is
++ * restarted when that process exits. */
++typedef enum displayStatus { running, notRunning, zombie, phoenix, handoff } DisplayStatus;
+ 
+ #ifndef FD_ZERO
+ typedef	struct	my_fd_set { int fds_bits[1]; } my_fd_set;
+@@ -290,6 +293,9 @@ struct verify_info {
+ 	char		**systemEnviron;/* environment for startup/reset */
+ 	int		version;	/* for dynamic greeter to see */
+ 	/* add new fields below this line, and preferably at the end */
++	int		sessionType;	/* -1 legacy, WDM_SESSION_X11, WDM_SESSION_WAYLAND */
++	char		*sessionKey;	/* "x11/big-wm" */
++	char		*sessionDesktop;/* XDG_SESSION_DESKTOP */
+ };
+ 
+ /* display manager exit status definitions */
+@@ -512,4 +518,12 @@ typedef SIGVAL (*SIGFUNC)(int);
+ 
+ SIGVAL (*Signal(int, SIGFUNC Handler))(int);
+ 
++/* desktop sessions and Wayland hand-off (wdm additions) */
++extern char *wdmXSessionDirs, *wdmWaylandSessionDirs, *wdmWaylandSession;
++extern char *wdmDefaultSession, *wdmSessionStateDir, *wdmRunDir;
++extern char *wdmWm;
++extern int  DesktopSessionsEnabled (void);
++extern int  DisplayVT (struct display *d);
++extern void ForgetServerConnection (void);
++
+ #endif /* _DM_H_ */
+diff --git a/include/wdmsessions.h b/include/wdmsessions.h
+new file mode 100644
+index 0000000..7f4549b
+--- /dev/null
++++ b/include/wdmsessions.h
+@@ -0,0 +1,70 @@
++/*
++ * wdm - WINGs display manager
++ * Copyright (C) 2026 Big WindowMaker <https://github.com/big-windowmaker>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * wdmsessions.h: desktop session entries (xsessions and wayland-sessions).
++ *
++ * Both wdm (the daemon) and wdmLogin (the greeter) read the session list
++ * with the same code.  The greeter only sends back "<type>/<id>"; the
++ * daemon looks the id up again in its own list and never executes text
++ * received from the greeter.
++ */
++#ifndef _WDMSESSIONS_H
++#define _WDMSESSIONS_H
++
++#define WDM_SESSION_X11     0
++#define WDM_SESSION_WAYLAND 1
++
++typedef struct WDMSession {
++	int type;		/* WDM_SESSION_X11 or WDM_SESSION_WAYLAND */
++	char *id;		/* file name without ".desktop" */
++	char *name;		/* localized Name= */
++	char *label;		/* name shown in the greeter, with (X11)/(Wayland) */
++	char *exec;		/* Exec= (raw) */
++	char *desktopNames;	/* DesktopNames= (raw, ';' separated) or NULL */
++	char *path;		/* full path of the .desktop file */
++} WDMSession;
++
++typedef struct WDMSessionList {
++	int count;
++	WDMSession *items;
++} WDMSessionList;
++
++/* Reads the .desktop files from the ':' separated directory lists.
++ * Hidden/NoDisplay entries, entries without Exec and entries whose TryExec
++ * is not executable are skipped.  When the same id appears more than once
++ * for the same type, the first directory wins.  The list is sorted by
++ * label.  "locale" is used for Name[xx_YY]; NULL means $LC_ALL,
++ * $LC_MESSAGES or $LANG.  Never returns NULL. */
++WDMSessionList *WDMReadSessions(const char *xdirs, const char *wdirs,
++				const char *locale);
++void WDMFreeSessions(WDMSessionList *list);
++
++/* "x11/big-wm" -> entry, or NULL.  Also accepts a bare id when it is
++ * unique in the list. */
++WDMSession *WDMFindSession(WDMSessionList *list, const char *key);
++
++/* Writes "x11/big-wm" style key for the entry into buf. */
++char *WDMSessionKey(const WDMSession *s, char *buf, int size);
++
++/* Splits an Exec= value following the Desktop Entry Specification
++ * (quoting, escapes, %% and removal of field codes).  Returns a NULL
++ * terminated malloc'ed vector, or NULL on syntax error/empty command. */
++char **WDMSplitExec(const char *exec);
++void WDMFreeArgv(char **argv);
++
++/* Valid session id / user name for file names in the state directory. */
++int WDMValidSessionId(const char *id);
++int WDMValidUserName(const char *name);
++
++/* Remembered session of a user: <statedir>/<user>, content "type/id".
++ * WDMSaveUserSession() with key NULL forgets it. */
++int WDMSaveUserSession(const char *statedir, const char *user, const char *key);
++char *WDMLoadUserSession(const char *statedir, const char *user);
++
++#endif /* _WDMSESSIONS_H */
+diff --git a/src/libwdm/environment.c b/src/libwdm/environment.c
+index a53269b..1286f7d 100644
+--- a/src/libwdm/environment.c
++++ b/src/libwdm/environment.c
+@@ -148,8 +148,10 @@ WDMUnsetEnv(char **env, const char *name)
+ 		return 0;
+ 	}
+ 
++	/* nothing to remove: keep the environment (returning NULL here threw
++	 * the whole environment away) */
+ 	if(env == NULL || name[0] == '\0')
+-		return 0;
++		return env;
+ 
+ 	ep = env;
+ 	len = strlen(name);
+@@ -160,13 +162,14 @@ WDMUnsetEnv(char **env, const char *name)
+ 		++ep;
+ 	}
+ 	
+-	if(ep == NULL || *ep == NULL)
+-		return 0;
++	if(*ep == NULL)
++		return env;
+ 
+ 	for(envsize = 0; ep[envsize] != 0; ++envsize)
+ 		/*nothing*/;
+ 	WDMDebug("WDMUnsetEnv: moving %i items of %p from %p to %p \n",
+ 			envsize, (void*)env, (void*)(ep + 1), (void*)ep);
++	wfree(*ep);	/* allocated by WDMPutEnv() */
+ 	memmove(ep, ep + 1, envsize * sizeof(char *));
+ 	
+ 	for(envsize = 0; env[envsize] != 0; ++envsize)
+diff --git a/src/libwdm/sessions.c b/src/libwdm/sessions.c
+new file mode 100644
+index 0000000..cf4391b
+--- /dev/null
++++ b/src/libwdm/sessions.c
+@@ -0,0 +1,600 @@
++/*
++ * wdm - WINGs display manager
++ * Copyright (C) 2026 Big WindowMaker <https://github.com/big-windowmaker>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * sessions.c: read the desktop session entries of xsessions and
++ * wayland-sessions (Desktop Entry Specification, the subset display
++ * managers use).
++ */
++
++#include <wdmsessions.h>
++
++#include <ctype.h>
++#include <dirent.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <strings.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#define LINE_MAX_LEN 4096
++#define TRYEXEC_PATH "/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
++
++static char *xstrdup(const char *s)
++{
++	char *r;
++
++	if (!s)
++		return NULL;
++	r = strdup(s);
++	if (!r)
++		abort();
++	return r;
++}
++
++static void *xrealloc(void *p, size_t n)
++{
++	p = realloc(p, n);
++	if (!p)
++		abort();
++	return p;
++}
++
++int WDMValidSessionId(const char *id)
++{
++	const char *p;
++
++	if (!id || !*id || *id == '.' || *id == '-' || strlen(id) > 128)
++		return 0;
++	for (p = id; *p; p++)
++		if (!isalnum((unsigned char)*p) && !strchr("._+@-", *p))
++			return 0;
++	return 1;
++}
++
++int WDMValidUserName(const char *name)
++{
++	const char *p;
++
++	if (!name || !*name || *name == '.' || *name == '-' || strlen(name) > 64)
++		return 0;
++	for (p = name; *p; p++)
++		if (!isalnum((unsigned char)*p) && !strchr("._-", *p)
++		    && !(*p == '$' && p[1] == '\0'))
++			return 0;
++	return 1;
++}
++
++/* string escapes of the Desktop Entry Specification: \s \n \t \r \\ */
++static void unescape_string(char *s)
++{
++	char *r = s, *w = s;
++
++	while (*r) {
++		if (*r == '\\' && r[1]) {
++			r++;
++			switch (*r) {
++			case 's': *w++ = ' '; break;
++			case 'n': *w++ = '\n'; break;
++			case 't': *w++ = '\t'; break;
++			case 'r': *w++ = '\r'; break;
++			case '\\': *w++ = '\\'; break;
++			default: *w++ = '\\'; *w++ = *r; break;
++			}
++			r++;
++		} else
++			*w++ = *r++;
++	}
++	*w = '\0';
++}
++
++static char *trim(char *s)
++{
++	char *e;
++
++	while (*s == ' ' || *s == '\t')
++		s++;
++	e = s + strlen(s);
++	while (e > s && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\n' || e[-1] == '\r'))
++		*--e = '\0';
++	return s;
++}
++
++static int parse_bool(const char *v)
++{
++	return v && (strcmp(v, "true") == 0 || strcmp(v, "1") == 0);
++}
++
++/* Locale candidates, most specific first: ll_CC@mod, ll_CC, ll@mod, ll. */
++static int locale_candidates(const char *locale, char cand[4][100])
++{
++	char lang[32] = "", country[32] = "", mod[32] = "";
++	const char *p = locale;
++	int n = 0, i;
++
++	if (!locale || !*locale || strcmp(locale, "C") == 0 || strcmp(locale, "POSIX") == 0)
++		return 0;
++	for (i = 0; *p && *p != '_' && *p != '.' && *p != '@' && i < 31; p++)
++		lang[i++] = *p;
++	lang[i] = '\0';
++	if (*p == '_') {
++		p++;
++		for (i = 0; *p && *p != '.' && *p != '@' && i < 31; p++)
++			country[i++] = *p;
++		country[i] = '\0';
++	}
++	while (*p && *p != '@')
++		p++;
++	if (*p == '@') {
++		p++;
++		for (i = 0; *p && i < 31; p++)
++			mod[i++] = *p;
++		mod[i] = '\0';
++	}
++	if (!*lang)
++		return 0;
++	if (*country && *mod)
++		snprintf(cand[n++], 100, "%s_%s@%s", lang, country, mod);
++	if (*country)
++		snprintf(cand[n++], 100, "%s_%s", lang, country);
++	if (*mod)
++		snprintf(cand[n++], 100, "%s@%s", lang, mod);
++	snprintf(cand[n++], 100, "%s", lang);
++	return n;
++}
++
++static int find_in_path(const char *prog)
++{
++	char buf[1024];
++	const char *p = TRYEXEC_PATH, *e;
++
++	if (strchr(prog, '/'))
++		return access(prog, X_OK) == 0;
++	while (*p) {
++		e = strchr(p, ':');
++		if (!e)
++			e = p + strlen(p);
++		snprintf(buf, sizeof(buf), "%.*s/%s", (int)(e - p), p, prog);
++		if (access(buf, X_OK) == 0)
++			return 1;
++		p = *e ? e + 1 : e;
++	}
++	return 0;
++}
++
++static int contains_ci(const char *hay, const char *needle)
++{
++	size_t n = strlen(needle);
++
++	for (; *hay; hay++)
++		if (strncasecmp(hay, needle, n) == 0)
++			return 1;
++	return 0;
++}
++
++static char *make_label(const char *name, int type)
++{
++	const char *suffix;
++	size_t len;
++	char *label;
++
++	if (type == WDM_SESSION_WAYLAND) {
++		if (contains_ci(name, "wayland"))
++			return xstrdup(name);
++		suffix = " (Wayland)";
++	} else {
++		if (contains_ci(name, "x11") || contains_ci(name, "xorg"))
++			return xstrdup(name);
++		suffix = " (X11)";
++	}
++	len = strlen(name) + strlen(suffix) + 1;
++	label = xrealloc(NULL, len);
++	snprintf(label, len, "%s%s", name, suffix);
++	return label;
++}
++
++/* Parses one .desktop file.  Returns 1 and fills *s when usable. */
++static int read_entry(const char *path, const char *id, int type,
++		      char cand[4][100], int ncand, WDMSession *s)
++{
++	FILE *f;
++	char line[LINE_MAX_LEN];
++	char *names[4] = { NULL, NULL, NULL, NULL };
++	char *name = NULL, *exec = NULL, *tryexec = NULL, *dnames = NULL;
++	int in_group = 0, hidden = 0, ok = 0, i;
++	struct stat st;
++
++	f = fopen(path, "r");
++	if (!f)
++		return 0;
++	if (fstat(fileno(f), &st) != 0 || !S_ISREG(st.st_mode)) {
++		fclose(f);
++		return 0;
++	}
++	while (fgets(line, sizeof(line), f)) {
++		char *key, *val, *eq, *br;
++		size_t l = strlen(line);
++
++		if (l == sizeof(line) - 1 && line[l - 1] != '\n') {
++			int c;	/* overlong line: skip the rest */
++			while ((c = fgetc(f)) != EOF && c != '\n')
++				;
++			continue;
++		}
++		key = trim(line);
++		if (*key == '#' || *key == '\0')
++			continue;
++		if (*key == '[') {
++			in_group = strcmp(key, "[Desktop Entry]") == 0;
++			continue;
++		}
++		if (!in_group)
++			continue;
++		eq = strchr(key, '=');
++		if (!eq)
++			continue;
++		*eq = '\0';
++		val = trim(eq + 1);
++		key = trim(key);
++		br = strchr(key, '[');
++		if (br) {
++			char *end = strchr(br, ']');
++
++			if (strncmp(key, "Name[", 5) != 0 || !end || end[1])
++				continue;
++			*end = '\0';
++			for (i = 0; i < ncand; i++)
++				if (!names[i] && strcmp(br + 1, cand[i]) == 0) {
++					names[i] = xstrdup(val);
++					unescape_string(names[i]);
++				}
++			continue;
++		}
++		if (strcmp(key, "Name") == 0 && !name) {
++			name = xstrdup(val);
++			unescape_string(name);
++		} else if (strcmp(key, "Exec") == 0 && !exec) {
++			exec = xstrdup(val);
++			unescape_string(exec);
++		} else if (strcmp(key, "TryExec") == 0 && !tryexec) {
++			tryexec = xstrdup(val);
++			unescape_string(tryexec);
++		} else if (strcmp(key, "DesktopNames") == 0 && !dnames) {
++			dnames = xstrdup(val);
++		} else if (strcmp(key, "Hidden") == 0 || strcmp(key, "NoDisplay") == 0) {
++			hidden |= parse_bool(val);
++		}
++	}
++	fclose(f);
++
++	if (!hidden && exec && *exec && (!tryexec || !*tryexec || find_in_path(tryexec))) {
++		char **argv = WDMSplitExec(exec);
++
++		if (argv) {
++			WDMFreeArgv(argv);
++			ok = 1;
++		}
++	}
++	if (ok) {
++		const char *shown = NULL;
++
++		for (i = 0; i < ncand && !shown; i++)
++			if (names[i] && *names[i])
++				shown = names[i];
++		if (!shown)
++			shown = (name && *name) ? name : id;
++		s->type = type;
++		s->id = xstrdup(id);
++		s->name = xstrdup(shown);
++		s->label = make_label(shown, type);
++		s->exec = exec;
++		s->desktopNames = dnames;
++		s->path = xstrdup(path);
++		exec = dnames = NULL;
++	}
++	for (i = 0; i < 4; i++)
++		free(names[i]);
++	free(name);
++	free(exec);
++	free(tryexec);
++	free(dnames);
++	return ok;
++}
++
++static int have_session(WDMSessionList *list, int type, const char *id)
++{
++	int i;
++
++	for (i = 0; i < list->count; i++)
++		if (list->items[i].type == type && strcmp(list->items[i].id, id) == 0)
++			return 1;
++	return 0;
++}
++
++static void read_dir(WDMSessionList *list, const char *dir, int type,
++		     char cand[4][100], int ncand)
++{
++	DIR *d;
++	struct dirent *de;
++	char **ids = NULL;
++	int nids = 0, i;
++
++	d = opendir(dir);
++	if (!d)
++		return;
++	while ((de = readdir(d)) != NULL) {
++		size_t l = strlen(de->d_name);
++
++		if (l <= 8 || strcmp(de->d_name + l - 8, ".desktop") != 0)
++			continue;
++		ids = xrealloc(ids, sizeof(char *) * (nids + 1));
++		ids[nids] = xstrdup(de->d_name);
++		ids[nids][l - 8] = '\0';
++		nids++;
++	}
++	closedir(d);
++	for (i = 0; i < nids; i++) {
++		char path[1024];
++		WDMSession s;
++
++		if (WDMValidSessionId(ids[i]) && !have_session(list, type, ids[i])) {
++			snprintf(path, sizeof(path), "%s/%s.desktop", dir, ids[i]);
++			memset(&s, 0, sizeof(s));
++			if (read_entry(path, ids[i], type, cand, ncand, &s)) {
++				list->items = xrealloc(list->items,
++						sizeof(WDMSession) * (list->count + 1));
++				list->items[list->count++] = s;
++			}
++		}
++		free(ids[i]);
++	}
++	free(ids);
++}
++
++static void read_dirs(WDMSessionList *list, const char *dirs, int type,
++		      char cand[4][100], int ncand)
++{
++	char *copy, *p, *tok, *save = NULL;
++
++	if (!dirs || !*dirs)
++		return;
++	copy = xstrdup(dirs);
++	for (p = copy; (tok = strtok_r(p, ":", &save)) != NULL; p = NULL)
++		if (*tok == '/')
++			read_dir(list, tok, type, cand, ncand);
++	free(copy);
++}
++
++static int cmp_session(const void *a, const void *b)
++{
++	const WDMSession *x = a, *y = b;
++	int r = strcasecmp(x->label, y->label);
++
++	if (r)
++		return r;
++	if (x->type != y->type)
++		return x->type - y->type;
++	return strcmp(x->id, y->id);
++}
++
++WDMSessionList *WDMReadSessions(const char *xdirs, const char *wdirs, const char *locale)
++{
++	WDMSessionList *list = xrealloc(NULL, sizeof(WDMSessionList));
++	char cand[4][100];
++	int ncand;
++
++	list->count = 0;
++	list->items = NULL;
++	if (!locale) {
++		locale = getenv("LC_ALL");
++		if (!locale || !*locale)
++			locale = getenv("LC_MESSAGES");
++		if (!locale || !*locale)
++			locale = getenv("LANG");
++	}
++	ncand = locale_candidates(locale, cand);
++	read_dirs(list, xdirs, WDM_SESSION_X11, cand, ncand);
++	read_dirs(list, wdirs, WDM_SESSION_WAYLAND, cand, ncand);
++	if (list->count > 1)
++		qsort(list->items, list->count, sizeof(WDMSession), cmp_session);
++	return list;
++}
++
++void WDMFreeSessions(WDMSessionList *list)
++{
++	int i;
++
++	if (!list)
++		return;
++	for (i = 0; i < list->count; i++) {
++		WDMSession *s = &list->items[i];
++		free(s->id);
++		free(s->name);
++		free(s->label);
++		free(s->exec);
++		free(s->desktopNames);
++		free(s->path);
++	}
++	free(list->items);
++	free(list);
++}
++
++char *WDMSessionKey(const WDMSession *s, char *buf, int size)
++{
++	snprintf(buf, size, "%s/%s", s->type == WDM_SESSION_WAYLAND ? "wayland" : "x11", s->id);
++	return buf;
++}
++
++WDMSession *WDMFindSession(WDMSessionList *list, const char *key)
++{
++	const char *slash, *id;
++	int type = -1, i, found = -1;
++
++	if (!list || !key)
++		return NULL;
++	slash = strchr(key, '/');
++	if (slash) {
++		if ((size_t)(slash - key) == 3 && strncmp(key, "x11", 3) == 0)
++			type = WDM_SESSION_X11;
++		else if ((size_t)(slash - key) == 7 && strncmp(key, "wayland", 7) == 0)
++			type = WDM_SESSION_WAYLAND;
++		else
++			return NULL;
++		id = slash + 1;
++	} else
++		id = key;
++	if (!WDMValidSessionId(id))
++		return NULL;
++	for (i = 0; i < list->count; i++) {
++		if (strcmp(list->items[i].id, id) != 0)
++			continue;
++		if (type >= 0) {
++			if (list->items[i].type == type)
++				return &list->items[i];
++		} else {
++			if (found >= 0)
++				return NULL;	/* ambiguous bare id */
++			found = i;
++		}
++	}
++	return found >= 0 ? &list->items[found] : NULL;
++}
++
++void WDMFreeArgv(char **argv)
++{
++	char **p;
++
++	if (!argv)
++		return;
++	for (p = argv; *p; p++)
++		free(*p);
++	free(argv);
++}
++
++char **WDMSplitExec(const char *exec)
++{
++	char **argv = NULL;
++	int argc = 0;
++	size_t len = strlen(exec);
++	char *buf = xrealloc(NULL, len + 1);
++	const char *p = exec;
++
++	for (;;) {
++		size_t n = 0;
++		int content = 0, quoted = 0;
++
++		while (*p == ' ' || *p == '\t')
++			p++;
++		if (!*p)
++			break;
++		while (*p && (quoted || (*p != ' ' && *p != '\t'))) {
++			if (quoted) {
++				if (*p == '"') {
++					quoted = 0;
++					p++;
++				} else if (*p == '\\' && p[1] && strchr("\"`$\\", p[1])) {
++					buf[n++] = p[1];
++					p += 2;
++				} else
++					buf[n++] = *p++;
++				content = 1;
++			} else if (*p == '"') {
++				quoted = 1;
++				content = 1;
++				p++;
++			} else if (*p == '\\' && p[1]) {
++				buf[n++] = p[1];
++				p += 2;
++				content = 1;
++			} else if (*p == '%' && p[1]) {
++				if (p[1] == '%') {
++					buf[n++] = '%';
++					content = 1;
++				}
++				/* any other field code is dropped */
++				p += 2;
++			} else {
++				buf[n++] = *p++;
++				content = 1;
++			}
++		}
++		if (quoted) {	/* unterminated quote */
++			free(buf);
++			WDMFreeArgv(argv);
++			return NULL;
++		}
++		if (content) {
++			buf[n] = '\0';
++			argv = xrealloc(argv, sizeof(char *) * (argc + 2));
++			argv[argc++] = xstrdup(buf);
++			argv[argc] = NULL;
++		}
++	}
++	free(buf);
++	if (argc == 0 || argv[0][0] == '\0') {
++		WDMFreeArgv(argv);
++		return NULL;
++	}
++	return argv;
++}
++
++int WDMSaveUserSession(const char *statedir, const char *user, const char *key)
++{
++	char path[1024], tmp[1100];
++	int fd, len, ok;
++
++	if (!statedir || !*statedir || !WDMValidUserName(user))
++		return 0;
++	snprintf(path, sizeof(path), "%s/%s", statedir, user);
++	if (!key)	/* forget */
++		return unlink(path) == 0 || errno == ENOENT;
++	if (mkdir(statedir, 0755) != 0 && errno != EEXIST)
++		return 0;
++	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
++	unlink(tmp);
++	fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
++	if (fd < 0)
++		return 0;
++	len = strlen(key);
++	ok = write(fd, key, len) == len && write(fd, "\n", 1) == 1;
++	ok = (close(fd) == 0) && ok;
++	if (!ok || rename(tmp, path) != 0) {
++		unlink(tmp);
++		return 0;
++	}
++	return 1;
++}
++
++char *WDMLoadUserSession(const char *statedir, const char *user)
++{
++	char path[1024], buf[256];
++	int fd;
++	ssize_t n;
++
++	if (!statedir || !*statedir || !WDMValidUserName(user))
++		return NULL;
++	snprintf(path, sizeof(path), "%s/%s", statedir, user);
++	fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
++	if (fd < 0)
++		return NULL;
++	n = read(fd, buf, sizeof(buf) - 1);
++	close(fd);
++	if (n <= 0)
++		return NULL;
++	buf[n] = '\0';
++	buf[strcspn(buf, "\r\n")] = '\0';
++	return *buf ? xstrdup(buf) : NULL;
++}
+diff --git a/src/wdm/Greet.c b/src/wdm/Greet.c
+index 782620f..cc474ef 100644
+--- a/src/wdm/Greet.c
++++ b/src/wdm/Greet.c
+@@ -101,6 +101,8 @@ from the X Consortium.
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <strings.h>
++#include <string.h>
++#include <ctype.h>
+ #include <unistd.h>
+ #include <fcntl.h>
+ #include <signal.h>
+@@ -140,6 +142,45 @@ static char     xsessionArg[256], exitArg[256];
+ 
+ struct display *Save_d=NULL;
+ 
++/* wdmWm empty or "desktop": the session list comes from the xsessions and
++ * wayland-sessions .desktop files instead of a list of names. */
++int DesktopSessionsEnabled(void)
++{
++    return wdmWm == NULL || *wdmWm == '\0' || strcmp(wdmWm, "desktop") == 0;
++}
++
++/* Notice left by the previous session of this display (see session.c):
++ * the number of seconds a session lasted when it ended too soon. */
++static char *TakeSessionNotice(struct display *d)
++{
++    char path[PATH_MAX], buf[32];
++    const char *p;
++    int fd;
++    ssize_t n;
++
++    if (!wdmRunDir || !*wdmRunDir)
++        return NULL;
++    snprintf(path, sizeof(path), "%s/notice-", wdmRunDir);
++    for (p = d->name; *p && strlen(path) < sizeof(path) - 2; p++) {
++        size_t l = strlen(path);
++        path[l] = isalnum((unsigned char)*p) ? *p : '_';
++        path[l + 1] = '\0';
++    }
++    fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
++    if (fd < 0)
++        return NULL;
++    n = read(fd, buf, sizeof(buf) - 1);
++    close(fd);
++    unlink(path);
++    if (n <= 0)
++        return NULL;
++    buf[n] = '\0';
++    buf[strcspn(buf, "\r\n")] = '\0';
++    if (!*buf || (strspn(buf, "0123456789") != strlen(buf) && strcmp(buf, "wayland") != 0))
++        return NULL;
++    return wstrdup(buf);
++}
++
+ extern  char    **systemEnv();
+ 
+ /****  pipe I/O routines ****/
+@@ -210,7 +251,8 @@ static int InitGreet (struct display *d)
+     }
+     if (pid == 0) {             /* child */
+         char **env = NULL;
+-	char *argv[20];
++	char *argv[40];
++	char *notice;
+ 	int argc = 1; /* argc = 0 is for command itself */
+ 
+         close(pipe_filedes[0]);
+@@ -230,7 +272,22 @@ static int InitGreet (struct display *d)
+ 		argv[0]++;
+ 
+ 	argv[argc++] = wstrconcat("-d", d->name);
+-	if(*wdmWm)
++	if(DesktopSessionsEnabled())
++	{
++		argv[argc++] = wstrconcat("-X", wdmXSessionDirs);
++		/* Wayland sessions need the VT of a local X server */
++		if(d->displayType.location == Local && DisplayVT(d) > 0)
++			argv[argc++] = wstrconcat("-W", wdmWaylandSessionDirs);
++		else
++			argv[argc++] = "-W:";	/* empty list */
++		if(*wdmDefaultSession)
++			argv[argc++] = wstrconcat("-D", wdmDefaultSession);
++		if(*wdmSessionStateDir)
++			argv[argc++] = wstrconcat("-R", wdmSessionStateDir);
++		if((notice = TakeSessionNotice(d)) != NULL)
++			argv[argc++] = wstrconcat("-e", notice);
++	}
++	else if(*wdmWm)
+ 		argv[argc++] = wstrconcat("-w", wdmWm);
+ 	if(*wdmLogo)
+ 		argv[argc++] = wstrconcat("-l", wdmLogo);
+diff --git a/src/wdm/dm.c b/src/wdm/dm.c
+index cb01d47..2f74d8f 100644
+--- a/src/wdm/dm.c
++++ b/src/wdm/dm.c
+@@ -40,6 +40,7 @@ from The Open Group.
+ # include	<dm_auth.h>
+ 
+ # include	<stdio.h>
++#include <string.h>
+ #ifdef X_POSIX_C_SOURCE
+ #define _POSIX_C_SOURCE X_POSIX_C_SOURCE
+ #include <signal.h>
+@@ -98,6 +99,7 @@ static int TitleLen;
+ 
+ #ifndef UNRELIABLE_SIGNALS
+ static SIGVAL ChildNotify (int n);
++static void InstallHandoffHandler (void);
+ #endif
+ 
+ static int StorePid (void);
+@@ -196,6 +198,7 @@ main (int argc, char **argv)
+ #ifndef UNRELIABLE_SIGNALS
+     (void) Signal (SIGCHLD, ChildNotify);
+ #endif
++    InstallHandoffHandler ();
+     while (
+ #ifdef XDMCP
+ 	   AnyWellKnownSockets() ||
+@@ -401,6 +404,74 @@ StopAll (int n)
+ 
+ int	ChildReady;
+ 
++/*
++ * Wayland hand-off: a display process that authenticated a user for a
++ * Wayland session sends SIGUSR2; the X server of that display is then
++ * stopped without restarting the display (status "handoff").  The display
++ * is restarted normally when that process exits.
++ */
++#define MAX_HANDOFF 8
++static volatile sig_atomic_t handoffCount;
++static volatile pid_t handoffPids[MAX_HANDOFF];
++
++static void
++HandoffNotify (int n, siginfo_t *si, void *ctx)
++{
++    int olderrno = errno;
++
++    if (si && si->si_pid > 0 && si->si_uid == 0 && handoffCount < MAX_HANDOFF)
++	handoffPids[handoffCount++] = si->si_pid;
++    ChildReady = 1;
++    errno = olderrno;
++}
++
++static void
++InstallHandoffHandler (void)
++{
++    struct sigaction sa;
++
++    memset (&sa, 0, sizeof (sa));
++    sa.sa_sigaction = HandoffNotify;
++    sa.sa_flags = SA_SIGINFO | SA_RESTART;
++    sigemptyset (&sa.sa_mask);
++    sigaction (SIGUSR2, &sa, NULL);
++}
++
++static void
++ProcessHandoffs (void)
++{
++    sigset_t mask, omask;
++    pid_t pids[MAX_HANDOFF];
++    int i, n;
++    struct display *d;
++
++    sigemptyset (&mask);
++    sigaddset (&mask, SIGUSR2);
++    sigprocmask (SIG_BLOCK, &mask, &omask);
++    n = handoffCount;
++    for (i = 0; i < n; i++)
++	pids[i] = handoffPids[i];
++    handoffCount = 0;
++    sigprocmask (SIG_SETMASK, &omask, (sigset_t *) NULL);
++
++    for (i = 0; i < n; i++) {
++	d = FindDisplayByPid (pids[i]);
++	if (!d) {
++	    WDMError ("Wayland hand-off request from unknown process %d ignored\n", (int) pids[i]);
++	    continue;
++	}
++	if (d->status != running || d->serverPid < 2 ||
++	    d->displayType.location != Local) {
++	    WDMError ("Wayland hand-off for display %s refused (status %d, server %d)\n",
++		      d->name, (int) d->status, d->serverPid);
++	    continue;
++	}
++	WDMInfo ("display %s: stopping the X server for a Wayland session\n", d->name);
++	d->status = handoff;
++	TerminateProcess (d->serverPid, d->termSignal);
++    }
++}
++
+ #ifndef UNRELIABLE_SIGNALS
+ /* ARGSUSED */
+ static SIGVAL
+@@ -436,6 +507,7 @@ WaitForChild (void)
+     sigemptyset(&mask);
+     sigaddset(&mask, SIGCHLD);
+     sigaddset(&mask, SIGHUP);
++    sigaddset(&mask, SIGUSR2);
+     sigprocmask(SIG_BLOCK, &mask, &omask);
+     WDMDebug("signals blocked\n");
+ #else
+@@ -454,6 +526,7 @@ WaitForChild (void)
+ #else
+     sigsetmask (omask);
+ #endif
++    ProcessHandoffs ();
+ #ifndef X_NOT_POSIX
+     while ((pid = waitpid (-1, &status, WNOHANG)) > 0)
+ #else
+@@ -569,6 +642,9 @@ WaitForChild (void)
+ 		WDMDebug("Zombie server reaped, removing display %s\n", d->name);
+ 		RemoveDisplay (d);
+ 		break;
++	    case handoff:
++		WDMDebug("X server of display %s stopped for a Wayland session\n", d->name);
++		break;
+ 	    case phoenix:
+ 		WDMDebug("Phoenix server arises, restarting display %s\n", d->name);
+ 		d->status = notRunning;
+diff --git a/src/wdm/resource.c b/src/wdm/resource.c
+index 08d2b83..739e827 100644
+--- a/src/wdm/resource.c
++++ b/src/wdm/resource.c
+@@ -68,6 +68,9 @@ char	*willing;
+ int_resource	choiceTimeout;	/* chooser choice timeout */
+ 
+ /* wdm additions */
++#ifndef DEF_WAYLAND_SESSION
++#define DEF_WAYLAND_SESSION "/etc/wdm/Wsession"
++#endif
+ #define DEF_WDMLOGIN "/usr/X11R6/bin/wdmLogin"
+ char	*wdmLogin;		/* full path to external program Login */
+ char	*wdmWm;			/* list of optional window managers to start */
+@@ -94,6 +97,13 @@ char	*wdmCursorTheme;	/* this will be XCURSOR_THEME value before */
+ int_resource	wdmXineramaHead;/* select xinerama head where to show login */
+ 				/* panel this _should_ be display dependant, */
+ 				/* but I make it later */
++/* desktop sessions (xsessions and wayland-sessions) */
++char	*wdmXSessionDirs;	/* ':' separated list of xsessions dirs */
++char	*wdmWaylandSessionDirs;	/* ':' separated list of wayland-sessions dirs */
++char	*wdmWaylandSession;	/* wrapper that runs a Wayland session */
++char	*wdmDefaultSession;	/* session preselected in wdmLogin ("big-wm") */
++char	*wdmSessionStateDir;	/* last session of each user */
++char	*wdmRunDir;		/* runtime state (failed session notices) */
+ 
+ # define DM_STRING	0
+ # define DM_INT		1
+@@ -392,6 +402,18 @@ struct dmResources wdmResources[] = {
+ 				""} ,
+ { "wdmXineramaHead",	"WdmXineramaHead",	DM_INT,	&wdmXineramaHead.c,
+ 				"0"} ,
++{ "wdmXSessionDirs",	"WdmXSessionDirs",	DM_STRING,	&wdmXSessionDirs,
++				"/usr/local/share/xsessions:/usr/share/xsessions"} ,
++{ "wdmWaylandSessionDirs",	"WdmWaylandSessionDirs",	DM_STRING,	&wdmWaylandSessionDirs,
++				"/usr/local/share/wayland-sessions:/usr/share/wayland-sessions"} ,
++{ "wdmWaylandSession",	"WdmWaylandSession",	DM_STRING,	&wdmWaylandSession,
++				DEF_WAYLAND_SESSION} ,
++{ "wdmDefaultSession",	"WdmDefaultSession",	DM_STRING,	&wdmDefaultSession,
++				""} ,
++{ "wdmSessionStateDir",	"WdmSessionStateDir",	DM_STRING,	&wdmSessionStateDir,
++				"/var/lib/wdm/sessions"} ,
++{ "wdmRunDir",	"WdmRunDir",	DM_STRING,	&wdmRunDir,
++				"/run/wdm"} ,
+ };
+ 
+ # define NUM_WDM_RESOURCES	(sizeof wdmResources/\
+diff --git a/src/wdm/server.c b/src/wdm/server.c
+index 2a1c4fc..264507d 100644
+--- a/src/wdm/server.c
++++ b/src/wdm/server.c
+@@ -46,6 +46,9 @@ from The Open Group.
+ # include 	<sys/socket.h>
+ 
+ #include <wdmlib.h>
++#include <ctype.h>
++#include <stdlib.h>
++#include <string.h>
+ 
+ static int receivedUsr1;
+ 
+@@ -387,3 +390,38 @@ PingServer (struct display *d, Display *alternateDpy)
+     XSetIOErrorHandler (oldError);
+     return 1;
+ }
++
++/*
++ * wdm additions for the Wayland hand-off.
++ */
++
++/* VT of a local display, from the "vtN" argument of its X server
++ * (Xservers: ":0 local /usr/bin/X :0 vt7 ..."), or -1. */
++int
++DisplayVT (struct display *d)
++{
++    char **a;
++    char *end;
++    long vt;
++
++    for (a = d->argv; a && *a; a++) {
++	if (strncmp (*a, "vt", 2) != 0 || !isdigit ((unsigned char) (*a)[2]))
++	    continue;
++	vt = strtol (*a + 2, &end, 10);
++	if (*end == '\0' && vt > 0 && vt < 64)
++	    return (int) vt;
++    }
++    return -1;
++}
++
++/* Forgets the connection opened by WaitForServer() so nothing (ResetServer,
++ * pseudoReset) talks to a server that is about to be stopped. */
++void
++ForgetServerConnection (void)
++{
++    if (dpy) {
++	ClearCloseOnFork (ConnectionNumber (dpy));
++	XCloseDisplay (dpy);
++	dpy = NULL;
++    }
++}
+diff --git a/src/wdm/session.c b/src/wdm/session.c
+index 46a612b..1f1a773 100644
+--- a/src/wdm/session.c
++++ b/src/wdm/session.c
+@@ -67,9 +67,22 @@ from The Open Group.
+ #endif
+ 
+ #include <wdmlib.h>
++#include <wdmsessions.h>
++
++#include <fcntl.h>
++#include <string.h>
++#include <time.h>
++#include <sys/ioctl.h>
++#include <sys/stat.h>
++#include <linux/kd.h>
++#include <linux/vt.h>
+ 
+ static	int	runAndWait (char **args, char **environ);
+ 
++/* A session that ends sooner than this leaves a notice for the greeter,
++ * so the user sees why the login screen came back. */
++#define SHORT_SESSION_SECONDS 10
++
+ #ifdef HAVE_SHADOW_H
+ #include <shadow.h>
+ #endif
+@@ -258,11 +271,154 @@ ErrorHandler(Display *dpy, XErrorEvent *event)
+     /*NOTREACHED*/
+ }
+ 
++/*
++ * Wayland hand-off helpers
++ */
++
++static int
++ActivateVT (int vt)
++{
++    char path[32];
++    struct vt_stat st;
++    int fd, i;
++
++    snprintf (path, sizeof (path), "/dev/tty%d", vt);
++    fd = open (path, O_RDWR | O_NOCTTY | O_CLOEXEC);
++    if (fd < 0) {
++	WDMError ("cannot open %s: %s\n", path, strerror (errno));
++	return 0;
++    }
++    /* an X server that died badly may leave the VT in graphics mode */
++    (void) ioctl (fd, KDSETMODE, KD_TEXT);
++    if (ioctl (fd, VT_ACTIVATE, vt) < 0)
++	WDMError ("VT_ACTIVATE %d failed: %s\n", vt, strerror (errno));
++    for (i = 0; i < 50; i++) {
++	if (ioctl (fd, VT_GETSTATE, &st) == 0 && st.v_active == vt)
++	    break;
++	usleep (100000);
++    }
++    close (fd);
++    if (i == 50) {
++	WDMError ("VT %d did not become active\n", vt);
++	return 0;
++    }
++    return 1;
++}
++
++/*
++ * Asks the parent wdm process to stop the X server of this display (it
++ * then does not restart the display until this process exits) and waits
++ * for the VT to be free.
++ */
++static int
++StopServerForWayland (struct display *d, Display *greetDpy)
++{
++    int vt = DisplayVT (d), serverPid = d->serverPid, i;
++    pid_t parent = getppid ();
++
++    if (vt <= 0 || serverPid < 2 || parent <= 1) {
++	WDMError ("display %s: cannot hand off (vt %d, server %d)\n",
++		  d->name, vt, serverPid);
++	return 0;
++    }
++    if (greetDpy)
++	XCloseDisplay (greetDpy);
++    ForgetServerConnection ();
++    WDMDebug ("asking wdm (%d) to stop X server %d\n", (int) parent, serverPid);
++    if (kill (parent, SIGUSR2) != 0) {
++	WDMError ("cannot signal wdm: %s\n", strerror (errno));
++	return 0;
++    }
++    /* the server is reaped by the parent; until then kill(0) succeeds */
++    for (i = 0; i < 150; i++) {
++	if (kill (serverPid, 0) != 0 && errno == ESRCH)
++	    break;
++	usleep (100000);
++    }
++    if (i == 150) {
++	WDMError ("X server %d of display %s did not stop\n", serverPid, d->name);
++	return 0;
++    }
++    d->serverPid = -1;
++    return ActivateVT (vt);
++}
++
++static void
++SetTTYOwner (int vt, uid_t uid)
++{
++    char path[32];
++    struct group *gr = getgrnam ("tty");
++
++    snprintf (path, sizeof (path), "/dev/tty%d", vt);
++    if (chown (path, uid, gr ? gr->gr_gid : 0) != 0 || chmod (path, 0620) != 0)
++	WDMError ("cannot set owner of %s: %s\n", path, strerror (errno));
++}
++
++/* notice: number of seconds the session lasted, or "wayland" when the
++ * Wayland session could not be started */
++static void
++LeaveSessionNotice (struct display *d, const char *notice)
++{
++    char path[PATH_MAX], buf[32];
++    const char *p;
++    int fd, len;
++
++    if (!wdmRunDir || !*wdmRunDir)
++	return;
++    if (mkdir (wdmRunDir, 0755) != 0 && errno != EEXIST)
++	return;
++    snprintf (path, sizeof (path), "%s/notice-", wdmRunDir);
++    for (p = d->name; *p && strlen (path) < sizeof (path) - 2; p++) {
++	size_t l = strlen (path);
++	path[l] = isalnum ((unsigned char) *p) ? *p : '_';
++	path[l + 1] = '\0';
++    }
++    unlink (path);
++    fd = open (path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
++    if (fd < 0)
++	return;
++    len = snprintf (buf, sizeof (buf), "%s\n", notice);
++    if (write (fd, buf, len) != len)
++	unlink (path);
++    close (fd);
++}
++
++#ifdef USE_PAM
++/* Environment for pam_systemd: seat, VT, session type and class. */
++static void
++SetLogindEnv (pam_handle_t *pamh, struct display *d, struct verify_info *verify)
++{
++    char buf[256];
++    int vt = DisplayVT (d);
++
++    if (verify->sessionType < 0)
++	return;
++    if (d->displayType.location == Local && vt > 0) {
++	pam_putenv (pamh, "XDG_SEAT=seat0");
++	snprintf (buf, sizeof (buf), "XDG_VTNR=%d", vt);
++	pam_putenv (pamh, buf);
++    }
++    pam_putenv (pamh, verify->sessionType == WDM_SESSION_WAYLAND ?
++		"XDG_SESSION_TYPE=wayland" : "XDG_SESSION_TYPE=x11");
++    pam_putenv (pamh, "XDG_SESSION_CLASS=user");
++    snprintf (buf, sizeof (buf), "XDG_SESSION_DESKTOP=%s", verify->sessionDesktop);
++    pam_putenv (pamh, buf);
++    if (verify->sessionType == WDM_SESSION_WAYLAND) {
++	/* a VT session, not an X display */
++	snprintf (buf, sizeof (buf), "tty%d", vt);
++	pam_set_item (pamh, PAM_TTY, buf);
++    }
++}
++#endif
++
+ void
+ ManageSession (struct display *d)
+ {
+     static int		pid = 0;
+     Display		*dpy;
++    time_t		sessionStart = 0;
++    char		*previousKey = NULL;
++    int			savedKey = 0;
+     greet_user_rtn	greet_stat; 
+     static GreetUserProc greet_user_proc = NULL;
+ #ifndef GREET_USER_STATIC
+@@ -305,6 +461,24 @@ ManageSession (struct display *d)
+ 
+     if (greet_stat == Greet_Success)
+     {
++	if (verify.sessionKey && wdmSessionStateDir && *wdmSessionStateDir) {
++	    previousKey = WDMLoadUserSession (wdmSessionStateDir, greet.name);
++	    savedKey = WDMSaveUserSession (wdmSessionStateDir, greet.name, verify.sessionKey);
++	    if (!savedKey)
++		WDMDebug ("could not save the session of %s\n", greet.name);
++	}
++	if (verify.sessionType == WDM_SESSION_WAYLAND) {
++	    if (!StopServerForWayland (d, dpy)) {
++		WDMError ("display %s: Wayland session not started\n", d->name);
++		LeaveSessionNotice (d, "wayland");
++		/* do not offer the session that failed as the default again */
++		if (savedKey)
++		    WDMSaveUserSession (wdmSessionStateDir, greet.name, previousKey);
++		SessionExit (d, OBEYSESS_DISPLAY, FALSE);
++	    }
++	    SetTTYOwner (DisplayVT (d), verify.uid);
++	}
++	sessionStart = time (NULL);
+ 	clientPid = 0;
+ 	if (!Setjmp (abortSession)) {
+ 	    (void) Signal (SIGTERM, catchTerm);
+@@ -358,12 +532,30 @@ ManageSession (struct display *d)
+ 	    AbortClient (clientPid);
+ 	}
+     }
++    if (sessionStart && verify.sessionType >= 0) {
++	long seconds = (long) (time (NULL) - sessionStart);
++
++	if (seconds < SHORT_SESSION_SECONDS) {
++	    char buf[32];
++
++	    WDMError ("session %s of %s ended after %ld s\n",
++		      verify.sessionKey, greet.name, seconds);
++	    snprintf (buf, sizeof (buf), "%ld", seconds);
++	    LeaveSessionNotice (d, buf);
++	    /* a session that dies at once is not offered as the default
++	     * next time (no login loop through the remembered choice) */
++	    if (savedKey)
++		WDMSaveUserSession (wdmSessionStateDir, greet.name, previousKey);
++	}
++    }
++    if (verify.sessionType == WDM_SESSION_WAYLAND)
++	SetTTYOwner (DisplayVT (d), 0);
+     /*
+      * run system-wide reset file
+      */
+     WDMDebug("Source reset program %s\n", d->reset);
+     source (verify.systemEnviron, d->reset);
+-    SessionExit (d, OBEYSESS_DISPLAY, TRUE);
++    SessionExit (d, OBEYSESS_DISPLAY, verify.sessionType != WDM_SESSION_WAYLAND);
+ }
+ 
+ void
+@@ -550,11 +742,40 @@ StartClient (
+ 	WDMDebug("\n");
+     }
+ #ifdef USE_PAM
+-    if (pamh) pam_open_session(pamh, 0);
+-#endif    
++    if (pamh) {
++	int pam_err;
++
++	SetLogindEnv (pamh, d, verify);
++	pam_err = pam_open_session (pamh, 0);
++	if (pam_err != PAM_SUCCESS) {
++	    WDMError ("pam_open_session for %s failed: %s\n", name,
++		      pam_strerror (pamh, pam_err));
++	    return 0;
++	}
++    }
++#endif
+     switch (pid = fork ()) {
+     case 0:
++	/* A Wayland session is a VT session: own session with the VT as
++	 * controlling terminal (setsid before CleanUpChild's setpgid). */
++	if (verify->sessionType == WDM_SESSION_WAYLAND)
++	    (void) setsid ();
+ 	CleanUpChild ();
++	if (verify->sessionType == WDM_SESSION_WAYLAND) {
++	    char tty[32];
++	    int fd;
++
++	    snprintf (tty, sizeof (tty), "/dev/tty%d", DisplayVT (d));
++	    fd = open (tty, O_RDWR);
++	    if (fd < 0) {
++		WDMError ("cannot open %s: %s\n", tty, strerror (errno));
++		exit (1);
++	    }
++	    (void) ioctl (fd, TIOCSCTTY, 0);
++	    dup2 (fd, 0);
++	    if (fd > 2)
++		close (fd);
++	}
+ #ifdef XDMCP
+ 	/* The chooser socket is not closed by CleanUpChild() */
+ 	DestroyWellKnownSockets();
+@@ -729,7 +950,12 @@ StartClient (
+ 	}
+ #endif /* K5AUTH */
+ 	bzero(passwd, strlen(passwd));
+-	SetUserAuthorization (d, verify);
++	if (verify->sessionType != WDM_SESSION_WAYLAND)
++	    SetUserAuthorization (d, verify);
++	else {
++	    verify->userEnviron = WDMUnsetEnv(verify->userEnviron, "DISPLAY");
++	    verify->userEnviron = WDMUnsetEnv(verify->userEnviron, "XAUTHORITY");
++	}
+ 	home = WDMGetEnv(verify->userEnviron, "HOME");
+ 	if (home)
+ 	    if (chdir (home) == -1) {
+@@ -738,6 +964,14 @@ StartClient (
+ 		chdir ("/");
+ 		verify->userEnviron = WDMSetEnv(verify->userEnviron, "HOME", "/");
+ 	    }
++	if (verify->argv && verify->sessionType == WDM_SESSION_WAYLAND) {
++		/* stdin stays on the VT; no X failsafe client without X */
++		dup2 (2, 1);
++		execve (verify->argv[0], verify->argv, verify->userEnviron);
++		WDMError("Wayland session \"%s\" execution failed: %s\n",
++			 verify->argv[0], strerror (errno));
++		exit (1);
++	}
+ 	if (verify->argv) {
+ 		WDMDebug("executing session %s\n", verify->argv[0]);
+ 		execute (verify->argv, verify->userEnviron);
+diff --git a/src/wdm/verify.c b/src/wdm/verify.c
+index 1a69f7e..7542a41 100644
+--- a/src/wdm/verify.c
++++ b/src/wdm/verify.c
+@@ -51,6 +51,8 @@ from The Open Group.
+ #endif
+ 
+ # include	<greet.h>
++#include <wdmsessions.h>
++#include <string.h>
+ 
+ #include <wdmlib.h>
+ 
+@@ -176,6 +178,83 @@ static struct pam_conv PAM_conversation = {
+ };
+ #endif /* USE_PAM */
+ 
++static char **
++appendArg (char **argv, const char *arg)
++{
++	int i = 0;
++	char **n;
++
++	while (argv && argv[i])
++		i++;
++	n = realloc (argv, (i + 2) * sizeof (char *));
++	if (!n || !(n[i] = strdup (arg))) {
++		WDMError("appendArg: out of memory\n");
++		exit (RESERVER_DISPLAY);
++	}
++	n[i + 1] = NULL;
++	return n;
++}
++
++/*
++ * Desktop sessions: the greeter sends "x11/<id>" or "wayland/<id>".  The id
++ * is looked up again here, so only Exec lines of installed .desktop files
++ * are ever executed.  X11 sessions run "Xsession <Exec...>", Wayland
++ * sessions run "<wdmWaylandSession> <Exec...>".
++ */
++static int
++ResolveDesktopSession (struct display *d, struct greet_info *greet,
++		       struct verify_info *verify, char ***argvp)
++{
++	WDMSessionList *list;
++	WDMSession *s = NULL;
++	char key[300], **exec, **argv = NULL;
++	int i, canWayland = (d->displayType.location == Local && DisplayVT(d) > 0);
++
++	list = WDMReadSessions(wdmXSessionDirs,
++			       canWayland ? wdmWaylandSessionDirs : "", "C");
++	if (greet->string) {
++		s = WDMFindSession(list, greet->string);
++		if (!s)
++			WDMError("session \"%s\" not available, using the default\n",
++				 greet->string);
++	}
++	if (!s && wdmDefaultSession && *wdmDefaultSession)
++		s = WDMFindSession(list, wdmDefaultSession);
++	for (i = 0; !s && i < list->count; i++)
++		if (list->items[i].type == WDM_SESSION_X11)
++			s = &list->items[i];
++	if (!s && list->count > 0)
++		s = &list->items[0];
++	if (!s || !(exec = WDMSplitExec(s->exec))) {
++		WDMError("no usable desktop session found\n");
++		WDMFreeSessions(list);
++		return 0;
++	}
++	if (s->type == WDM_SESSION_WAYLAND)
++		argv = appendArg(NULL, wdmWaylandSession);
++	else if (d->session && *d->session)
++		argv = parseArgs(NULL, d->session);
++	for (i = 0; exec[i]; i++)
++		argv = appendArg(argv, exec[i]);
++	WDMFreeArgv(exec);
++
++	verify->sessionType = s->type;
++	verify->sessionKey = strdup(WDMSessionKey(s, key, sizeof(key)));
++	if (s->desktopNames && *s->desktopNames) {
++		verify->sessionDesktop = strdup(s->desktopNames);
++		verify->sessionDesktop[strcspn(verify->sessionDesktop, ";")] = '\0';
++	} else
++		verify->sessionDesktop = strdup(s->id);
++	if (!verify->sessionKey || !verify->sessionDesktop) {
++		WDMError("ResolveDesktopSession: out of memory\n");
++		exit (RESERVER_DISPLAY);
++	}
++	WDMInfo("user %s: session %s (%s)\n", greet->name, verify->sessionKey, s->path);
++	WDMFreeSessions(list);
++	*argvp = argv;
++	return 1;
++}
++
+ #ifdef USE_BSDAUTH
+ int
+ Verify (struct display *d, struct greet_info *greet, struct verify_info *verify)
+@@ -486,15 +565,31 @@ done:
+ 	home = p->pw_dir;
+ 	shell = p->pw_shell;
+ 	argv = 0;
+-	if (d->session)
+-		argv = parseArgs (argv, d->session);
+-	if (greet->string)
+-		argv = parseArgs (argv, greet->string);
+-	if (!argv)
+-		argv = parseArgs (argv, "xsession");
++	verify->sessionType = -1;
++	verify->sessionKey = NULL;
++	verify->sessionDesktop = NULL;
++	if (!DesktopSessionsEnabled() || !ResolveDesktopSession(d, greet, verify, &argv)) {
++		if (d->session)
++			argv = parseArgs (argv, d->session);
++		if (greet->string)
++			argv = parseArgs (argv, greet->string);
++		if (!argv)
++			argv = parseArgs (argv, "xsession");
++	}
+ 	verify->argv = argv;
+ 	verify->userEnviron = userEnv (d, p->pw_uid == 0,
+ 				       greet->name, home, shell);
++	if (verify->sessionType >= 0) {
++		verify->userEnviron = WDMSetEnv(verify->userEnviron, "XDG_SESSION_TYPE",
++			verify->sessionType == WDM_SESSION_WAYLAND ? "wayland" : "x11");
++		verify->userEnviron = WDMSetEnv(verify->userEnviron, "XDG_SESSION_CLASS", "user");
++		verify->userEnviron = WDMSetEnv(verify->userEnviron, "XDG_SESSION_DESKTOP",
++			verify->sessionDesktop);
++		verify->userEnviron = WDMSetEnv(verify->userEnviron, "DESKTOP_SESSION",
++			strchr(verify->sessionKey, '/') + 1);
++		if (verify->sessionType == WDM_SESSION_WAYLAND)
++			verify->userEnviron = WDMUnsetEnv(verify->userEnviron, "DISPLAY");
++	}
+ 	WDMDebug("user environment:\n");
+ 	WDMPrintEnv (verify->userEnviron);
+ 	verify->systemEnviron = systemEnv (d, greet->name, home);

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Executado como root antes da tela de login, com DISPLAY=:0.
+# Num Lock ligado, como o greeter-setup-script do LightDM na ISO.
+if command -v numlockx >/dev/null 2>&1; then
+    numlockx on
+fi
+exit 0

@@ -1,0 +1,4 @@
+# Servidor X local do wdm. O "vt7" é obrigatório: as sessões Wayland rodam
+# nesse mesmo VT depois que o wdm encerra o servidor X. O -novtswitch
+# impede o X de voltar ao tty1 ao sair (a troca de VT fica com o wdm).
+:0 local /usr/bin/X :0 vt7 -nolisten tcp -novtswitch

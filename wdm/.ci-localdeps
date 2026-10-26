@@ -1,0 +1,2 @@
+# Compilado e instalado antes no contêiner de CI (ver ci/build-package.sh).
+windowmaker

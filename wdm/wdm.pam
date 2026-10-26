@@ -1,0 +1,11 @@
+#%PAM-1.0
+# wdm: mesmas regras do LightDM no Arch (login local com pam_systemd, pela
+# pilha system-local-login).
+auth        include     system-local-login
+-auth       optional    pam_gnome_keyring.so
+-auth       optional    pam_kwallet5.so
+account     include     system-local-login
+password    include     system-local-login
+session     include     system-local-login
+-session    optional    pam_gnome_keyring.so auto_start
+-session    optional    pam_kwallet5.so auto_start

@@ -1,0 +1,899 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 19:02:25 -0300
+Subject: [PATCH 3/3] =?UTF-8?q?wdmLogin:=20seletor=20de=20sess=C3=B5es,=20?=
+ =?UTF-8?q?teclado=20e=20tradu=C3=A7=C3=A3o=20pt=5FBR?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Opções -X/-W (diretórios de sessões), -D (sessão padrão), -R (sessão
+  lembrada de cada usuário, pré-selecionada ao digitar o nome) e -e (aviso
+  de sessão anterior que terminou cedo).
+- Painel largo (660x240 por padrão) com seletor "Sessão (F2)" que cabe
+  "Big WindowMaker (Wayland)"; rótulos com (X11)/(Wayland) quando o Name
+  não diz o tipo.
+- Teclado: Enter, Tab, Esc (recomeçar), F1 (ajuda com os atalhos), F2 e
+  Shift+F2 (sessão), F3 e Shift+F3 (reiniciar/desligar; Enter confirma).
+- SIGUSR1/SIGTERM só escrevem num pipe; as chamadas X saem do tratador de
+  sinal (Xlib não é async-signal-safe).
+- Papel de parede escalado sem distorção (cobre a tela e corta o centro);
+  logo PNG com transparência misturada à cor do painel antes de escalar.
+- Tradução pt_BR.
+---
+ Makefile.in           |  15 +-
+ po/pt_BR.po           | 125 ++++++++++++++
+ src/wdmLogin/Login.c  | 394 ++++++++++++++++++++++++++++++++++++------
+ src/wdmLogin/config.c |   2 +-
+ 4 files changed, 480 insertions(+), 56 deletions(-)
+ create mode 100644 po/pt_BR.po
+
+diff --git a/Makefile.in b/Makefile.in
+index 68fde29..a0cc48f 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -94,7 +94,7 @@ $(DESTDIR)$(DMDIR)/authdir:
+ 
+ all-doc: doc/wdm.man
+ 
+-all-nls-yes: po/cs.mo po/cy.mo po/de.mo po/en.mo po/es.mo po/fr.mo po/ja.mo po/ru.mo
++all-nls-yes: po/cs.mo po/cy.mo po/de.mo po/en.mo po/es.mo po/fr.mo po/ja.mo po/pt_BR.mo po/ru.mo
+ 
+ all-nls-no:
+ 
+@@ -102,7 +102,7 @@ install-doc: $(DESTDIR)$(MANDIR)/man1/wdmLogin.1 $(DESTDIR)$(MANDIR)/man1/wdm.1
+ 
+ install-gfx: $(DESTDIR)$(GFXDIR)/Eagle.xpm $(DESTDIR)$(GFXDIR)/Earth.jpg $(DESTDIR)$(GFXDIR)/Earth200x130.xpm $(DESTDIR)$(GFXDIR)/GnuLinux-logo.jpg $(DESTDIR)$(GFXDIR)/Stars.jpg $(DESTDIR)$(GFXDIR)/StarsLogo.jpg $(DESTDIR)$(GFXDIR)/gnuLogo.xpm
+ 
+-install-nls-yes: $(DESTDIR)$(NLSDIR)/cs/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/cy/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/de/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/en/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/es/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/fr/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/ja/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/ru/LC_MESSAGES/wdm.mo
++install-nls-yes: $(DESTDIR)$(NLSDIR)/cs/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/cy/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/de/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/en/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/es/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/fr/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/ja/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/pt_BR/LC_MESSAGES/wdm.mo $(DESTDIR)$(NLSDIR)/ru/LC_MESSAGES/wdm.mo
+ 
+ install-nls-no:
+ 
+@@ -295,6 +295,13 @@ $(DESTDIR)$(GFXDIR)/gnuLogo.xpm: pixmaps/gnuLogo.xpm
+ 	$(INSTALL) -d $(@D)
+ 	$(INSTALL_DATA) pixmaps/gnuLogo.xpm $@
+ 
++po/pt_BR.mo: po/pt_BR.po
++	$(msgfmt) -o $@ po/pt_BR.po
++
++$(DESTDIR)$(NLSDIR)/pt_BR/LC_MESSAGES/wdm.mo: po/pt_BR.mo
++	$(INSTALL) -d $(@D)
++	$(INSTALL_DATA) po/pt_BR.mo $@
++
+ po/cs.mo: po/cs.po
+ 	$(msgfmt) -o $@ po/cs.po
+ 
+@@ -459,10 +466,10 @@ $(DESTDIR)$(DMDIR)/Xclients.in: configs/Xclients.in
+ 
+ 
+ clean:
+-	rm -f src/TestLogin/TestLogin.o src/chooser.o src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/wdm/Greet.o src/wdm/access.o src/wdm/auth.o src/wdm/choose.o src/wdm/daemon.o src/wdm/dm.o src/wdm/dpylist.o src/wdm/file.o src/wdm/genauth.o src/wdm/loghelpers.o src/wdm/mitauth.o src/wdm/netaddr.o src/wdm/policy.o src/wdm/protodpy.o src/wdm/reset.o src/wdm/resource.o src/wdm/server.o src/wdm/session.o src/wdm/socket.o src/wdm/util.o src/wdm/verify.o src/wdm/xdmcp.o src/wdmChooser/chooser.o src/wdmLogin/Login.o src/wdmLogin/config.o src/wdmPrefs/prefs.o src/wdmPrefs/testPanel.o src/wdmPrefs/testPanel2.o configs/Xclients configs/Xservers configs/Xservers.ws configs/Xsession configs/Xsetup_0 configs/wdm-config configs/wdmReconfig po/cs.mo po/cy.mo po/de.mo po/en.mo po/es.mo po/fr.mo po/ja.mo po/ru.mo doc/wdm.man bin/TestLogin bin/wdm bin/wdmChooser bin/wdmLogin bin/wdmPrefs bin/libwdm.a
++	rm -f src/TestLogin/TestLogin.o src/chooser.o src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/wdm/Greet.o src/wdm/access.o src/wdm/auth.o src/wdm/choose.o src/wdm/daemon.o src/wdm/dm.o src/wdm/dpylist.o src/wdm/file.o src/wdm/genauth.o src/wdm/loghelpers.o src/wdm/mitauth.o src/wdm/netaddr.o src/wdm/policy.o src/wdm/protodpy.o src/wdm/reset.o src/wdm/resource.o src/wdm/server.o src/wdm/session.o src/wdm/socket.o src/wdm/util.o src/wdm/verify.o src/wdm/xdmcp.o src/wdmChooser/chooser.o src/wdmLogin/Login.o src/wdmLogin/config.o src/wdmPrefs/prefs.o src/wdmPrefs/testPanel.o src/wdmPrefs/testPanel2.o configs/Xclients configs/Xservers configs/Xservers.ws configs/Xsession configs/Xsetup_0 configs/wdm-config configs/wdmReconfig po/cs.mo po/cy.mo po/de.mo po/en.mo po/es.mo po/fr.mo po/ja.mo po/pt_BR.mo po/ru.mo doc/wdm.man bin/TestLogin bin/wdm bin/wdmChooser bin/wdmLogin bin/wdmPrefs bin/libwdm.a
+ 
+ distclean:
+-	rm -f src/TestLogin/TestLogin.o src/chooser.o src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/wdm/Greet.o src/wdm/access.o src/wdm/auth.o src/wdm/choose.o src/wdm/daemon.o src/wdm/dm.o src/wdm/dpylist.o src/wdm/file.o src/wdm/genauth.o src/wdm/loghelpers.o src/wdm/mitauth.o src/wdm/netaddr.o src/wdm/policy.o src/wdm/protodpy.o src/wdm/reset.o src/wdm/resource.o src/wdm/server.o src/wdm/session.o src/wdm/socket.o src/wdm/util.o src/wdm/verify.o src/wdm/xdmcp.o src/wdmChooser/chooser.o src/wdmLogin/Login.o src/wdmLogin/config.o src/wdmPrefs/prefs.o src/wdmPrefs/testPanel.o src/wdmPrefs/testPanel2.o configs/Xclients configs/Xservers configs/Xservers.ws configs/Xsession configs/Xsetup_0 configs/wdm-config configs/wdmReconfig po/cs.mo po/cy.mo po/de.mo po/en.mo po/es.mo po/fr.mo po/ja.mo po/ru.mo doc/wdm.man bin/TestLogin bin/wdm bin/wdmChooser bin/wdmLogin bin/wdmPrefs bin/libwdm.a bin/TestLogin bin/wdm bin/wdmChooser bin/wdmLogin bin/wdmPrefs config.status config.log include/config.h include/gnuLogo.xpm Makefile
++	rm -f src/TestLogin/TestLogin.o src/chooser.o src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/wdm/Greet.o src/wdm/access.o src/wdm/auth.o src/wdm/choose.o src/wdm/daemon.o src/wdm/dm.o src/wdm/dpylist.o src/wdm/file.o src/wdm/genauth.o src/wdm/loghelpers.o src/wdm/mitauth.o src/wdm/netaddr.o src/wdm/policy.o src/wdm/protodpy.o src/wdm/reset.o src/wdm/resource.o src/wdm/server.o src/wdm/session.o src/wdm/socket.o src/wdm/util.o src/wdm/verify.o src/wdm/xdmcp.o src/wdmChooser/chooser.o src/wdmLogin/Login.o src/wdmLogin/config.o src/wdmPrefs/prefs.o src/wdmPrefs/testPanel.o src/wdmPrefs/testPanel2.o configs/Xclients configs/Xservers configs/Xservers.ws configs/Xsession configs/Xsetup_0 configs/wdm-config configs/wdmReconfig po/cs.mo po/cy.mo po/de.mo po/en.mo po/es.mo po/fr.mo po/ja.mo po/pt_BR.mo po/ru.mo doc/wdm.man bin/TestLogin bin/wdm bin/wdmChooser bin/wdmLogin bin/wdmPrefs bin/libwdm.a bin/TestLogin bin/wdm bin/wdmChooser bin/wdmLogin bin/wdmPrefs config.status config.log include/config.h include/gnuLogo.xpm Makefile
+ 	if test -e bin; then rmdir bin; fi
+ 
+ po/wdm.pot: src/TestLogin/TestLogin.c src/chooser.c src/libwdm/debug.c src/libwdm/environment.c src/libwdm/names.c src/libwdm/plcheckers.c src/wdm/Greet.c src/wdm/access.c src/wdm/auth.c src/wdm/choose.c src/wdm/daemon.c src/wdm/dm.c src/wdm/dpylist.c src/wdm/file.c src/wdm/genauth.c src/wdm/loghelpers.c src/wdm/mitauth.c src/wdm/netaddr.c src/wdm/policy.c src/wdm/protodpy.c src/wdm/reset.c src/wdm/resource.c src/wdm/server.c src/wdm/session.c src/wdm/socket.c src/wdm/util.c src/wdm/verify.c src/wdm/xdmcp.c src/wdmChooser/chooser.c src/wdmLogin/Login.c src/wdmLogin/config.c src/wdmPrefs/prefs.c src/wdmPrefs/testPanel.c src/wdmPrefs/testPanel2.c
+diff --git a/po/pt_BR.po b/po/pt_BR.po
+new file mode 100644
+index 0000000..8de027d
+--- /dev/null
++++ b/po/pt_BR.po
+@@ -0,0 +1,125 @@
++# Brazilian Portuguese translation of wdm (WINGs Display Manager).
++# Big WindowMaker <https://github.com/big-windowmaker>, 2026.
++msgid ""
++msgstr ""
++"Project-Id-Version: wdm 1.28\n"
++"PO-Revision-Date: 2026-10-26 12:00-0300\n"
++"Last-Translator: Big WindowMaker <https://github.com/big-windowmaker>\n"
++"Language-Team: Brazilian Portuguese\n"
++"Language: pt_BR\n"
++"MIME-Version: 1.0\n"
++"Content-Type: text/plain; charset=UTF-8\n"
++"Content-Transfer-Encoding: 8bit\n"
++"Plural-Forms: nplurals=2; plural=(n > 1);\n"
++
++msgid ""
++"Keyboard shortcuts:\n"
++"  Enter: next field, log in or run the selected option\n"
++"  Tab: switch between login name and password\n"
++"  Esc: start over\n"
++"  F1: show or hide this help\n"
++"  F2 / Shift+F2: next / previous session\n"
++"  F3 / Shift+F3: next / previous option (reboot, halt)\n"
++msgstr ""
++"Atalhos de teclado:\n"
++"  Enter: próximo campo, entrar ou executar a opção escolhida\n"
++"  Tab: alterna entre o nome de usuário e a senha\n"
++"  Esc: recomeçar\n"
++"  F1: mostra ou esconde esta ajuda\n"
++"  F2 / Shift+F2: sessão seguinte / anterior\n"
++"  F3 / Shift+F3: opção seguinte / anterior (reiniciar, desligar)\n"
++
++msgid "Login"
++msgstr "Entrar"
++
++msgid "Reboot"
++msgstr "Reiniciar"
++
++msgid "Halt"
++msgstr "Desligar"
++
++msgid "ExitLogin"
++msgstr "Sair do wdm"
++
++msgid "Login failed"
++msgstr "Falha na autenticação"
++
++msgid "Reboot failed"
++msgstr "Não foi possível reiniciar"
++
++msgid "Halt failed"
++msgstr "Não foi possível desligar"
++
++msgid "ExitLogin failed"
++msgstr "Não foi possível sair do wdm"
++
++msgid "NoChange"
++msgstr "Sem mudança"
++
++msgid "failsafe"
++msgstr "modo de segurança"
++
++msgid "ERROR"
++msgstr "ERRO"
++
++msgid "Password:"
++msgstr "Senha:"
++
++msgid "Login name:"
++msgstr "Usuário:"
++
++msgid "invalid name"
++msgstr "nome inválido"
++
++msgid "validating"
++msgstr "verificando"
++
++msgid "exiting"
++msgstr "saindo"
++
++msgid "Close Help"
++msgstr "Fechar"
++
++msgid "Help"
++msgstr "Ajuda"
++
++msgid "Press Enter to confirm."
++msgstr "Tecle Enter para confirmar."
++
++msgid "Login Authentication"
++msgstr "Autenticação"
++
++msgid "Welcome to"
++msgstr "Bem-vindo ao"
++
++msgid "Session (F2)"
++msgstr "Sessão (F2)"
++
++msgid "Start WM"
++msgstr "Iniciar WM"
++
++msgid "Options (F3)"
++msgstr "Opções (F3)"
++
++msgid "Options"
++msgstr "Opções"
++
++msgid "Start Over"
++msgstr "Recomeçar"
++
++msgid "Go!"
++msgstr "Entrar"
++
++msgid ""
++"The last session ended after %s s.\n"
++"See ~/.xsession-errors."
++msgstr ""
++"A última sessão terminou após %s s.\n"
++"Veja ~/.xsession-errors."
++
++msgid ""
++"The Wayland session could not be started.\n"
++"See journalctl -u wdm."
++msgstr ""
++"Não foi possível iniciar a sessão Wayland.\n"
++"Veja journalctl -u wdm."
+diff --git a/src/wdmLogin/Login.c b/src/wdmLogin/Login.c
+index 424113d..49734be 100644
+--- a/src/wdmLogin/Login.c
++++ b/src/wdmLogin/Login.c
+@@ -23,6 +23,8 @@
+ #include <wdmconfig.h>
+ #include <wdmlib.h>
+ #include <wdmLogin.h>
++#include <wdmsessions.h>
++#include <errno.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <unistd.h>
+@@ -56,9 +58,12 @@
+ #define FOREVER 1
+ 
+ WMRect screen;
+-static int help_heigth = 140;
++static int help_heigth = 170;
+ static int text_width = 150, text_heigth = 26;
+ 
++/* layout, computed from the window size in ComputeLayout() */
++static int auth_x = 235, auth_w = 275, row_y = 178, sess_w = 118, opt_w = 98;
++
+ static char displayArgDefault[] = "";
+ static char *displayArg = displayArgDefault;
+ 
+@@ -67,7 +72,13 @@ static char *displayArg = displayArgDefault;
+ static int WmDefUser = False;	/* default username */
+ 
+ static char *helpArg = NULL;
+-static char *HelpMsg = N_("no help available.");
++static char *HelpMsg = N_("Keyboard shortcuts:\n"
++	"  Enter: next field, log in or run the selected option\n"
++	"  Tab: switch between login name and password\n"
++	"  Esc: start over\n"
++	"  F1: show or hide this help\n"
++	"  F2 / Shift+F2: next / previous session\n"
++	"  F3 / Shift+F3: next / previous option (reboot, halt)\n");
+ 
+ /*###################################################################*/
+ 
+@@ -144,6 +155,18 @@ static WDMLoginConfig *cfg;
+ 
+ static int exit_request = 0;
+ 
++/* desktop sessions (-X/-W): labels shown in WmStr, keys sent to wdm */
++static char *xSessionDirs = NULL;
++static char *waylandSessionDirs = NULL;
++static char *defaultSession = NULL;
++static char *sessionStateDir = NULL;
++static char *noticeArg = NULL;
++static WDMSessionList *sessions = NULL;
++static int sessionTouched = False;	/* user picked a session by hand */
++
++/* signals are turned into bytes on this pipe and handled in the event loop */
++static int signal_pipe[2] = { -1, -1 };
++
+ char *ProgName = "Login";
+ 
+ char *
+@@ -179,7 +202,7 @@ parse_helpArg(void)
+ 	char *defaultHelpText = NULL;
+ 
+ 	/* a good default value, even in case of errors */
+-	defaultHelpText = wstrconcat("wdm --- " PACKAGE_VERSION "\n\n\n\n\n",
++	defaultHelpText = wstrconcat("wdm " PACKAGE_VERSION "\n\n",
+ 				     _(HelpMsg));
+ 	HelpText = defaultHelpText;
+ 
+@@ -246,7 +269,16 @@ OutputAuth(char *user, char *pswd)
+ 	writestring(wdm_fd, user ? user : "");
+ 	writestring(wdm_fd, pswd ? pswd : "");
+ 
+-	if(OptionCode == 0)
++	if(OptionCode == 0 && sessions && sessions->count > 0)
++	{
++		char key[300];
++
++		writeuc(wdm_fd, 1);
++		writestring(wdm_fd, WDMSessionKey(&sessions->items[WmOptionCode],
++					key, sizeof(key)));
++		writeuc(wdm_fd, 0);	/* end of data */
++	}
++	else if(OptionCode == 0)
+ 	{
+ 		if(WmOptionCode == 0)
+ 			writeuc(wdm_fd, 0);	/* end of data */
+@@ -268,12 +300,75 @@ OutputAuth(char *user, char *pswd)
+ 
+ /*###################################################################*/
+ 
++static int
++FindSessionIndex(const char *key)
++{
++	WDMSession *s;
++
++	if(!sessions || !key)
++		return -1;
++	s = WDMFindSession(sessions, key);
++	return s ? (int)(s - sessions->items) : -1;
++}
++
++static int
++SetupSessions()
++{
++	int i, def = -1;
++
++	if(!xSessionDirs && !waylandSessionDirs)
++		return False;
++	sessions = WDMReadSessions(xSessionDirs, waylandSessionDirs, NULL);
++	if(sessions->count == 0)
++	{
++		WDMError("no desktop sessions found in %s and %s\n",
++			xSessionDirs ? xSessionDirs : "-",
++			waylandSessionDirs ? waylandSessionDirs : "-");
++		WDMFreeSessions(sessions);
++		sessions = NULL;
++		return False;
++	}
++	WmStr = (char **) malloc(sizeof(char *) * (sessions->count + 1));
++	for(i = 0; i < sessions->count; i++)
++		WmStr[i] = sessions->items[i].label;
++	WmStr[i] = NULL;
++
++	def = FindSessionIndex(defaultSession);
++	for(i = 0; def < 0 && i < sessions->count; i++)
++		if(sessions->items[i].type == WDM_SESSION_X11)
++			def = i;
++	WmOptionCode = def < 0 ? 0 : def;
++	return True;
++}
++
++/* after the user name is known: preselect the session used last time */
++static void
++SelectUserSession(const char *user)
++{
++	char *key;
++	int idx;
++
++	if(!sessions || sessionTouched || !sessionStateDir)
++		return;
++	key = WDMLoadUserSession(sessionStateDir, user);
++	idx = FindSessionIndex(key);
++	free(key);
++	if(idx >= 0)
++	{
++		WmOptionCode = idx;
++		WMSetPopUpButtonSelectedItem(panel->wmBtn, idx);
++	}
++}
++
+ static void
+ SetupWm()
+ {
+ 	int i = 0, n = 0;
+ 	char *ptr = WmArg;
+ 
++	if(SetupSessions())
++		return;
++
+ 	/* count number of items, skip empty items.
+ 	   n = number of items - 1 */
+ 	while(*ptr)
+@@ -313,7 +408,7 @@ LoginArgs(int argc, char *argv[])
+ 	int c;
+ 
+ 
+-	while((c = getopt(argc, argv, "asb:d:h:l:uw:c:x:f:")) != -1)
++	while((c = getopt(argc, argv, "asb:d:h:l:uw:c:x:f:X:W:D:R:e:")) != -1)
+ 	{
+ 		switch (c)
+ 		{
+@@ -344,6 +439,21 @@ LoginArgs(int argc, char *argv[])
+ 		case 'c':	/* configfile */
+ 			configFile = optarg;
+ 			break;
++		case 'X':	/* xsessions directories */
++			xSessionDirs = optarg;
++			break;
++		case 'W':	/* wayland-sessions directories */
++			waylandSessionDirs = optarg;
++			break;
++		case 'D':	/* default session, "big-wm" or "x11/big-wm" */
++			defaultSession = optarg;
++			break;
++		case 'R':	/* directory with the last session of each user */
++			sessionStateDir = optarg;
++			break;
++		case 'e':	/* the previous session lasted only N seconds */
++			noticeArg = optarg;
++			break;
+ 		case 'f':	/* filedescriptor for wdm comm.*/
+ 			wdm_fd = strtol(optarg, NULL, 0);
+ 			if(wdm_fd < 1) wdm_fd = 1;
+@@ -487,6 +597,7 @@ PerformLogin(LoginPanel * panel, int canexit)
+ 
+ 		LoginSwitch = True;
+ 
++		SelectUserSession(LoginName);
+ 		init_pwdfield(LoginPswd);
+ 		return;
+ 	}
+@@ -571,6 +682,7 @@ static void
+ changeWm(WMWidget * self, LoginPanel * panel)
+ {
+ 	WmOptionCode = WMGetPopUpButtonSelectedItem(self);
++	sessionTouched = True;
+ 	WMSetFocusToWidget(panel->entryText);
+ }
+ 
+@@ -584,22 +696,66 @@ changeOption(WMPopUpButton * self, LoginPanel * panel)
+ 	WMSetFocusToWidget(panel->entryText);
+ }
+ 
++static int
++CyclePopUp(WMPopUpButton *button, int delta)
++{
++	int n = WMGetPopUpButtonNumberOfItems(button);
++	int i = WMGetPopUpButtonSelectedItem(button);
++
++	if(n <= 0)
++		return 0;
++	if(i < 0)
++		i = 0;
++	i = ((i + delta) % n + n) % n;
++	WMSetPopUpButtonSelectedItem(button, i);
++	return i;
++}
++
++/*
++ * Keyboard: Enter goes on (or runs the selected option), Tab switches
++ * between name and password, Esc starts over, F1 shows the help,
++ * F2/Shift+F2 choose the session, F3/Shift+F3 choose the option.
++ */
+ static void
+ handleKeyPress(XEvent * event, void *clientData)
+ {
+ 	LoginPanel *panel = (LoginPanel *) clientData;
++	KeySym ks = XLookupKeysym(&event->xkey, 0);
++	int back = (event->xkey.state & ShiftMask) ? -1 : 1;
+ 
+ 	if(panel->msgFlag)
+ 	{
+ 		ClearMsgs(panel);
+ 	}
+-	if(event->xkey.keycode == panel->retkey)
+-	{
+-		PerformLogin(panel, True);
+-	}
+-	else if(event->xkey.keycode == panel->tabkey)
++	switch(ks)
+ 	{
++	case XK_Return:
++	case XK_KP_Enter:
++		if(OptionCode != 0)
++			goPressed(NULL, panel);
++		else
++			PerformLogin(panel, True);
++		break;
++	case XK_Tab:
+ 		PerformLogin(panel, False);
++		break;
++	case XK_Escape:
++		startoverPressed(NULL, panel);
++		break;
++	case XK_F1:
++		helpPressed(NULL, panel);
++		break;
++	case XK_F2:
++		WmOptionCode = CyclePopUp(panel->wmBtn, back);
++		sessionTouched = True;
++		break;
++	case XK_F3:
++		OptionCode = CyclePopUp(panel->exitBtn, back);
++		if(OptionCode != 0)
++			PrintInfoMsg(panel, _("Press Enter to confirm."));
++		break;
++	default:
++		break;
+ 	}
+ }
+ 
+@@ -653,6 +809,12 @@ CreateLogo(LoginPanel * panel)
+ 	}
+ 	if(image1 == NULL)
+ 		return;
++	/* blend the alpha channel (PNG/SVG logos) with the panel color before
++	 * scaling: the scalers do not keep it */
++	gray.red = 0xae;
++	gray.green = 0xaa;
++	gray.blue = 0xae;
++	RCombineImageWithColor(image1, &gray);
+ 
+ #if 0
+ 	WDMDebug("width=%i,heigth=%i\n", image1->width, image1->height);
+@@ -717,6 +879,21 @@ CreateLogo(LoginPanel * panel)
+ 
+ }
+ 
++static void
++ComputeLayout(int width, int height)
++{
++	/* classic wdm panel is 530x240; wider panels give the extra room to
++	 * the authentication frame and to the session selector */
++	auth_x = 235;
++	auth_w = width - auth_x - 12;
++	if(auth_w < 275)
++		auth_w = 275;
++	text_width = auth_w - 125;
++	row_y = height - 62;
++	sess_w = width >= 640 ? 250 : 118;
++	opt_w = width >= 640 ? 130 : 98;
++}
++
+ static void
+ CreateAuthFrame(LoginPanel * panel)
+ {
+@@ -728,14 +905,14 @@ CreateAuthFrame(LoginPanel * panel)
+ 	WMSetFrameRelief(panel->authF, WRGroove);
+ 	WMSetFrameTitlePosition(panel->authF, WTPAtTop);
+ 	WMSetFrameTitle(panel->authF, _("Login Authentication"));
+-	WMMoveWidget(panel->authF, (WMWidgetWidth(panel->win) - 290), 10);
+-	WMResizeWidget(panel->authF, 275, 120);
++	WMMoveWidget(panel->authF, auth_x, 10);
++	WMResizeWidget(panel->authF, auth_w, 120);
+ 
+ 	gethostname(str, 127);
+ 
+ 	y = 20;
+ 	panel->welcomeMsg1 = WMCreateLabel(panel->authF);
+-	WMResizeWidget(panel->welcomeMsg1, 255, 26);
++	WMResizeWidget(panel->welcomeMsg1, auth_w - 20, 26);
+ 	WMSetLabelText(panel->welcomeMsg1, _("Welcome to"));
+ 	WMMoveWidget(panel->welcomeMsg1, 11, y);
+ 	y += 26;
+@@ -748,7 +925,7 @@ CreateAuthFrame(LoginPanel * panel)
+ 	}
+ 
+ 	panel->welcomeMsg2 = WMCreateLabel(panel->authF);
+-	WMResizeWidget(panel->welcomeMsg2, 255, 26);
++	WMResizeWidget(panel->welcomeMsg2, auth_w - 20, 26);
+ 	WMMoveWidget(panel->welcomeMsg2, 11, y);
+ 	WMSetLabelText(panel->welcomeMsg2, str);
+ 	WMSetLabelTextAlignment(panel->welcomeMsg2, WACenter);
+@@ -771,8 +948,8 @@ CreateAuthFrame(LoginPanel * panel)
+ 	y = 84;
+ 
+ 	panel->entryLabel = WMCreateLabel(panel->authF);
+-	WMMoveWidget(panel->entryLabel, 10, y);
+-	WMResizeWidget(panel->entryLabel, 100, 26);
++	WMMoveWidget(panel->entryLabel, 5, y);
++	WMResizeWidget(panel->entryLabel, 110, 26);
+ 	font = WMBoldSystemFontOfSize(panel->scr, 14);
+ 	if(font)
+ 	{
+@@ -781,9 +958,14 @@ CreateAuthFrame(LoginPanel * panel)
+ 	}
+ 	WMSetLabelText(panel->entryLabel, _("Login name:"));
+ 	WMSetLabelTextAlignment(panel->entryLabel, WARight);
++	/* WINGs labels wrap by default, measuring at byte positions: that
++	 * splits UTF-8 sequences ("Usuário:") and makes Pango complain */
++	WMSetLabelWraps(panel->entryLabel, False);
++	WMSetLabelWraps(panel->welcomeMsg1, False);
++	WMSetLabelWraps(panel->welcomeMsg2, False);
+ 
+ 	panel->entryText = WMCreateTextField(panel->authF);
+-	WMMoveWidget(panel->entryText, 115, y);
++	WMMoveWidget(panel->entryText, 120, y);
+ 	WMResizeWidget(panel->entryText, text_width, text_heigth);
+ 	WMSetTextFieldText(panel->entryText, "");
+ 	WMSetTextFieldSecure(panel->entryText, False);
+@@ -797,21 +979,22 @@ CreateMsgsFrames(LoginPanel * panel)
+ 	panel->msgF = WMCreateFrame(panel->winF1);
+ 	WMSetFrameRelief(panel->msgF, WRFlat);
+ 	WMSetFrameTitlePosition(panel->msgF, WTPAtBottom);
+-	WMMoveWidget(panel->msgF, (WMWidgetWidth(panel->win) - 290), 136);
+-	WMResizeWidget(panel->msgF, 275, 40);
++	WMMoveWidget(panel->msgF, auth_x, 132);
++	WMResizeWidget(panel->msgF, auth_w, row_y - 134);
+ 	WMSetFrameTitle(panel->msgF, "");
+ 
+ 	panel->msgL = WMCreateLabel(panel->msgF);
+-	WMResizeWidget(panel->msgL, 260, 26);
+-	WMMoveWidget(panel->msgL, 5, 2);
+-	font = WMBoldSystemFontOfSize(panel->scr, 14);
++	WMResizeWidget(panel->msgL, auth_w - 10, row_y - 150);
++	WMMoveWidget(panel->msgL, 5, 1);
++	WMSetLabelWraps(panel->msgL, False);	/* see CreateHelpFrames() */
++	font = WMBoldSystemFontOfSize(panel->scr, 12);
+ 	if(font)
+ 	{
+ 		WMSetLabelFont(panel->msgL, font);
+ 		WMReleaseFont(font);
+ 	}
+ 	WMSetLabelText(panel->msgL, "");
+-	WMSetLabelTextAlignment(panel->msgL, WARight);
++	WMSetLabelTextAlignment(panel->msgL, WACenter);
+ 
+ }
+ 
+@@ -823,31 +1006,32 @@ CreatePopups(LoginPanel * panel)
+ 	panel->wmF = WMCreateFrame(panel->winF1);
+ 	WMSetFrameRelief(panel->wmF, WRGroove);
+ 	WMSetFrameTitlePosition(panel->wmF, WTPAtTop);
+-	WMSetFrameTitle(panel->wmF, _("Start WM"));
+-	WMMoveWidget(panel->wmF, 13, 178);
+-	WMResizeWidget(panel->wmF, 118, 45);
++	WMSetFrameTitle(panel->wmF, sessions ? _("Session (F2)") : _("Start WM"));
++	WMMoveWidget(panel->wmF, 13, row_y);
++	WMResizeWidget(panel->wmF, sess_w, 45);
+ 
+ 	panel->wmBtn = WMCreatePopUpButton(panel->wmF);
+ 	WMMoveWidget(panel->wmBtn, 4, 15);
+-	WMResizeWidget(panel->wmBtn, 110, 25);
++	WMResizeWidget(panel->wmBtn, sess_w - 8, 25);
+ 	WMSetPopUpButtonAction(panel->wmBtn, (WMAction *) changeWm, panel);
+ 	i = 0;
+ 	while(WmStr[i] != NULL)
+ 	{
+-		WMAddPopUpButtonItem(panel->wmBtn, _(WmStr[i]));
++		/* session labels come from the .desktop files, already localized */
++		WMAddPopUpButtonItem(panel->wmBtn, sessions ? WmStr[i] : _(WmStr[i]));
+ 		i++;
+ 	}
+ 
+ 	panel->exitF = WMCreateFrame(panel->winF1);
+ 	WMSetFrameRelief(panel->exitF, WRGroove);
+ 	WMSetFrameTitlePosition(panel->exitF, WTPAtTop);
+-	WMSetFrameTitle(panel->exitF, _("Options"));
+-	WMMoveWidget(panel->exitF, 134, 178);
+-	WMResizeWidget(panel->exitF, 98, 45);
++	WMSetFrameTitle(panel->exitF, sessions ? _("Options (F3)") : _("Options"));
++	WMMoveWidget(panel->exitF, 13 + sess_w + 3, row_y);
++	WMResizeWidget(panel->exitF, opt_w, 45);
+ 
+ 	panel->exitBtn = WMCreatePopUpButton(panel->exitF);
+ 	WMMoveWidget(panel->exitBtn, 4, 15);
+-	WMResizeWidget(panel->exitBtn, 90, 25);
++	WMResizeWidget(panel->exitBtn, opt_w - 8, 25);
+ 	WMSetPopUpButtonAction(panel->exitBtn, (WMAction *) changeOption,
+ 			       panel);
+ 	i = 0;
+@@ -861,35 +1045,50 @@ CreatePopups(LoginPanel * panel)
+ static void
+ CreateButtons(LoginPanel * panel)
+ {
+-	int i;
++	int i, x, w, bw, gap;
++
++	x = 13 + sess_w + 3 + opt_w + 6;
++	w = WMWidgetWidth(panel->win) - x - 8;
++	if(w < 240)
++	{	/* classic layout */
++		x = WMWidgetWidth(panel->win) - 290;
++		w = 282;
++	}
++	gap = 8;
++	bw = (w - 6 - 2 * gap) / 3;
++	if(bw > 80)
++	{
++		gap += (bw - 80) * 3 / 2;
++		bw = 80;
++	}
+ 
+ 	panel->cmdF = WMCreateFrame(panel->winF1);
+ 	WMSetFrameRelief(panel->cmdF, WRFlat);
+ 	WMSetFrameTitlePosition(panel->cmdF, WTPAtTop);
+-	WMMoveWidget(panel->cmdF, (WMWidgetWidth(panel->win) - 290), 185);
+-	WMResizeWidget(panel->cmdF, 282, 38);
++	WMMoveWidget(panel->cmdF, x, row_y + 7);
++	WMResizeWidget(panel->cmdF, w, 38);
+ 
+ 	i = 3;
+ 	panel->helpBtn = WMCreateCommandButton(panel->cmdF);
+ 	WMSetButtonAction(panel->helpBtn, (WMAction *) helpPressed, panel);
+ 	WMMoveWidget(panel->helpBtn, i, 8);
+ 	WMSetButtonText(panel->helpBtn, _("Help"));
+-	WMResizeWidget(panel->helpBtn, 80, 25);
++	WMResizeWidget(panel->helpBtn, bw, 25);
+ 
+-	i += 96;
++	i += bw + gap;
+ 	panel->startoverBtn = WMCreateCommandButton(panel->cmdF);
+ 	WMSetButtonAction(panel->startoverBtn, (WMAction *) startoverPressed,
+ 			  panel);
+ 	WMMoveWidget(panel->startoverBtn, i, 8);
+ 	WMSetButtonText(panel->startoverBtn, _("Start Over"));
+-	WMResizeWidget(panel->startoverBtn, 80, 25);
++	WMResizeWidget(panel->startoverBtn, bw, 25);
+ 
+-	i += 96;
++	i += bw + gap;
+ 	panel->goBtn = WMCreateCommandButton(panel->cmdF);
+ 	WMSetButtonAction(panel->goBtn, (WMAction *) goPressed, panel);
+ 	WMMoveWidget(panel->goBtn, i, 8);
+ 	WMSetButtonText(panel->goBtn, _("Go!"));
+-	WMResizeWidget(panel->goBtn, 80, 25);
++	WMResizeWidget(panel->goBtn, bw, 25);
+ }
+ 
+ static void
+@@ -919,8 +1118,10 @@ CreateHelpFrames(LoginPanel * panel)
+ 	panel->helpTextL = WMCreateLabel(panel->helpTextF);
+ 	WMSetLabelTextAlignment(panel->helpTextL, WALeft);
+ 
++	/* no wrapping: W_GetTextHeight() wraps at byte positions and splits
++	 * UTF-8 sequences (Pango warnings); the help text has its own '\n' */
+ 	height = W_GetTextHeight(WMDefaultSystemFont(panel->scr),
+-			HelpText, (WMWidgetWidth(panel->win) - 60), True) + 10;
++			HelpText, (WMWidgetWidth(panel->win) - 60), False) + 10;
+ 
+ 	WMResizeWidget(panel->helpTextF,
+ 			(WMWidgetWidth(panel->win) - 50), height);
+@@ -929,7 +1130,7 @@ CreateHelpFrames(LoginPanel * panel)
+ 			(WMWidgetWidth(panel->win) - 60), height - 5);
+ 
+ 	WMSetLabelText(panel->helpTextL, HelpText);
+-	WMSetLabelWraps(panel->helpTextL, True);
++	WMSetLabelWraps(panel->helpTextL, False);
+ 
+ 	wfree(HelpText);
+ }
+@@ -944,6 +1145,7 @@ CreateLoginPanel(WMScreen *scr, WDMLoginConfig *cfg)
+ 		return NULL;
+ 	memset(panel, 0, sizeof(LoginPanel));
+ 	panel->scr = scr;
++	ComputeLayout(cfg->geometry.size.width, cfg->geometry.size.height);
+ 
+ 	/* basic window and frames */
+ 
+@@ -986,7 +1188,7 @@ CreateLoginPanel(WMScreen *scr, WDMLoginConfig *cfg)
+ 	WMSetScrollViewContentView(panel->helpSV,
+ 				   WMWidgetView(panel->helpTextF));
+ 
+-	WMSetPopUpButtonSelectedItem(panel->wmBtn, 0);
++	WMSetPopUpButtonSelectedItem(panel->wmBtn, WmOptionCode);
+ 	WMSetPopUpButtonSelectedItem(panel->exitBtn, 0);
+ 
+ 	panel->msgFlag = False;
+@@ -1071,7 +1273,30 @@ loadBGpixmap(RContext * rcontext)
+ 			ProgName, bgOption);
+ 		return NULL;
+ 	}
+-	tmp = RScaleImage(image, screen.size.width, screen.size.height);
++	{
++		/* scale to cover the screen keeping the aspect ratio, then
++		 * crop the center (wallpapers are rarely the screen ratio) */
++		double sx = (double) screen.size.width / image->width;
++		double sy = (double) screen.size.height / image->height;
++		double sc = sx > sy ? sx : sy;
++		unsigned w = (unsigned) (image->width * sc + 0.5);
++		unsigned h = (unsigned) (image->height * sc + 0.5);
++
++		if(w < screen.size.width)
++			w = screen.size.width;
++		if(h < screen.size.height)
++			h = screen.size.height;
++		tmp = RSmoothScaleImage(image, w, h);
++		if(tmp != NULL && (w != screen.size.width || h != screen.size.height))
++		{
++			RImage *crop = RGetSubImage(tmp,
++					(w - screen.size.width) / 2,
++					(h - screen.size.height) / 2,
++					screen.size.width, screen.size.height);
++			RReleaseImage(tmp);
++			tmp = crop;
++		}
++	}
+ 	if(tmp == NULL)
+ 	{
+ 		WDMError("%s could not resize bg image %s\n",
+@@ -1243,18 +1468,75 @@ setBG(WMScreen * scr)
+ 
+ /* signal processing */
+ 
++/* Signal handlers only write a byte; X calls happen in HandleSignalPipe(),
++ * from the event loop (Xlib is not async-signal-safe). */
+ static void
+ SignalUsr1(int ignored)		/* oops, an error */
+ {
+-	InitializeLoginInput(panel);
+-	PrintErrMsg(panel, _(ExitFailStr[OptionCode]));
+-	signal(SIGUSR1, SignalUsr1);
++	int e = errno;
++	char c = 'u';
++
++	if(write(signal_pipe[1], &c, 1) < 0)
++		;
++	errno = e;
+ }
+ 
+ static void
+ SignalTerm(int ignored)		/* all done */
+ {
++	int e = errno;
++	char c = 't';
++
+ 	exit_request = 1;	/* corrects some hanging problems, thanks to A. Kabaev */
++	if(write(signal_pipe[1], &c, 1) < 0)
++		;
++	errno = e;
++}
++
++static void
++HandleSignalPipe(int fd, int mask, void *data)
++{
++	char buf[16];
++	ssize_t n, i;
++
++	n = read(fd, buf, sizeof(buf));
++	for(i = 0; i < n; i++)
++	{
++		if(buf[i] == 'u')
++		{
++			InitializeLoginInput(panel);
++			PrintErrMsg(panel, _(ExitFailStr[OptionCode]));
++		}
++		else if(buf[i] == 't')
++		{
++			DestroyLoginPanel(panel);
++			exit(0);
++		}
++	}
++}
++
++static void
++SetupSignals(void)
++{
++	struct sigaction sa;
++
++	if(pipe(signal_pipe) == 0)
++	{
++		fcntl(signal_pipe[0], F_SETFL, O_NONBLOCK);
++		fcntl(signal_pipe[1], F_SETFL, O_NONBLOCK);
++		fcntl(signal_pipe[0], F_SETFD, FD_CLOEXEC);
++		fcntl(signal_pipe[1], F_SETFD, FD_CLOEXEC);
++		WMAddInputHandler(signal_pipe[0], WIReadMask, HandleSignalPipe, NULL);
++	}
++	memset(&sa, 0, sizeof(sa));
++	sigemptyset(&sa.sa_mask);
++	sa.sa_flags = SA_RESTART;
++	sa.sa_handler = SignalUsr1;
++	sigaction(SIGUSR1, &sa, NULL);
++	sa.sa_handler = SignalTerm;
++	sigaction(SIGTERM, &sa, NULL);
++	sigaction(SIGINT, &sa, NULL);
++	signal(SIGPIPE, SIG_DFL);
+ }
+ 
+ /*###################################################################*/
+@@ -1403,10 +1685,20 @@ main(int argc, char **argv)
+ 			     handleKeyPress, panel);
+ 
+ 	exit_request = 0;
+-	signal(SIGUSR1, SignalUsr1);
+-	signal(SIGTERM, SignalTerm);
+-	signal(SIGINT, SignalTerm);
+-	signal(SIGPIPE, SIG_DFL);
++	SetupSignals();
++
++	if(noticeArg && strcmp(noticeArg, "wayland") == 0)
++		PrintErrMsg(panel, _("The Wayland session could not be started.\n"
++				"See journalctl -u wdm."));
++	else if(noticeArg)
++	{
++		char msg[256];
++
++		snprintf(msg, sizeof(msg),
++			_("The last session ended after %s s.\nSee ~/.xsession-errors."),
++			noticeArg);
++		PrintErrMsg(panel, msg);
++	}
+ 
+ 	while(!exit_request)
+ 	{
+diff --git a/src/wdmLogin/config.c b/src/wdmLogin/config.c
+index c9f162b..89d4c3b 100644
+--- a/src/wdmLogin/config.c
++++ b/src/wdmLogin/config.c
+@@ -27,7 +27,7 @@
+ 
+ static Bool WDMCheckPLGeometry(WMPropList *pl, void *def, void *target);
+ 
+-static WMRect default_geometry = {{INT_MIN, INT_MIN}, {530, 240}};
++static WMRect default_geometry = {{INT_MIN, INT_MIN}, {660, 240}};
+ 
+ static WDMDictionaryStruct wdmLogin_config_struct[] = 
+ {

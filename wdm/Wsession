@@ -1,0 +1,28 @@
+#!/bin/sh
+# Inicia a sessão Wayland escolhida no wdm. Executado como o usuário, no VT
+# do wdm (entrada padrão), já com a sessão do logind (XDG_SESSION_TYPE=wayland):
+#   Wsession <comando do Exec= do .desktop da sessão>
+# A saída vai para ~/.xsession-errors, como na sessão X11.
+
+errfile="$HOME/.xsession-errors"
+if (umask 077 && : >"$errfile") 2>/dev/null; then
+    exec >"$errfile" 2>&1
+fi
+echo "wdm: sessão Wayland iniciada em $(date): $*"
+
+for file in /etc/profile "$HOME/.profile"; do
+    if [ -f "$file" ]; then
+        . "$file"
+    fi
+done
+unset file errfile
+
+if [ $# -eq 0 ]; then
+    echo "wdm: nenhuma sessão Wayland informada" >&2
+    exit 1
+fi
+if ! command -v "$1" >/dev/null 2>&1; then
+    echo "wdm: comando da sessão não encontrado: $1" >&2
+    exit 127
+fi
+exec "$@"

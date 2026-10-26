@@ -62,6 +62,27 @@ fi
 nodeps=0
 [[ -f .ci-nodeps ]] && nodeps=1
 
+# Pacotes que precisam da versão deste repositório de outro pacote (e não
+# da do Manjaro) listam o diretório dele em .ci-localdeps: ele é compilado
+# antes, no mesmo contêiner, e instalado. Ex.: o wdm liga na libwraster do
+# windowmaker do Big WindowMaker, cujas versões de símbolo diferem da do
+# Manjaro com o mesmo soname.
+if [[ -f .ci-localdeps ]]; then
+  while read -r dep; do
+    [[ -z ${dep} || ${dep} == \#* ]] && continue
+    if [[ ! ${dep} =~ ^[a-z0-9][a-z0-9._+-]*$ ]] || [[ ! -f ${repo_root}/${dep}/PKGBUILD ]]; then
+      echo "dependência local inválida em .ci-localdeps: ${dep}" >&2
+      exit 2
+    fi
+    echo "::group::dependência local ${dep}"
+    cp -r "${repo_root}/${dep}" "${work}/"
+    chown -R builder: "${work}/${dep}"
+    (cd "${work}/${dep}" && as_builder makepkg --syncdeps --noconfirm --cleanbuild)
+    pacman -U --noconfirm "${work}/${dep}"/*.pkg.tar.zst
+    echo "::endgroup::"
+  done < .ci-localdeps
+fi
+
 echo "::group::makepkg"
 if ((nodeps)); then
   as_builder makepkg --nodeps --noconfirm --cleanbuild --log

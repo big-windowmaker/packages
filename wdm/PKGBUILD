@@ -1,0 +1,190 @@
+# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+# Baseado no pacote do Debian (wdm 1.28-27, Axel Beckert e Agustín Martín
+# Domingo) e no do AUR (wdm 1.28-9, Brian Bidulock).
+
+# WDM, o WINGs Display Manager: derivado do xdm, com a tela de login em
+# WINGs (visual NeXT/Window Maker). O upstream (github.com/raorn/wdm) está
+# parado desde 2012; quem mantém a 1.28 viva é o Debian, com 11 patches
+# (sessão PAM aberta no processo pai, por causa do logind, entre outros).
+#
+# Fontes: o tarball original da 1.28 e o debian.tar.xz da 1.28-27, pelas URLs
+# permanentes do snapshot.debian.org (checksums iguais aos do .dsc do
+# Debian). O tarball traz o Makefile.in e o configure gerados, que o git do
+# upstream não tem.
+#
+# Patches próprios, depois dos do Debian (o upstream não recebe mais PRs):
+#   0001  build com GCC 15 e pkgconf; versão 1.28 no AC_INIT.
+#   0002  daemon: lista de sessões a partir de xsessions e wayland-sessions,
+#         ambiente do pam_systemd (XDG_SEAT, XDG_VTNR, tipo e classe da
+#         sessão) e sessões Wayland: depois da autenticação o wdm encerra o
+#         servidor X e inicia a sessão no mesmo VT, com sessão própria no
+#         logind (Type=wayland); ao sair, a tela de login volta.
+#   0003  wdmLogin: seletor "Sessão (F2)", atalhos de teclado, sessão
+#         lembrada por usuário, aviso de sessão que terminou cedo, papel de
+#         parede sem distorção e tradução pt_BR.
+# A configuração (wdm-config, Xservers, Xsession, Wsession, PAM, unidade do
+# systemd) fica neste diretório, fora dos patches.
+#
+# pkgrel começa em 10: o AUR já publicou a 1.28-9, e um wdm do AUR instalado
+# não pode parecer mais novo que este.
+pkgname=wdm
+pkgver=1.28
+_debrel=27
+_snapshot=20230829T151102Z
+pkgrel=11
+pkgdesc='WINGs Display Manager: login screen with the NeXT look, X11 and Wayland sessions'
+arch=(x86_64)
+url='https://github.com/raorn/wdm'
+license=('GPL-2.0-or-later AND X11')
+depends=(
+  glibc
+  libx11
+  libxau
+  libxcrypt
+  libxdmcp
+  libxinerama
+  libxmu
+  pam
+  sh
+  # libWINGs, libWUtil e libwraster do windowmaker do Big WindowMaker: o
+  # 0.96.0 do Manjaro exporta LIBWRASTER7 com o mesmo soname, e o wdmLogin
+  # compilado contra ele não abre com o nosso (e vice-versa).
+  'windowmaker>=0.96.0.r130'
+  xorg-server  # o wdm executa o /usr/bin/X do Xservers
+  xorg-xrdb    # recursos X da tela de login (Xresources)
+)
+optdepends=(
+  'big-wm-themes: logo e papel de parede do Big WindowMaker na tela de login'
+  'numlockx: Num Lock ligado na tela de login'
+)
+backup=(
+  etc/pam.d/wdm
+  etc/wdm/Wsession
+  etc/wdm/Xaccess
+  etc/wdm/Xreset
+  etc/wdm/Xresources
+  etc/wdm/Xservers
+  etc/wdm/Xsession
+  etc/wdm/Xsetup_0
+  etc/wdm/Xstartup
+  etc/wdm/wdm-config
+  etc/wdm/wdmLogin-config
+)
+source=(
+  "https://snapshot.debian.org/archive/debian/${_snapshot}/pool/main/w/wdm/wdm_${pkgver}.orig.tar.gz"
+  "https://snapshot.debian.org/archive/debian/${_snapshot}/pool/main/w/wdm/wdm_${pkgver}-${_debrel}.debian.tar.xz"
+  0001-build-gcc15-pkgconf-version.patch
+  0002-desktop-sessions-logind-wayland.patch
+  0003-wdmLogin-session-selector-keyboard-pt_BR.patch
+  wdm-config
+  wdmLogin-config
+  Xservers
+  Xaccess
+  Xresources
+  Xsetup_0
+  Xstartup
+  Xreset
+  Xsession
+  Wsession
+  wdm.pam
+  wdm.service
+  wdm.tmpfiles
+  test-sessions.c
+)
+sha256sums=('dbd4a1fe635592bda8ff748f6c071ba29141c7ea41c80477a64bf672c5d072b7'
+            'fe749e5db1c47054cf4453b6ef677f0ab0fa63f8fcf78c90af21211b18cc3602'
+            'ea21325e65b3ce1971d4374d81f5d00a48fa568cc6138f2c104649cfd8670143'
+            'a3f940e583cf89684a78a9cc1adc26b2ed581f9c252bbb93d5efb082c6fe6eda'
+            '6c94049ef09823996c44588e4bf7865332bb6071e3315fd5b9792b7837943ac1'
+            '2f9e342bdf5113645aba3802637be848b2cf9833d4cce2219fad1e66908360bb'
+            'b73057f2e41333406285b3572cb0de5e10b666537a7315a3c336593a45a56495'
+            '2307e89b459169f00a7ef000de7bf4e39d8124ca060edaadcffa552f8fccabee'
+            'ea0b27c20519b8087e5a331d8b76f4a7042bdc8171b1ac26fb9cbf3001822311'
+            'ad4ab3067f9505ec6215eec33ae91237201042879305d4826ea1b18767acff1e'
+            'f922acce4e6461721290386b03334ec166fca51c7bbd5cfd9e48ccb62474287d'
+            'd52de3f885d21d297ade43b988eca72555d2a06d0c1eceddf451443f722fac0c'
+            '2f9647b86d953af02c652597e2f1bc0ff2864ee448f59b7ac74f415be84304de'
+            '0e8649c1a32be7c07ba4f06624ebe73d065671a013e4007e5cddbc27554ee67c'
+            '2b283255df3416dd3b62d46ae2ffedba3946ab103455a2736cf4e9335f9bfd48'
+            '64ef5a2ce80d9385e3a9e984349a36ae83a3349005509e8105d4f7065300cfe3'
+            'bb9ee62229ca4e218da041818a88441534a0c2a95a0cfc8c04d6975ded836912'
+            '3b7ece92f7a2b2f17a8c79368a4f6739d6c037ddd14bd7cae1f05b595e9318d7'
+            '04a3aa656245d5e53f461839665a08d62e77930c87185f51b98b58eac8c5e8f3')
+
+prepare() {
+  cd "wdm-${pkgver}"
+
+  # Patches do Debian, na ordem do series.
+  local _p
+  while read -r _p; do
+    [[ -z ${_p} || ${_p} == \#* ]] && continue
+    patch -Np1 -i "${srcdir}/debian/patches/${_p}"
+  done < "${srcdir}/debian/patches/series"
+
+  for _p in "${srcdir}"/000[0-9]-*.patch; do
+    patch -Np1 -i "${_p}"
+  done
+
+  autoconf -f
+}
+
+build() {
+  cd "wdm-${pkgver}"
+  # Código K&R: declarações como "char **systemEnv();" não compilam em C23,
+  # o padrão do GCC 15.
+  CFLAGS+=' -std=gnu17'
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --mandir=/usr/share/man \
+    --localstatedir=/var/lib/wdm \
+    --with-wdmdir=/etc/wdm \
+    --with-nlsdir=/usr/share/locale \
+    --with-gfxdir=/usr/share/wdm/pixmaps \
+    --with-fakehome=/var/lib/wdm \
+    --with-runlockdir=/run \
+    --with-logdir=/var/log \
+    --with-defuserpath=/usr/local/sbin:/usr/local/bin:/usr/bin \
+    --with-defsystempath=/usr/local/sbin:/usr/local/bin:/usr/bin \
+    --enable-pam \
+    --with-pamdir=/etc/pam.d \
+    --enable-aafont
+  make
+}
+
+check() {
+  cd "wdm-${pkgver}"
+  # libwdm: leitura dos .desktop, divisão do Exec, sessão lembrada e
+  # WDMUnsetEnv.
+  cc ${CFLAGS} -std=gnu17 ${LDFLAGS} -Iinclude $(pkg-config --cflags WINGs) \
+    "${srcdir}/test-sessions.c" bin/libwdm.a $(pkg-config --libs WINGs) \
+    -o test-sessions
+  rm -rf test-tmp
+  mkdir test-tmp
+  ./test-sessions "${PWD}/test-tmp"
+  # Tradução e scripts de sessão.
+  msgfmt -c -o /dev/null po/pt_BR.po
+  local _s
+  for _s in Xsession Wsession Xsetup_0 Xstartup Xreset; do
+    sh -n "${srcdir}/${_s}"
+  done
+}
+
+package() {
+  cd "wdm-${pkgver}"
+  # Só o wdm e o wdmLogin: o wdmChooser (XDMCP) e as imagens de exemplo do
+  # upstream (algumas da NASA, com licença própria) ficam de fora.
+  make DESTDIR="${pkgdir}" install-bin install-doc install-nls-yes
+
+  local _f
+  for _f in wdm-config wdmLogin-config Xservers Xaccess Xresources; do
+    install -Dm644 "${srcdir}/${_f}" "${pkgdir}/etc/wdm/${_f}"
+  done
+  for _f in Xsetup_0 Xstartup Xreset Xsession Wsession; do
+    install -Dm755 "${srcdir}/${_f}" "${pkgdir}/etc/wdm/${_f}"
+  done
+  install -Dm644 "${srcdir}/wdm.pam" "${pkgdir}/etc/pam.d/wdm"
+  install -Dm644 "${srcdir}/wdm.service" "${pkgdir}/usr/lib/systemd/system/wdm.service"
+  install -Dm644 "${srcdir}/wdm.tmpfiles" "${pkgdir}/usr/lib/tmpfiles.d/wdm.conf"
+  install -Dm644 "${srcdir}/debian/copyright" "${pkgdir}/usr/share/licenses/${pkgname}/copyright"
+}
