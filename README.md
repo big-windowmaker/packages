@@ -1,9 +1,22 @@
-# Big WindowMaker — pacotes
+<p align="center">
+  <img src="https://raw.githubusercontent.com/big-windowmaker/big-wm/main/themes/logo/big-wm.svg" width="110" alt="Logo do Big WindowMaker">
+</p>
+
+<h1 align="center">Big WindowMaker — pacotes</h1>
+
+<p align="center">
+  <a href="https://github.com/big-windowmaker/packages/actions/workflows/build.yml"><img src="https://github.com/big-windowmaker/packages/actions/workflows/build.yml/badge.svg" alt="build"></a>
+  <img src="https://img.shields.io/badge/PKGBUILDs-0BSD-blue" alt="Licença 0BSD">
+</p>
 
 PKGBUILDs dos pacotes próprios da distribuição **Big WindowMaker** (baseada em
 BigLinux/BigCommunity/Manjaro). Cada diretório da raiz é um `pkgbase`, com o
 `PKGBUILD`, a `.SRCINFO` gerada por `makepkg --printsrcinfo` e, quando houver,
-os patches.
+os patches. Todo push em `main` compila os pacotes alterados num contêiner
+Manjaro limpo, roda `check()`, instala os pacotes e passa o `namcap`; os
+pacotes ficam disponíveis como artefatos por 30 dias e são usados pelo
+[build-iso](https://github.com/big-windowmaker/build-iso) e pelos testes de
+integração do [big-wm](https://github.com/big-windowmaker/big-wm).
 
 | Diretório | Pacotes gerados | Versão | Origem |
 |---|---|---|---|
