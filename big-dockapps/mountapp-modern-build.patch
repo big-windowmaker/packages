@@ -1,0 +1,162 @@
+mountapp: compila o mount.app com GCC 15+ e a libWUtil atual
+
+- não compila o mount.conf (configurador em GTK 1.2, que não existe mais);
+- procura WMGetFromPLString na libWUtil e não faz "read" interativo;
+- bool vem de <stdbool.h> (bool é palavra-chave em C23);
+- WMWritePropListToFile perdeu o terceiro argumento;
+- comparação de string com strcmp e fim de dois casos de UB (++x em x = ...);
+- se a fonte Helvetica do X não existir, usa "fixed" em vez de sair;
+- corrige o teste da cor da legenda (gcc1 -> gcc2).
+
+Upstream: mountapp 3.0 (SourceForge), sem manutenção; sem PR.
+
+diff --git a/configure.in b/configure.in
+index e9eaa3d..b5c122f 100644
+--- a/configure.in
++++ b/configure.in
+@@ -101,26 +101,14 @@ dnl =====================================================
+ dnl        Check for libWINGs (replaces libPropList)
+ dnl =====================================================
+ 
+-AC_CHECK_LIB(WINGs, WMGetFromPLString,
+-    [LIBPL_LIBS=-lWINGs LIBPL_INC_PATH="" missing=no],
+-    [missing=yes])
+-
+-if test "$missing" = yes; then
+-    echo "********** WARNING *************"
+-    echo "libWINGs is not installed in your system."
+-    echo "You need to build it before building mount.app (if you already"
+-    echo "did that, remove config.cache and rerun configure)."
+-    echo "Please read the INSTALL file for detailed instructions."
+-    read foo
+-fi
++dnl As funções de PropList (WMGetFromPLString etc.) ficam na libWUtil.
++AC_CHECK_LIB(WUtil, WMGetFromPLString,
++    [LIBPL_LIBS=-lWUtil LIBPL_INC_PATH=""],
++    [AC_MSG_ERROR([libWUtil (Window Maker) is required to build mount.app])])
+ 
+ AC_SUBST(LIBPL_LIBS)
+ AC_SUBST(LIBPL_INC_PATH)
+ 
+-GTK_LIBS=`gtk-config --libs`
+-GTK_CFLAGS=`gtk-config --cflags`
+-AC_SUBST(GTK_LIBS)
+-AC_SUBST(GTK_CFLAGS)
+ 
+ if test "${prefix}" = "NONE"; then
+ 	prefix=/usr/local
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 2a571a5..cb6b82b 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -17,15 +17,12 @@ AUTOMAKE_OPTIONS = no-dependencies
+ mexecbindir = @mountsdir@
+ mpixmapdir = @pixmapdir@
+ 
+-mexecbin_PROGRAMS = mount.app mount.conf
++mexecbin_PROGRAMS = mount.app
+ 
+ INCLUDES = @LIBPL_INC_PATH@ @XCFLAGS@
+ 
+ mount_app_SOURCES = mount.c mount.h fstab.c properties.c external.c globals.c
+ 
+-mount_conf_SOURCES = config.c mount.h fstab.c properties.c globals.c
+-
+ mount_app_LDADD = @LIBPL_LIBS@ @XLFLAGS@ @XLIBS@ @X_EXTRA_LIBS@ @GFXLIBS@
+-mount_conf_LDADD = @LIBPL_LIBS@ @GTK_LIBS@ @GFXLIBS@ @X_EXTRA_LIBS@
+ 
+-CFLAGS = @CFLAGS@ @GTK_CFLAGS@ @GFXFLAGS@
++AM_CFLAGS = @GFXFLAGS@
+diff --git a/src/external.c b/src/external.c
+index 971aefa..f2ab365 100644
+--- a/src/external.c
++++ b/src/external.c
+@@ -275,7 +275,7 @@ void            noZombie(int sig)
+     {
+         pid[p_head] = exitedPid;
+         retStatus[p_head] = status;
+-        p_head = (p_head == P_MAX-1) ? 0 : ++p_head;
++        p_head = (p_head == P_MAX-1) ? 0 : p_head + 1;
+     }
+ 
+     signal(SIGCHLD, noZombie);
+@@ -290,7 +290,7 @@ void            shovelDeadChildren()
+     while (p_head != p_tail)
+     {
+         handleDeadChild(pid[p_tail], retStatus[p_tail]);
+-        p_tail = (p_tail == P_MAX-1) ? 0 : ++p_tail;
++        p_tail = (p_tail == P_MAX-1) ? 0 : p_tail + 1;
+     }
+ }
+ 
+diff --git a/src/mount.c b/src/mount.c
+index 229d18a..c1d4303 100644
+--- a/src/mount.c
++++ b/src/mount.c
+@@ -411,6 +411,11 @@ void            initializeAppIcon()
+ 
+     xfs = XLoadQueryFont(dpy, txtfont);
+     if (xfs == 0)
++    {
++        fprintf(stderr, "Unable to load text font %s, using \"fixed\"\n", txtfont);
++        xfs = XLoadQueryFont(dpy, "fixed");
++    }
++    if (xfs == 0)
+     {
+         fprintf(stderr, "Unable to load text font\n");
+         exit(1);
+@@ -428,13 +433,18 @@ void            initializeAppIcon()
+    
+     xfs = XLoadQueryFont(dpy, capfont);
+     if (xfs == 0)
++    {
++        fprintf(stderr, "Unable to load cap font %s, using \"fixed\"\n", capfont);
++        xfs = XLoadQueryFont(dpy, "fixed");
++    }
++    if (xfs == 0)
+     {
+         fprintf(stderr, "Unable to load cap font\n");
+         exit(1);
+     }
+     gcf2 = xfs->fid;
+     gcc2 = getColor(capcolor, 1);
+-    if (gcc1 == 0)
++    if (gcc2 == 0)
+     {
+         fprintf(stderr, "Unable to load cap color\n");
+         exit(1);
+@@ -804,7 +814,7 @@ void		format_size(char *s, double size_in_byte)
+ 	unit = "Byte";
+      }  
+    
+-   if ((size < 10) && (unit != "Byte"))
++   if ((size < 10) && strcmp(unit, "Byte") != 0)
+      {
+ 	sprintf (s, "%.1f%s", size, unit);
+      }
+diff --git a/src/mount.h b/src/mount.h
+index a63cc9b..cf04ae4 100644
+--- a/src/mount.h
++++ b/src/mount.h
+@@ -44,7 +44,7 @@
+ 
+ #include <WINGs/WINGs.h>
+ 
+-typedef unsigned char bool;
++#include <stdbool.h>
+ 
+ #ifndef TRUE
+ #define FALSE 0
+diff --git a/src/properties.c b/src/properties.c
+index fcf93f5..c6516c3 100644
+--- a/src/properties.c
++++ b/src/properties.c
+@@ -448,7 +448,7 @@ void            saveProperties(allInfo *ai)
+         WMReleasePropList(mpProp);
+     }
+ 
+-    if (WMWritePropListToFile(props, getFileName(), FALSE) == FALSE)
++    if (WMWritePropListToFile(props, getFileName()) == FALSE)
+         printf("Error occurred synchronizing proplist\n");
+ 
+     WMReleasePropList(props);

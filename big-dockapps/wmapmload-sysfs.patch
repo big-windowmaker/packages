@@ -1,0 +1,260 @@
+wmapmload: lê a bateria de /sys/class/power_supply
+
+O /proc/apm não existe nos kernels atuais e o wmapmload saía com "No APM
+support in kernel". O leitor Linux passa a somar as baterias do sistema
+(type=Battery, ignorando periféricos com scope=Device) e a ler as fontes
+Mains/USB. Sem bateria mostra 0% com o AC ligado e não entra em alarme.
+Suspender/standby usam systemctl suspend em vez do apm.
+
+Upstream: wmapmload 0.3.4 (tnemeth.free.fr), sem manutenção; sem PR.
+
+diff --git a/src/main.c b/src/main.c
+index ee1317c..dab24ed 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -35,6 +35,7 @@
+ 
+ #ifdef linux
+ #include <sys/stat.h>
++#include <dirent.h>
+ #endif
+ 
+ /*#ifdef SunOS*/
+@@ -65,12 +66,18 @@
+ # define APMDEV "/dev/apm"
+ #else
+ # ifdef linux
+-#  define APMDEV "/proc/apm"
++/* /proc/apm no longer exists on current kernels: read sysfs instead. */
++#  define APMDEV "/sys/class/power_supply"
+ # endif
+ #endif
+ 
+-#define SUSPEND_CMD "apm -s"
+-#define STANDBY_CMD "apm -S"
++#ifdef linux
++# define SUSPEND_CMD "systemctl suspend"
++# define STANDBY_CMD "systemctl suspend"
++#else
++# define SUSPEND_CMD "apm -s"
++# define STANDBY_CMD "apm -S"
++#endif
+ 
+ typedef struct ApmInfos {
+     const char driver_version[10];
+@@ -246,7 +253,8 @@ static void update() {
+     apm_getinfos(&cur_apm_infos);
+ 
+     /* alarm mode */
+-    if (cur_apm_infos.battery_percentage < alarm_level) {
++    if (cur_apm_infos.battery_percentage >= 0 &&
++        cur_apm_infos.battery_percentage < alarm_level) {
+         if (!in_alarm_mode) {
+             in_alarm_mode = True;
+             pre_backlight = backlight;
+@@ -552,79 +560,140 @@ static int my_system (char *cmd) {
+ 
+ 
+ #ifdef linux
+-int apm_read(ApmInfos *i) {
+-    FILE        *str;
+-    char         units[10];
+-    char         buffer[100];
+-    int          retcode = 0;
++/* Reads an integer from /sys/class/power_supply/<dev>/<attr>. */
++static int sysfs_long(const char *dev, const char *attr, long *val) {
++    char  path[512];
++    FILE *f;
++    int   ok;
++
++    snprintf(path, sizeof(path), APMDEV "/%s/%s", dev, attr);
++    if (!(f = fopen(path, "r")))
++        return 0;
++    ok = (fscanf(f, "%ld", val) == 1);
++    fclose(f);
++    return ok;
++}
++
++/* Reads one line from /sys/class/power_supply/<dev>/<attr>. */
++static int sysfs_str(const char *dev, const char *attr, char *buf, size_t len) {
++    char  path[512];
++    FILE *f;
++    char *nl;
++
++    snprintf(path, sizeof(path), APMDEV "/%s/%s", dev, attr);
++    if (!(f = fopen(path, "r")))
++        return 0;
++    if (!fgets(buf, len, f)) {
++        fclose(f);
++        return 0;
++    }
++    fclose(f);
++    if ((nl = strchr(buf, '\n')))
++        *nl = '\0';
++    return 1;
++}
+ 
+-    if (!(str = fopen(APMDEV, "r")))
++/*
++ * Sums every system battery (type=Battery, skipping peripheral batteries
++ * with scope=Device) and checks the external supplies (type=Mains/USB).
++ * Without a battery, battery_percentage is -1 and AC is reported on line.
++ */
++int apm_read(ApmInfos *i) {
++    DIR           *dir;
++    struct dirent *de;
++    char           buf[64];
++    long           v, now = 0, full = 0, rate = 0, cap_sum = 0;
++    int            nbat = 0, ncap = 0, charging = 0, discharging = 0;
++    int            mains = 0, online = 0;
++
++    if (!(dir = opendir(APMDEV)))
+         return 1;
+ 
+-    (void)fgets(buffer, sizeof(buffer) - 1, str);
+-    buffer[sizeof(buffer) - 1] = '\0';
+-    sscanf(buffer, "%s %d.%d %x %x %x %x %d%% %d %s\n",
+-            (char *)i->driver_version,
+-            &i->apm_version_major,
+-            &i->apm_version_minor,
+-            &i->apm_flags,
+-            &i->ac_line_status,
+-            &i->battery_status,
+-            &i->battery_flags,
+-            &i->battery_percentage,
+-            &i->battery_time,
+-            units);
+-    i->using_minutes = !strncmp(units, "min", 3) ? 1 : 0;
+-
+-    if (i->driver_version[0] == 'B') {
+-        strcpy((char *)i->driver_version, "pre-0.7");
+-        i->apm_version_major  = 0;
+-        i->apm_version_minor  = 0;
+-        i->apm_flags          = 0;
+-        i->ac_line_status     = 0xff;
+-        i->battery_status     = 0xff;
+-        i->battery_flags      = 0xff;
+-        i->battery_percentage = -1;
+-        i->battery_time       = -1;
+-        i->using_minutes      = 1;
+-
+-        sscanf(buffer, "BIOS version: %d.%d", &i->apm_version_major, &i->apm_version_minor);
+-        (void)fgets(buffer, sizeof(buffer) - 1, str);
+-        sscanf(buffer, "Flags: 0x%02x", &i->apm_flags);
+-
+-        if (i->apm_flags & APM_32_BIT_SUPPORT) {
+-            (void)fgets(buffer, sizeof(buffer) - 1, str);
+-            (void)fgets(buffer, sizeof(buffer) - 1, str);
+-
+-            if (buffer[0] != 'P') {
+-
+-                if (!strncmp(buffer+4, "off line", 8))     i->ac_line_status = 0;
+-                else if (!strncmp(buffer+4, "on line", 7)) i->ac_line_status = 1;
+-                else if (!strncmp(buffer+4, "on back", 7)) i->ac_line_status = 2;
+-
+-                (void)fgets(buffer, sizeof(buffer) - 1, str);
+-                if (!strncmp(buffer+16, "high", 4))        i->battery_status = 0;
+-                else if (!strncmp(buffer+16, "low", 3))    i->battery_status = 1;
+-                else if (!strncmp(buffer+16, "crit", 4))   i->battery_status = 2;
+-                else if (!strncmp(buffer+16, "charg", 5))  i->battery_status = 3;
+-
+-                (void)fgets(buffer, sizeof(buffer) - 1, str);
+-                if (strncmp(buffer+14, "unknown", 7))      i->battery_percentage = atoi(buffer + 14);
+-
+-                if (i->apm_version_major >= 1 && i->apm_version_minor >= 1) {
+-                    (void)fgets(buffer, sizeof(buffer) - 1, str);
+-                    sscanf(buffer, "Battery flag: 0x%02x", &i->battery_flags);
+-                    (void)fgets(buffer, sizeof(buffer) - 1, str);
+-                    if (strncmp(buffer+14, "unknown", 7))  i->battery_time = atoi(buffer + 14);
+-                }
++    while ((de = readdir(dir))) {
++        if (de->d_name[0] == '.' ||
++            !sysfs_str(de->d_name, "type", buf, sizeof(buf)))
++            continue;
++
++        if (strcmp(buf, "Battery") != 0) {
++            if (strcmp(buf, "Mains") == 0 || strcmp(buf, "USB") == 0) {
++                mains++;
++                if (sysfs_long(de->d_name, "online", &v) && v > 0)
++                    online = 1;
+             }
++            continue;
++        }
++        if (sysfs_str(de->d_name, "scope", buf, sizeof(buf)) &&
++            strcmp(buf, "Device") == 0)
++            continue;
++        if (sysfs_long(de->d_name, "present", &v) && v == 0)
++            continue;
++
++        nbat++;
++        if (sysfs_str(de->d_name, "status", buf, sizeof(buf))) {
++            if (strcmp(buf, "Charging") == 0)
++                charging = 1;
++            else if (strcmp(buf, "Discharging") == 0)
++                discharging = 1;
++        }
++
++        /* energy_* (uWh/uW) or charge_* (uAh/uA): the ratios are the same. */
++        if (sysfs_long(de->d_name, "energy_now", &v)) {
++            now += v;
++            if (sysfs_long(de->d_name, "energy_full", &v)) full += v;
++            if (sysfs_long(de->d_name, "power_now", &v)) rate += labs(v);
++        } else if (sysfs_long(de->d_name, "charge_now", &v)) {
++            now += v;
++            if (sysfs_long(de->d_name, "charge_full", &v)) full += v;
++            if (sysfs_long(de->d_name, "current_now", &v)) rate += labs(v);
+         }
++        if (sysfs_long(de->d_name, "capacity", &v)) {
++            cap_sum += v;
++            ncap++;
++        }
++    }
++    closedir(dir);
++
++    strcpy((char *)i->driver_version, "sysfs");
++    i->apm_version_major = 0;
++    i->apm_version_minor = 0;
++    i->apm_flags         = 0;
++    i->battery_flags     = 0;
++    i->using_minutes     = 1;
++    i->battery_time      = 0;
++
++    if (nbat == 0)
++        i->battery_percentage = -1;
++    else if (full > 0)
++        i->battery_percentage = (int)(now * 100 / full);
++    else if (ncap > 0)
++        i->battery_percentage = (int)(cap_sum / ncap);
++    else
++        i->battery_percentage = -1;
++    if (i->battery_percentage > 100) i->battery_percentage = 100;
++
++    /* Time left (minutes) only while discharging, capped at 99:59. */
++    if (discharging && rate > 0) {
++        i->battery_time = (int)(now * 60 / rate);
++        if (i->battery_time > 99 * 60 + 59) i->battery_time = 99 * 60 + 59;
+     }
+ 
+-    if (i->battery_percentage > 100) i->battery_percentage = -1;
+-    fclose(str);
++    if (mains > 0)
++        i->ac_line_status = online;
++    else
++        i->ac_line_status = discharging ? 0 : 1;
++
++    if (charging)
++        i->battery_status = 3;
++    else if (i->battery_percentage < 0)
++        i->battery_status = 0xff;
++    else if (i->battery_percentage <= 5)
++        i->battery_status = 2;
++    else if (i->battery_percentage <= 25)
++        i->battery_status = 1;
++    else
++        i->battery_status = 0;
+ 
+-    return retcode;
++    return 0;
+ }
+ #else
+ # ifdef freebsd

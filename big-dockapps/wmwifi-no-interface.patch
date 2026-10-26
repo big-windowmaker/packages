@@ -1,0 +1,99 @@
+wmwifi: não confunde o cabeçalho de /proc/net/wireless com uma interface
+
+Sem interface wireless (VM, desktop) o arquivo só tem as duas linhas de
+cabeçalho: o wmwifi lia "face" como nome de interface, com a struct wifi
+não inicializada. Agora mostra "none - no wifi" até uma interface aparecer.
+Também inicializa sw/wfi e para de sobrescrever o CFLAGS do usuário no
+configure.in (as flags do makepkg eram descartadas).
+
+Upstream: window-maker/dockapps (wmwifi), ainda sem PR; enviar para wmaker-dev.
+
+diff --git a/wmwifi/configure.in b/wmwifi/configure.in
+index e826caa..4f4a726 100644
+--- a/wmwifi/configure.in
++++ b/wmwifi/configure.in
+@@ -11,7 +11,8 @@ dnl Replace `main' with a function in -links:
+ AC_PATH_XTRA
+ AC_PATH_X
+ dnl echo $X_CFLAGS $X_LIBS
+-CFLAGS="$X_CFLAGS $X_LIBS"
++CFLAGS="$CFLAGS $X_CFLAGS"
++LDFLAGS="$LDFLAGS $X_LIBS"
+ AC_CHECK_LIB(X11, XCopyArea, [], [], $X_LIBS)
+ AC_CHECK_LIB(Xext, XShapeCombineMask, [], [], $X_LIBS)
+ AC_CHECK_LIB(Xpm, XpmCreatePixmapFromData, [], [], $X_LIBS)
+diff --git a/wmwifi/src/wireless.c b/wmwifi/src/wireless.c
+index bc9753b..011786e 100644
+--- a/wmwifi/src/wireless.c
++++ b/wmwifi/src/wireless.c
+@@ -27,22 +27,37 @@ int get_wifi_info(struct wifi *wfi)
+     int i;
+     FILE *fp;
+     char buff[1024] = "";
++    int found = 0;
+ 
+-    if (fp = fopen("/proc/net/wireless", "r")) {
++    if ((fp = fopen("/proc/net/wireless", "r"))) {
+     //if (fp = fopen("./demo.txt", "r")) {
+ 	for (i = 0; i < (wfi->ifnum + 3); i++) {
+-	    fgets(buff, sizeof(buff), fp);
+-	    buff[strlen(buff) + 1] = '\0';
++	    found = (fgets(buff, sizeof(buff), fp) != NULL);
++	    if (!found)
++		break;
+ 	}
+ 	fclose(fp);
+-    } else {
+-	wfi->max_qual = -1;
+-	fprintf(stdout,
+-		"ERROR: Cannot Open Linux Wireless Extensions!\n\b");
+-//	exit(1);
+     }
+ 
+-    sscanf(buff, "%s %*s %f %d", &wfi->ifname, &wfi->link, &wfi->level);
++    /*
++     * No wireless interface (only the two header lines) or no wireless
++     * extensions at all: show "none - no wifi" instead of parsing the
++     * header line as an interface name.
++     */
++    if (!found) {
++	strcpy(wfi->ifname, "none");
++	strcpy(wfi->essid, "no wifi");
++	wfi->ifnum = 0;
++	wfi->link = 0;
++	wfi->level = 0;
++	wfi->noise = 0;
++	wfi->max_link = 0;
++	wfi->max_qual = 100;
++	memset(&wfi->bitrate, 0, sizeof(wfi->bitrate));
++	return 0;
++    }
++
++    sscanf(buff, "%254s %*s %f %d", wfi->ifname, &wfi->link, &wfi->level);
+     /* Don't know why I have to make a second call to sscanf
+      * to pull wfi->noise, but for some wierd reason I cannot
+      * pull it above along with the other stats.
+diff --git a/wmwifi/src/wmwifi.c b/wmwifi/src/wmwifi.c
+index bf95dc8..73e4852 100644
+--- a/wmwifi/src/wmwifi.c
++++ b/wmwifi/src/wmwifi.c
+@@ -87,9 +87,8 @@ int main(int argc, char **argv)
+     XEvent event;
+     XButtonPressedEvent *bevent;
+     int i;
+-    struct wifi wfi;
++    struct wifi wfi = { 0 };
+ 
+-    wfi.ifnum = 0;
+ 
+     /* Parse CommandLine */
+     parse_arguments(argc, argv);
+@@ -198,7 +197,7 @@ static void do_theme(struct theme thm)
+ /* called by timer */
+ static void update(struct wifi *wfi)
+ {
+-    int sw, percent;
++    int sw = 0, percent;
+     extern int count;
+     //char *str = calloc(1, sizeof(wfi->ifname) + sizeof(wfi->essid) + 3);
+     char str[512];

@@ -1,0 +1,660 @@
+minicontrol: porta de GTK 1.2 para GTK 3
+
+O GTK 1.2 não existe mais. Usa a técnica de dockapp GTK 3 do wmpasman (a
+mesma do wmshutdown), GtkGrid, ícones via gdk-pixbuf e g_spawn_async no
+lugar de system(). Corrige também -c (faltava a barra) e -p (strcat em
+memória não inicializada), vazamentos a cada segundo no relógio e o
+gtk_main_iteration() dentro do timeout. Os botões do diálogo de desligar
+passam a usar "clicked" e fecham o diálogo.
+
+Upstream: minicontrol 0.2 (zenwalk.org), sem manutenção; sem PR.
+
+diff --git a/makefile b/makefile
+index 855c614..70f50ab 100755
+--- a/makefile
++++ b/makefile
+@@ -13,27 +13,25 @@ BIN = minicontrol
+ PREFIX = /usr
+ 
+ 
++DESTDIR =
++
+ SRCPATH = .
+-BINPATH = $(PREFIX)/bin
++BINPATH = $(DESTDIR)$(PREFIX)/bin
+ CONFIGPATH = $(PREFIX)/share/minicontrol
+ CONFIGFILE = minicontrol.cf
+-CFLAGS = -g -Wall
++CFLAGS ?= -g -Wall
+ DEFINE = -D__CONFPATH='"$(CONFIGPATH)"' -D__CONFFILE='"$(CONFIGFILE)"'
+ 
+-LIBCONFIG = `gtk-config --cflags --libs`
++GTK_CFLAGS = $(shell pkg-config --cflags gtk+-3.0 x11)
++GTK_LIBS = $(shell pkg-config --libs gtk+-3.0 x11)
+ 
+ 
+ $(BIN) : $(SRC)
+-	gcc $(CFLAGS) $(DEFINE) $(LIBCONFIG) -o $(BIN) $(SRC)
+-
+-install : $(BIN) $(CONFIGPATH)
+-	chmod 755 $(SRCPATH)/$(BIN)
+-	chmod 666 $(SRCPATH)/conf/*.xpm
+-	chmod 666 $(SRCPATH)/conf/*.cf
+-	strip $(SRCPATH)/$(BIN)
+-	cp -pf $(SRCPATH)/$(BIN) $(BINPATH)/
+-	cp -pf $(SRCPATH)/conf/*.xpm $(CONFIGPATH)/
+-	cp -pf $(SRCPATH)/conf/*.cf $(CONFIGPATH)/
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(GTK_CFLAGS) $(DEFINE) -o $(BIN) $(SRC) $(LDFLAGS) $(GTK_LIBS)
++
++install : $(BIN)
++	install -Dm755 $(SRCPATH)/$(BIN) $(BINPATH)/$(BIN)
++	install -Dm644 -t $(DESTDIR)$(CONFIGPATH) $(SRCPATH)/conf/*.xpm $(SRCPATH)/conf/*.cf
+ 
+ uninstall : $(BINPATH)/$(BIN)
+ 	rm -f $(BINPATH)/$(BIN)
+diff --git a/minicontrol.c b/minicontrol.c
+index 765d469..ac20d7a 100755
+--- a/minicontrol.c
++++ b/minicontrol.c
+@@ -5,6 +5,8 @@
+  * Copyright (C) 2003 by Jean Philippe GUILLEMIN <jp.guillemin@free.fr>
+  * license: This software is under GPL license
+  * rev: 0.2  :))
++ *
++ * Ported from GTK+ 1.2 to GTK+ 3 for Big WindowMaker.
+  */
+ 
+ 
+@@ -18,6 +20,8 @@
+ #include <gtk/gtk.h>
+ #include <gdk/gdk.h>
+ #include <gdk/gdkx.h>
++#include <X11/Xlib.h>
++#include <X11/Xutil.h>
+ 
+ #ifndef __CONFPATH
+ #define __CONFPATH "/usr/share/minicontrol"
+@@ -44,42 +48,77 @@ GtkWidget *create_main_dockapp_icon_window
+ 		int main_argc,
+ 		char *main_argv[]);
+ 
+-void launchonclick
+-		(GtkWidget *event_box, 
++gboolean launchonclick
++		(GtkWidget *event_box,
+ 		GdkEventButton *event,
+ 		gpointer data);
+ 
+-void launchdialog
+-		(GtkWidget *parent, 
++gboolean launchdialog
++		(GtkWidget *parent,
+ 		GdkEventButton *event,
+ 		gpointer data);
+ 
+ int parse_from_config
+-		(u_int32_t *uint_value, 
+-		char *char_value, 
+-		char *filename, 
++		(char *char_value,
++		char *filename,
+ 		char *param );
+ 
+ int usage(void);
+ 
+-int getclocktime(char *clockstring);
++int getclocktime(char *clockstring, size_t len);
+ 
+-gint draw_label( gpointer data );
++gboolean draw_label( gpointer data );
+ 
+ void exitwidget (GtkWidget *wgt, gpointer data);
+ 
+ 
+ // *******************************************************************
+ 
+-char	 	*configfile,
+-				*parameter,
+-				*char_param_value,
+-				*text_color,
+-				*text_size;
+-u_int32_t uint_param_value;
++char		configfile[EXTRALONG_STRING];
+ 
+ 
+ 
++// run a command through the shell without blocking; GLib reaps the child
++static void run_command(const char *cmd)
++{
++	gchar *argv[] = { "/bin/sh", "-c", (gchar *) cmd, NULL };
++	GError *error = NULL;
++
++	if (!cmd || !*cmd)
++		return;
++	if (!g_spawn_async(NULL, argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL, &error)){
++		fprintf(stderr, "error launching command \"%s\": %s\n", cmd, error->message);
++		g_error_free(error);
++	}
++}
++
++// icon = absolute path, a file name in __CONFPATH, or an icon theme name
++static GtkWidget *load_icon(const char *icon)
++{
++	GdkPixbuf *pixbuf = NULL;
++	GtkWidget *image;
++	char path[EXTRALONG_STRING];
++
++	if (icon[0] == '/'){
++		pixbuf = gdk_pixbuf_new_from_file_at_size(icon, 24, 24, NULL);
++	}else if (strchr(icon, '.')){
++		snprintf(path, sizeof(path), "%s/%s", __CONFPATH, icon);
++		pixbuf = gdk_pixbuf_new_from_file_at_size(path, 24, 24, NULL);
++	}else if (icon[0]){
++		pixbuf = gtk_icon_theme_load_icon(gtk_icon_theme_get_default(),
++				icon, 24, GTK_ICON_LOOKUP_FORCE_SIZE, NULL);
++	}
++	if (!pixbuf)
++		pixbuf = gtk_icon_theme_load_icon(gtk_icon_theme_get_default(),
++				"image-missing", 24, GTK_ICON_LOOKUP_FORCE_SIZE, NULL);
++
++	image = gtk_image_new_from_pixbuf(pixbuf);
++	if (pixbuf)
++		g_object_unref(pixbuf);
++	return image;
++}
++
++
+ // Start main *******************************************************************
+ 
+ int main( int argc, char *argv[] ) {
+@@ -87,239 +126,188 @@ int main( int argc, char *argv[] ) {
+ 	int i;
+ 	GtkWidget *mainwin;
+ 	GtkWidget *mainbox;
+-	GtkWidget *pixmap1,*pixmap2;
+-	GdkBitmap *mask;
+ 	GtkWidget *pixmap_widget1,*pixmap_widget2;
+ 	GtkWidget *clockbox, *box1, *box2;
+ 	GtkWidget *watchlabel;
+ 	GtkWidget *separator;
+ 	GtkWidget *table;
+ 
+-	char	 	*wprefs_cmd, 
+-					*imagefile1, 
+-					*imagefile2;
++	static char	wprefs_cmd[BIG_STRING],
++			imagefile1[BIG_STRING],
++			imagefile2[BIG_STRING];
++	char		char_param_value[BIG_STRING];
+ 
+-	configfile = malloc(MEDIUM_STRING);
+-	parameter = malloc(MEDIUM_STRING);
+-	char_param_value = malloc(BIG_STRING); 
+ 
+-	
+-	wprefs_cmd = malloc(BIG_STRING);
+-
+-	imagefile1 = malloc(BIG_STRING);
+-	imagefile2 = malloc(BIG_STRING);
+-	text_color = malloc(BIG_STRING);
+-	text_size = malloc(BIG_STRING);
+-		
+-	
+ // Here we parse command line args and configfile
+-	
+-
+-
+-	if (argc < 2){
+-		strncpy(configfile, __CONFPATH, MEDIUM_STRING);	
+-		strcat(configfile, "/");
+-		strcat(configfile, __CONFFILE);	
+-	}else{
+-		while ((i = getopt(argc, argv, "hc:p:")) != EOF){
+-				switch (i){
+-					case 'c': /* config file */
+-						strncpy(configfile, __CONFPATH, MEDIUM_STRING);	
+-						strcat(configfile, optarg);
+-						break;
+-					case 'p': /* custom config file */
+-						strcat(configfile, optarg);
+-						break;
+-					case 'h': usage(); exit (EXIT_SUCCESS);
+-					}
+-			}
++
++	snprintf(configfile, sizeof(configfile), "%s/%s", __CONFPATH, __CONFFILE);
++
++	while ((i = getopt(argc, argv, "hc:p:")) != EOF){
++			switch (i){
++				case 'c': /* config file */
++					snprintf(configfile, sizeof(configfile), "%s/%s", __CONFPATH, optarg);
++					break;
++				case 'p': /* custom config file */
++					g_strlcpy(configfile, optarg, sizeof(configfile));
++					break;
++				case 'h': usage(); exit (EXIT_SUCCESS);
++				default: usage(); exit (EXIT_FAILURE);
++				}
+ 		}
+ 	//fprintf(stderr, "%s\n", configfile);
+-	
+-	strncpy (parameter, "wprefs_icon", MEDIUM_STRING);
+-	if (parse_from_config(&uint_param_value, char_param_value, configfile, parameter) == 0){
+-		strncpy(imagefile1, __CONFPATH, BIG_STRING);
+-		strcat(imagefile1, "/");	
+-		strcat(imagefile1, char_param_value);
+-		//fprintf(stderr, "%s\n", char_param_value);
+-	}
+-	strncpy (parameter, "halt_icon", MEDIUM_STRING);
+-	if (parse_from_config(&uint_param_value, char_param_value, configfile, parameter) == 0){
+-		strncpy(imagefile2, __CONFPATH, BIG_STRING);	
+-		strcat(imagefile2, "/");
+-		strcat(imagefile2, char_param_value);
+-	}
+-	strncpy (parameter, "wprefs_cmd", MEDIUM_STRING);
+-	if (parse_from_config(&uint_param_value, char_param_value, configfile, parameter) == 0){
+-		strncpy(wprefs_cmd, char_param_value, BIG_STRING);
+-			strcat (wprefs_cmd, "&");
++
++	if (parse_from_config(char_param_value, configfile, "wprefs_icon") == 0){
++		g_strlcpy(imagefile1, char_param_value, BIG_STRING);
+ 	}
+-	
+-	strncpy (parameter, "text_color", MEDIUM_STRING);
+-	if (parse_from_config(&uint_param_value, char_param_value, configfile, parameter) == 0){
+-		strncpy(text_color, char_param_value, BIG_STRING);
++	if (parse_from_config(char_param_value, configfile, "halt_icon") == 0){
++		g_strlcpy(imagefile2, char_param_value, BIG_STRING);
+ 	}
+-	
+-	strncpy (parameter, "text_size", MEDIUM_STRING);
+-	if (parse_from_config(&uint_param_value, char_param_value, configfile, parameter) == 0){
+-		strncpy(text_size, char_param_value, BIG_STRING);
++	if (parse_from_config(char_param_value, configfile, "wprefs_cmd") == 0){
++		g_strlcpy(wprefs_cmd, char_param_value, BIG_STRING);
+ 	}
+ 
+-		
++
+ 	gtk_init(&argc, &argv);
+-	
++
+ 	mainwin = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+-	gtk_widget_realize(mainwin);
+-	
++
+ 	mainbox = create_main_dockapp_icon_window(mainwin, 54, argc, argv);
+-	
+-	table = gtk_table_new(2,2, TRUE);
++
++	table = gtk_grid_new();
++	gtk_grid_set_column_homogeneous(GTK_GRID(table), TRUE);
+ 
+ 	box1 = gtk_event_box_new ();
+ 	box2 = gtk_event_box_new ();
+-	clockbox = gtk_vbox_new (FALSE, 0);
+-	gtk_signal_connect (GTK_OBJECT(box1), "button_press_event", GTK_SIGNAL_FUNC(launchonclick), wprefs_cmd);
+-	gtk_signal_connect (GTK_OBJECT(box2), "button_press_event", GTK_SIGNAL_FUNC(launchdialog), "Shutdown or Reboot");
+-	
++	clockbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
++	g_signal_connect (box1, "button-press-event", G_CALLBACK(launchonclick), wprefs_cmd);
++	g_signal_connect (box2, "button-press-event", G_CALLBACK(launchdialog), "Shutdown or Reboot");
++
+ 	watchlabel = gtk_label_new(NULL);
++	gtk_label_set_justify (GTK_LABEL(watchlabel), GTK_JUSTIFY_CENTER);
+ 	draw_label(watchlabel);
+-	separator = gtk_hseparator_new ();	
+-	
+-	pixmap1 = (gpointer) gdk_pixmap_create_from_xpm (mainwin->window, &mask,
+-               	NULL, imagefile1);
+-        pixmap_widget1 = gtk_pixmap_new((gpointer) pixmap1, mask);
++	separator = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
++
++	pixmap_widget1 = load_icon(imagefile1);
+ 	gtk_container_add(GTK_CONTAINER(box1), pixmap_widget1);
+ 
+-	pixmap2 = (gpointer) gdk_pixmap_create_from_xpm (mainwin->window, &mask,
+-               	NULL, imagefile2);
+-        pixmap_widget2 = gtk_pixmap_new((gpointer) pixmap2, mask);
++	pixmap_widget2 = load_icon(imagefile2);
+ 	gtk_container_add(GTK_CONTAINER(box2), pixmap_widget2);
+-		
+-	gtk_table_attach_defaults(GTK_TABLE(table), clockbox, 0,2, 0,1);
+-	gtk_table_attach_defaults(GTK_TABLE(table), box1, 0,1, 1,2);
+-	gtk_table_attach_defaults(GTK_TABLE(table), box2, 1,2, 1,2);
+-	
+-	gtk_container_add (GTK_CONTAINER(mainwin), mainbox);	
++
++	gtk_grid_attach(GTK_GRID(table), clockbox, 0, 0, 2, 1);
++	gtk_grid_attach(GTK_GRID(table), box1, 0, 1, 1, 1);
++	gtk_grid_attach(GTK_GRID(table), box2, 1, 1, 1, 1);
++
+ 	gtk_container_add (GTK_CONTAINER (mainbox), table);
+-	gtk_container_add (GTK_CONTAINER (clockbox), watchlabel);
+-	gtk_container_add (GTK_CONTAINER (clockbox), separator);
+-	
+-	gtk_widget_show_all(mainwin);
+-	
+-	gtk_timeout_add( 1000 , draw_label, watchlabel );
+-	
++	gtk_box_pack_start (GTK_BOX (clockbox), watchlabel, TRUE, TRUE, 2);
++	gtk_box_pack_start (GTK_BOX (clockbox), separator, FALSE, FALSE, 0);
++
++	gtk_widget_show_all(mainbox);
++
++	g_timeout_add_seconds( 1 , draw_label, watchlabel );
++
+ 	gtk_main ();
+-	
++
+ 	return(0);
+ } // end main
+ 
+ 
+-// Function create_main_dockapp_icon_window (c) 2000, Alexey Vyskubov <alexey@pepper.spb.ru>
++// GTK3 dockapp window, based on wmpasman by Brad Jorsch (as used by
++// wmshutdown): GDK rewrites WM_HINTS when the window is mapped, so the
++// icon window hint is set while the main window is reparented away from
++// the root window. Replaces the GTK1 code (c) 2000 Alexey Vyskubov.
+ 
+ GtkWidget *create_main_dockapp_icon_window
+ 		(GtkWidget *mw,
+ 		unsigned int s,
+ 		int margc,
+-		char *margv[]) 
++		char *margv[])
+ {
+-	GtkWidget *dockappbox; // This will become icon box 
+-	Window xmw;
++	GtkWidget *dockappbox; // This will become icon box
++	GdkDisplay *display = gdk_display_get_default();
++	Display *d;
++	Window xmw, iw, w, p, dummy1, *dummy2;
++	unsigned int dummy3;
+ 	XWMHints *wm_hints;
+-	
+-	xmw = GDK_WINDOW_XWINDOW(mw->window);
+-	
+-	dockappbox = gtk_event_box_new();
+-	gtk_widget_set_usize(dockappbox, s, s);
+-	gtk_container_add (GTK_CONTAINER (mw), dockappbox);
++
++	dockappbox = gtk_window_new(GTK_WINDOW_POPUP);
++	gtk_window_set_wmclass(GTK_WINDOW(mw), g_get_prgname(), "DockApp");
++	gtk_widget_set_size_request(dockappbox, s, s);
++	gtk_widget_realize(mw);
+ 	gtk_widget_realize(dockappbox);
+-	
+-	// Time for game with Xlib 
+-	wm_hints = XAllocWMHints();
+-	wm_hints->window_group = xmw;
+-	wm_hints->icon_window = GDK_WINDOW_XWINDOW(dockappbox->window);
+-	wm_hints->icon_x = 0;
+-	wm_hints->icon_y = 0; 
+-	wm_hints->initial_state = WithdrawnState;
+-	wm_hints->flags = StateHint |
+-		IconPositionHint |
+-		WindowGroupHint |
+-		IconWindowHint;
+-	
+-	XSetWMHints(GDK_DISPLAY(), xmw, wm_hints);
+-	XSetCommand(GDK_DISPLAY(), xmw, margv, margc);
+-	
++
++	d = GDK_DISPLAY_XDISPLAY(display);
++	xmw = GDK_WINDOW_XID(gtk_widget_get_window(mw));
++	iw = GDK_WINDOW_XID(gtk_widget_get_window(dockappbox));
++	XQueryTree(d, xmw, &dummy1, &p, &dummy2, &dummy3);
++	if (dummy2)
++		XFree(dummy2);
++	w = XCreateSimpleWindow(d, p, 0, 0, 1, 1, 0, 0, 0);
++	XReparentWindow(d, xmw, w, 0, 0);
++	gtk_widget_show(mw);
++	gtk_widget_show(dockappbox);
++
++	// Time for game with Xlib
++	wm_hints = XGetWMHints(d, xmw);
++	if (!wm_hints)
++		wm_hints = XAllocWMHints();
++	wm_hints->flags |= IconWindowHint;
++	wm_hints->icon_window = iw;
++	XSetWMHints(d, xmw, wm_hints);
++	XSetCommand(d, xmw, margv, margc);
+ 	XFree(wm_hints);
+-	
++	XReparentWindow(d, xmw, p, 0, 0);
++	XDestroyWindow(d, w);
++
+ 	return dockappbox;
+ } // end create_main_dockapp_icon_window
+ 
+ 
+ // the function to execute command which is called when button is clicked ****************************
+-void launchonclick
+-		(GtkWidget *event_box, 
++gboolean launchonclick
++		(GtkWidget *event_box,
+ 		GdkEventButton *event,
+ 		gpointer data)
+ {
+ 	//fprintf(stderr, "data = %s", (char *) data);  //debug
+-	int output  = system((char *) data);
+-	if (output){
+-		fprintf(stderr, "error launching command in function \"launchonclick\"\n");
+-	}
+-	return;
++	if (event->button == 1 && event->type == GDK_BUTTON_PRESS)
++		run_command((char *) data);
++	return TRUE;
+ } // end launchonclick
+ 
+ 
+ 
+ // the function to parse the config file for parameters ****************************
++// char_value (BIG_STRING) receives everything after "param ="
+ int parse_from_config
+-		(u_int32_t 
+-		*uint_value, 
+-		char *char_value, 
+-		char *filename, 
++		(char *char_value,
++		char *filename,
+ 		char *param )
+ {
+-	int c;
+ 	FILE *file;
+-	char 	*sep, 
+-				*buffer, 
+-				*line, 
+-				*value,
+-				*arg1,
+-				*arg2;
+-	line = malloc(LONG_STRING); 
+-	buffer = malloc(MEDIUM_STRING); 
+-	sep = malloc(MEDIUM_STRING); 
+-	value = malloc(MEDIUM_STRING);
+-	arg1 = malloc(64);
+-	arg2 = malloc(64);
+-	c = 0;	
+-	
++	char	buffer[MEDIUM_STRING],
++		line[LONG_STRING],
++		*value,
++		*p;
++
+ 	if((file=fopen(filename, "rb")) == 0) {
+ 		fprintf (stderr,"Error opening file %s !\n",filename);
+ 		exit(EXIT_FAILURE);
+ 	}
+-	
++
+ 	while (fgets (line, LONG_STRING, file) !=NULL) {
+ 		if (strstr (line, "[") !=0) continue;
+ 		if (strstr (line, "#") !=0) continue;
+-		memset(char_value, 0, BIG_STRING);
+-		memset(arg1, 0, 64);
+-		memset(arg2, 0, 64);
+-		c = sscanf (line, "%s %s %s %s %s", buffer, sep, value, arg1, arg2); 
++		if (sscanf (line, "%127s", buffer) != 1) continue;
+ 		if (strncmp (param, buffer, MEDIUM_STRING) == 0) {
+-			strncat(char_value, value, 127);
+-			if (*arg1) {
+-				strcat(char_value, " ");
+-				strncat(char_value, arg1, 63);
+-			}
+-			if (*arg2) {
+-				strcat(char_value, " ");
+-				strncat(char_value, arg2, 63);
+-			}
+-			*uint_value = atoi(char_value);
++			value = strchr(line, '=');
++			value = value ? value + 1 : line + strlen(line);
++			while (*value == ' ' || *value == '\t') value++;
++			g_strlcpy(char_value, value, BIG_STRING);
++			if ((p = strchr(char_value, '\n')))
++				*p = '\0';
+ 			fclose (file);
+ 			return(EXIT_SUCCESS);
+-		}	
++		}
+ 	}
+ 	fclose (file);
+ 	return(EXIT_FAILURE);
+@@ -332,87 +320,83 @@ int usage(void) {
+ 					"\t  [-c] choose 1 of the default configfiles\n"
+ 					"\t  [-h] display this help\n"
+ 					"\t  [-p] use this switch to enable custom path to your own configfile\n"
+-					"( default minicontrol.cf file is located in /usr/share/minicontrol/ )\n");
++					"( default minicontrol.cf file is located in " __CONFPATH "/ )\n");
+ 	return(EXIT_SUCCESS);
+ } // end usage
+ 
+ // does what it tells
+-int getclocktime(char *clockstring){
+-	long clock;
++int getclocktime(char *clockstring, size_t len){
++	time_t clock;
+ 	struct tm *clk;
+ 
+ 	time(&clock);
+ 	clk=localtime (&clock);
+-	sprintf (clockstring, "%02d:%02d", clk->tm_hour, clk->tm_min);
++	snprintf (clockstring, len, "%02d:%02d", clk->tm_hour, clk->tm_min);
+ return(EXIT_SUCCESS);
+ } // end getclocktime
+ 
+ 
+ // recalculate time and *watchlabel every second
+-gint draw_label( gpointer data ){
+-	while (gtk_events_pending()) gtk_main_iteration();	
++gboolean draw_label( gpointer data ){
+ 	GtkLabel *label = (GtkLabel *)data;
+-	char *string;
+-	string = malloc(BIG_STRING);
+-	getclocktime(string);
+-		//fprintf(stderr, clocklabel2);
+-	gtk_label_set_text( label, (char *) string);
+-	gtk_label_set_justify (GTK_LABEL(label), GTK_JUSTIFY_CENTER);
++	char string[SHORT_STRING];
++	getclocktime(string, sizeof(string));
++	if (strcmp(gtk_label_get_text(label), string) != 0)
++		gtk_label_set_text( label, string);
+ return TRUE;
+ }
+ 
+ 
+ 
++static void dialog_run_command (GtkWidget *button, gpointer data){
++	run_command((char *) data);
++	gtk_widget_destroy (gtk_widget_get_toplevel (button));
++}
++
+ // dialog popup to choose action Reboot Halt Cancel
+-void launchdialog
+-		(GtkWidget *parent, 
++gboolean launchdialog
++		(GtkWidget *parent,
+ 		GdkEventButton *event,
+ 		gpointer data)
+ {
+ 	GtkWidget *dialog;
+ 	GtkWidget *table;
+ 	GtkWidget *button1, *button2, *button3;
+-   	char	*halt_cmd,
+-		*reboot_cmd;
+-	halt_cmd = malloc(BIG_STRING);
+-	reboot_cmd = malloc(BIG_STRING);
+-	
++	static char	halt_cmd[BIG_STRING],
++			reboot_cmd[BIG_STRING];
++
++	if (event->button != 1 || event->type != GDK_BUTTON_PRESS)
++		return FALSE;
++
+ 	// Here we parse the configfile
+-	strncpy (parameter, "halt_cmd", MEDIUM_STRING);
+-	if (parse_from_config(&uint_param_value, char_param_value, configfile, parameter) == 0){
+-		strncpy(halt_cmd, char_param_value, BIG_STRING);
+-		strcat (halt_cmd, "&");
+-	}
+-	strncpy (parameter, "reboot_cmd", MEDIUM_STRING);
+-	if (parse_from_config(&uint_param_value, char_param_value, configfile, parameter) == 0){
+-		strncpy(reboot_cmd, char_param_value, BIG_STRING);
+-		strcat (reboot_cmd, "&");
+-	}
+-	
++	halt_cmd[0] = reboot_cmd[0] = '\0';
++	parse_from_config(halt_cmd, configfile, "halt_cmd");
++	parse_from_config(reboot_cmd, configfile, "reboot_cmd");
++
+ 	dialog = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+ 	gtk_window_set_title (GTK_WINDOW (dialog), "Really exit?");
++	gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER);
+ 	gtk_container_set_border_width (GTK_CONTAINER (dialog), 5);
+-	gtk_widget_realize(dialog);
+-	
+-	table = gtk_table_new(3,1, FALSE);
+-	gtk_table_set_row_spacings(GTK_TABLE(table), 5);
+-	gtk_table_set_col_spacings(GTK_TABLE(table), 5);
+-	 
++
++	table = gtk_grid_new();
++	gtk_grid_set_row_spacing(GTK_GRID(table), 5);
++	gtk_grid_set_column_spacing(GTK_GRID(table), 5);
++
+ 	button1 = gtk_button_new_with_label ("Shutdown");
+-	button2 = gtk_button_new_with_label ("  Reboot  ");
+-	button3 = gtk_button_new_with_label ("  Cancel  ");
+-	
+-	gtk_table_attach_defaults(GTK_TABLE(table), button1, 0,1, 0,1);
+-	gtk_table_attach_defaults(GTK_TABLE(table), button2, 1,2, 0,1);
+-	gtk_table_attach_defaults(GTK_TABLE(table), button3, 2,3, 0,1);
+-	
+-	gtk_signal_connect (GTK_OBJECT(button1), "button_press_event", GTK_SIGNAL_FUNC(launchonclick), halt_cmd);
+-	gtk_signal_connect (GTK_OBJECT(button2), "button_press_event", GTK_SIGNAL_FUNC(launchonclick), reboot_cmd);
+-    	gtk_signal_connect (GTK_OBJECT(button3), "clicked", GTK_SIGNAL_FUNC(exitwidget), dialog);
+-	
++	button2 = gtk_button_new_with_label ("Reboot");
++	button3 = gtk_button_new_with_label ("Cancel");
++
++	gtk_grid_attach(GTK_GRID(table), button1, 0, 0, 1, 1);
++	gtk_grid_attach(GTK_GRID(table), button2, 1, 0, 1, 1);
++	gtk_grid_attach(GTK_GRID(table), button3, 2, 0, 1, 1);
++
++	g_signal_connect (button1, "clicked", G_CALLBACK(dialog_run_command), halt_cmd);
++	g_signal_connect (button2, "clicked", G_CALLBACK(dialog_run_command), reboot_cmd);
++	g_signal_connect (button3, "clicked", G_CALLBACK(exitwidget), dialog);
++
+ 	gtk_container_add (GTK_CONTAINER (dialog), table);
+ 	gtk_widget_show_all (dialog);
+-   return;
++	return TRUE;
+ 
+ 
+ } // end launchdialog
+@@ -421,5 +405,3 @@ void exitwidget (GtkWidget *wgt, gpointer data){
+ 	gtk_widget_destroy (GTK_WIDGET(data));
+ 	return;
+ } // end exitwidget
+-
+-

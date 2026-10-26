@@ -1,0 +1,14 @@
+# Config file for minicontrol : set commands with their respective icon
+# (a 24x24 image in /usr/share/minicontrol, an absolute path or an icon theme name)
+
+[WPREFS]
+wprefs_cmd = WPrefs
+wprefs_icon = wprefs24.xpm
+
+[HALT]
+halt_cmd = systemctl poweroff
+halt_icon = exit.xpm
+
+[REBOOT]
+reboot_cmd = systemctl reboot
+reboot_icon = halt24.xpm

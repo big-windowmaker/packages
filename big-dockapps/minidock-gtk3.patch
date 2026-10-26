@@ -1,0 +1,558 @@
+minidock: porta para GTK 3
+
+O GTK 2 não está mais nos repositórios do Manjaro. Usa a técnica de dockapp
+GTK 3 do wmpasman (a mesma do wmshutdown), GtkGrid e g_spawn_async. Corrige
+também: o processo filho do fork() voltava para o loop do GTK, a string de
+formato em fprintf(file, bigbuffer), estouros de buffer nos caminhos e o
+memset(value, 0, sizeof(value)) com ponteiro. O ícone pode ser nome do tema
+ou caminho absoluto; a troca de ícone atualiza o botão sem recriar a janela.
+O Makefile usa pkg-config, CFLAGS/LDFLAGS do ambiente e não faz strip.
+
+Upstream: minidock 1.9 (zenwalk.org), sem manutenção; sem PR.
+
+diff --git a/Makefile b/Makefile
+index 75dfc86..df58ff5 100755
+--- a/Makefile
++++ b/Makefile
+@@ -23,22 +23,19 @@ CONFIGPATH = $(DESTDIR)$(CONFDIR)
+ CONFIGFILE = default.cf
+ DEFINE = -D_REENTRANT -D__CONFPATH='"$(CONFDIR)"' -D__CONFFILE='"$(CONFIGFILE)"' -D__ICONPATH='"$(PREFIX)$(SHAREDIR)"'
+ 
+-GTK_CFLAGS = -I/usr/include/gtk-2.0 -I/usr/lib/gtk-2.0/include -I/usr/include/atk-1.0 -I/usr/include/cairo -I/usr/include/pango-1.0 -I/usr/include/glib-2.0 -I/usr/lib/glib-2.0/include  
+-GTK_LIBS = -lgtk-x11-2.0 -latk-1.0 -lgdk-x11-2.0 -lgdk_pixbuf-2.0 -lm -lpangocairo-1.0 -lpango-1.0 -lcairo -lgobject-2.0 -lgmodule-2.0 -ldl -lglib-2.0  
+-CFLAGS = -Wall -O2 -march=i486 -mtune=i686
++GTK_CFLAGS = $(shell pkg-config --cflags gtk+-3.0 x11)
++GTK_LIBS = $(shell pkg-config --libs gtk+-3.0 x11)
++CFLAGS ?= -Wall -O2
+ 
+ CFLAGS += $(GTK_CFLAGS)
+ 
+ $(BIN) : $(SRC)
+-	gcc $(CFLAGS) $(GTK_LIBS) $(DEFINE) -o $(BIN) $(SRC)
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(DEFINE) -o $(BIN) $(SRC) $(LDFLAGS) $(GTK_LIBS)
+ 
+ 
+-install : $(BIN) path
+-	chmod 755 $(SRCPATH)/$(BIN)
+-	chmod 666 $(SRCPATH)/conf/*.cf
+-	strip $(SRCPATH)/$(BIN)
+-	cp -pf $(SRCPATH)/$(BIN) $(BINPATH)/
+-	cp -pf $(SRCPATH)/conf/*.cf $(CONFIGPATH)/
++install : $(BIN)
++	install -Dm755 $(SRCPATH)/$(BIN) $(BINPATH)/$(BIN)
++	install -Dm644 $(SRCPATH)/conf/$(CONFIGFILE) $(CONFIGPATH)/$(CONFIGFILE)
+ 
+ 
+ uninstall : $(BINPATH)/$(BIN)
+diff --git a/minidock.c b/minidock.c
+index 017d2ca..9fdf553 100755
+--- a/minidock.c
++++ b/minidock.c
+@@ -35,22 +35,13 @@ int main( int argc, char *argv[] ) {
+ 
+ // Here we parse command line args and configfile *******************************************************************
+ 
+-	char defaultcf[128];
++	char defaultcf[CONFPATH_MAX];
+ 	char *configfile = NULL;
+-	char homecf[128];
+-	char *homedir = NULL;
+-	
+-	strncpy(defaultcf, __CONFPATH, sizeof(defaultcf));	
+-	strcat(defaultcf, "/");	
+-	strcat(defaultcf, __CONFFILE);	
+-	
+-	homedir = getenv("HOME");
+-	
+-	strncpy(homecf, homedir, sizeof(homecf));
+-	strcat(homecf, "/");	
+-	strcat(homecf, ".minidock.cf");
++	char homecf[CONFPATH_MAX];
++	const char *homedir = g_get_home_dir();
+ 
+-	gtk_set_locale ();
++	snprintf(defaultcf, sizeof(defaultcf), "%s/%s", __CONFPATH, __CONFFILE);
++	snprintf(homecf, sizeof(homecf), "%s/.minidock.cf", homedir);
+ 
+ 	int test1, test2;
+ 	if ((test1 = access(homecf, F_OK)) == -1){
+@@ -58,12 +49,11 @@ int main( int argc, char *argv[] ) {
+ 			fprintf(stderr,"Error creating config file %s !\n",homecf);
+ 		}
+ 	}
+-	
++
+ 	int i;
+-	
+-	if (argc < 2){
+-		configfile = homecf;
+-	}else{
++
++	configfile = homecf;
++	if (argc >= 2){
+ 		while ((i = getopt(argc, argv, "hc:")) != EOF){
+ 			switch (i){
+ 				case 'c': /* config file */
+@@ -92,10 +82,10 @@ int main( int argc, char *argv[] ) {
+ 	strncpy (minidock3->param_cmd, "command3", 128);
+ 	strncpy (minidock4->param_icon, "icon4", 128);
+ 	strncpy (minidock4->param_cmd, "command4", 128);
+-	strncpy (minidock1->configfile, configfile, 128);
+-	strncpy (minidock2->configfile, configfile, 128);
+-	strncpy (minidock3->configfile, configfile, 128);
+-	strncpy (minidock4->configfile, configfile, 128);	
++	g_strlcpy (minidock1->configfile, configfile, sizeof(minidock1->configfile));
++	g_strlcpy (minidock2->configfile, configfile, sizeof(minidock2->configfile));
++	g_strlcpy (minidock3->configfile, configfile, sizeof(minidock3->configfile));
++	g_strlcpy (minidock4->configfile, configfile, sizeof(minidock4->configfile));
+ 					
+ 	gtk_init(&argc, &argv);
+ 	dockapp = (GtkWidget *) build_dockapp(configfile);
+@@ -116,99 +106,103 @@ int main( int argc, char *argv[] ) {
+ 		return FALSE;
+ 	}
+ 
++/* GTK3 dockapp window, based on wmpasman by Brad Jorsch (as used by
++ * wmshutdown): GDK rewrites WM_HINTS when the window is mapped, so the
++ * icon window hint is set while the main window is reparented away from
++ * the root window. */
++static GtkWidget *create_dock_icon_window(GtkWidget *mw, int size)
++{
++	GdkDisplay *display = gdk_display_get_default();
++	GtkWidget *iconwin = gtk_window_new(GTK_WINDOW_POPUP);
++	Display *d;
++	Window mainwin, iw, w, p, dummy1, *dummy2;
++	unsigned int dummy3;
++	XWMHints *wm_hints;
++
++	gtk_window_set_wmclass(GTK_WINDOW(mw), g_get_prgname(), "DockApp");
++	gtk_widget_set_size_request(iconwin, size, size);
++	gtk_widget_realize(mw);
++	gtk_widget_realize(iconwin);
++
++	d = GDK_DISPLAY_XDISPLAY(display);
++	mainwin = GDK_WINDOW_XID(gtk_widget_get_window(mw));
++	iw = GDK_WINDOW_XID(gtk_widget_get_window(iconwin));
++	XQueryTree(d, mainwin, &dummy1, &p, &dummy2, &dummy3);
++	if (dummy2)
++		XFree(dummy2);
++	w = XCreateSimpleWindow(d, p, 0, 0, 1, 1, 0, 0, 0);
++	XReparentWindow(d, mainwin, w, 0, 0);
++	gtk_widget_show(mw);
++	gtk_widget_show(iconwin);
++	wm_hints = XGetWMHints(d, mainwin);
++	if (!wm_hints)
++		wm_hints = XAllocWMHints();
++	wm_hints->flags |= IconWindowHint;
++	wm_hints->icon_window = iw;
++	XSetWMHints(d, mainwin, wm_hints);
++	XFree(wm_hints);
++	XReparentWindow(d, mainwin, p, 0, 0);
++	XDestroyWindow(d, w);
++
++	return iconwin;
++}
++
++/* icon = absolute path to an image file, or a name from the icon theme */
++static void set_icon(struct minidock *data)
++{
++	GtkIconTheme *icon_theme = gtk_icon_theme_get_default();
++	GdkPixbuf *pixbuf = NULL;
++
++	if (data->icon[0] == '/')
++		pixbuf = gdk_pixbuf_new_from_file_at_size(data->icon, 24, 24, NULL);
++	else if (data->icon[0])
++		pixbuf = gtk_icon_theme_load_icon(icon_theme, data->icon, 24,
++				GTK_ICON_LOOKUP_FORCE_SIZE, NULL);
++	if (!pixbuf)
++		pixbuf = gtk_icon_theme_load_icon(icon_theme, "image-missing", 24,
++				GTK_ICON_LOOKUP_FORCE_SIZE, NULL);
++
++	gtk_image_set_from_pixbuf(GTK_IMAGE(data->image), pixbuf);
++	if (pixbuf)
++		g_object_unref(pixbuf);
++}
++
+ GtkWidget * build_dockapp(char *configfile) {
+ 	GtkWidget *mainwin;
+-	Window xmw;
+-	XWMHints *wm_hints;
+ 	GtkWidget *mainbox;
+ 	GtkWidget *table;
+-	GtkWidget *box1, *box2, *box3, *box4;
+-	GdkPixbuf *pixbuf1,*pixbuf2,*pixbuf3,*pixbuf4;
+-	GtkWidget *pixmap_widget1,*pixmap_widget2,*pixmap_widget3,*pixmap_widget4;
+-	GtkIconTheme *icon_theme;
+-	icon_theme = gtk_icon_theme_get_default();	
++	struct minidock *buttons[4] = { minidock1, minidock2, minidock3, minidock4 };
++	int n;
+ 
+-	
+-	parse_from_config(minidock1->configfile, minidock1->param_icon, minidock1->icon);
+-	parse_from_config(minidock1->configfile, minidock1->param_cmd, minidock1->command);
+-	
+-	parse_from_config(minidock2->configfile, minidock2->param_icon, minidock2->icon);
+-	parse_from_config(minidock2->configfile, minidock2->param_cmd, minidock2->command);
+-	
+-	parse_from_config(minidock3->configfile, minidock3->param_icon, minidock3->icon);
+-	parse_from_config(minidock3->configfile, minidock3->param_cmd, minidock3->command);
+-	
+-	parse_from_config(minidock4->configfile, minidock4->param_icon, minidock4->icon);
+-	parse_from_config(minidock4->configfile, minidock4->param_cmd, minidock4->command);
+-	
+ 	// GTK stuff *******************************************************************
+ 
+ 	mainwin = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+ 
+-	mainbox = gtk_event_box_new();
+-	gtk_widget_set_usize(mainbox, 52, 52);
+-	gtk_container_add (GTK_CONTAINER (mainwin), mainbox);
+-	
+ 	/* Set up the event handler */
+-	gtk_signal_connect(GTK_OBJECT(mainwin),
+-		"delete_event",
+-		GTK_SIGNAL_FUNC(window_closed),
+-		NULL);
+-	
+-	table = gtk_table_new(2,2, TRUE);
+-	
+-	box1 = gtk_event_box_new();
+-	pixbuf1 = gtk_icon_theme_load_icon (icon_theme, minidock1->icon, 24, 0, NULL);
+-	pixmap_widget1 = gtk_image_new_from_pixbuf(pixbuf1);
+-	gtk_container_add(GTK_CONTAINER(box1), pixmap_widget1);
+-
+-	box2 = gtk_event_box_new();
+-	pixbuf2 = gtk_icon_theme_load_icon (icon_theme, minidock2->icon, 24, 0, NULL);
+-	pixmap_widget2 = gtk_image_new_from_pixbuf(pixbuf2);
+-	gtk_container_add(GTK_CONTAINER(box2), pixmap_widget2);
+-
+-	box3 = gtk_event_box_new();
+-	pixbuf3 = gtk_icon_theme_load_icon (icon_theme, minidock3->icon, 24, 0, NULL);
+-	pixmap_widget3 = gtk_image_new_from_pixbuf(pixbuf3);
+-	gtk_container_add(GTK_CONTAINER(box3), pixmap_widget3);
+-	
+-	box4 = gtk_event_box_new();
+-	pixbuf4 = gtk_icon_theme_load_icon (icon_theme, minidock4->icon, 24, 0, NULL);
+-	pixmap_widget4 = gtk_image_new_from_pixbuf(pixbuf4);
+-	gtk_container_add(GTK_CONTAINER(box4), pixmap_widget4);
+-	
+-	
++	g_signal_connect(mainwin, "delete-event", G_CALLBACK(window_closed), NULL);
++
++	mainbox = create_dock_icon_window(mainwin, 52);
++
++	table = gtk_grid_new();
++	gtk_grid_set_row_homogeneous(GTK_GRID(table), TRUE);
++	gtk_grid_set_column_homogeneous(GTK_GRID(table), TRUE);
+ 	gtk_container_add (GTK_CONTAINER (mainbox), table);
+-	
+-	gtk_table_attach_defaults(GTK_TABLE(table), box1, 0,1, 0,1);
+-	gtk_table_attach_defaults(GTK_TABLE(table), box2, 1,2, 0,1);
+-	gtk_table_attach_defaults(GTK_TABLE(table), box3, 0,1, 1,2);
+-	gtk_table_attach_defaults(GTK_TABLE(table), box4, 1,2, 1,2);
+-
+-	gtk_signal_connect (GTK_OBJECT(box1), "button_press_event", GTK_SIGNAL_FUNC(launchonclick), minidock1);
+-	gtk_signal_connect (GTK_OBJECT(box2), "button_press_event", GTK_SIGNAL_FUNC(launchonclick), minidock2);
+-	gtk_signal_connect (GTK_OBJECT(box3), "button_press_event", GTK_SIGNAL_FUNC(launchonclick), minidock3);
+-	gtk_signal_connect (GTK_OBJECT(box4), "button_press_event", GTK_SIGNAL_FUNC(launchonclick), minidock4);
+-	
+-	gtk_widget_show_all (mainwin);
+-	
+-	// Make it a dockapp
+-	xmw = GDK_WINDOW_XWINDOW(mainwin->window);
+-
+-	wm_hints = XAllocWMHints();
+-	wm_hints->window_group = xmw;
+-	wm_hints->icon_window = GDK_WINDOW_XWINDOW(mainbox->window);
+-	wm_hints->icon_x = 0;
+-	wm_hints->icon_y = 0; 
+-	wm_hints->initial_state = WithdrawnState;
+-	wm_hints->flags = StateHint |
+-		IconPositionHint |
+-		WindowGroupHint |
+-		IconWindowHint;
+-	
+-	XSetWMHints(GDK_DISPLAY(), xmw, wm_hints);
+-	
+-	XFree(wm_hints);
++
++	for (n = 0; n < 4; n++) {
++		GtkWidget *box = gtk_event_box_new();
++
++		parse_from_config(buttons[n]->configfile, buttons[n]->param_icon, buttons[n]->icon);
++		parse_from_config(buttons[n]->configfile, buttons[n]->param_cmd, buttons[n]->command);
++
++		buttons[n]->image = gtk_image_new();
++		set_icon(buttons[n]);
++		gtk_container_add(GTK_CONTAINER(box), buttons[n]->image);
++		gtk_grid_attach(GTK_GRID(table), box, n % 2, n / 2, 1, 1);
++		g_signal_connect(box, "button-press-event", G_CALLBACK(launchonclick), buttons[n]);
++	}
++
++	gtk_widget_show_all (mainbox);
++
+ 	return mainwin;
+ 
+ }
+@@ -219,103 +213,95 @@ GtkWidget * build_dockapp(char *configfile) {
+ /* the function to execute command when left button is clicked *************************************
+ 	or change the command and pixmap icon when right button is 2-clicked */
+ 
+-void launchonclick
+-		(GtkWidget *event_box, 
++gboolean launchonclick
++		(GtkWidget *event_box,
+ 		GdkEventButton *event,
+ 		struct minidock *data)
+ {
+-		pid_t pid, w;
+-		int status;
+ 		/* left button of mouse is clicked */
+-        if(event->button == 1){
+-			pid = fork();
+-			if (pid == 0) {
+-				if (system (data->command)){
+-					fprintf(stderr,"Unable to launch command %s", data->command); 
+-				}
+-			} else if (pid < 0) {
+-				perror ("Unable to fork");   
+-			} else if (pid > 0) {
+-				w = waitpid(pid, &status, WNOHANG);
+-
++        if(event->button == 1 && event->type == GDK_BUTTON_PRESS){
++			/* run through the shell, like system() did, but without
++			 * blocking the dockapp; GLib reaps the child */
++			gchar *argv[] = { "/bin/sh", "-c", data->command, NULL };
++			GError *error = NULL;
++
++			if (data->command[0] &&
++			    !g_spawn_async(NULL, argv, NULL, G_SPAWN_DEFAULT,
++					   NULL, NULL, NULL, &error)) {
++				fprintf(stderr,"Unable to launch command %s: %s\n",
++					data->command, error->message);
++				g_error_free(error);
+ 			}
+ 
+-			return;
++			return TRUE;
+        }
+-	   
++
+ 	   /* right button of mouse is 2-clicked */
+         if(event->button == 3)
+         {
+ 			if(event->type == GDK_2BUTTON_PRESS){
+-			
++
+ 				/* create a new text entry window for entering the new command */
+ 				GtkWidget *dialog;
+ 				GtkWidget *button;
+ 				GtkWidget *entry1, *entry2;
+-				
++				GtkWidget *content;
++
+ 				// window parameters
+ 				dialog = gtk_dialog_new();
+ 				gtk_window_set_title (GTK_WINDOW (dialog), "command & icon");
+-				gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER); 
++				gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER);
+ 				gtk_window_resize (GTK_WINDOW (dialog), 250, 50);
+-				
++
+ 				// entry box parameters
+ 				entry1 = gtk_entry_new ();
+ 				entry2 = gtk_entry_new ();
+ 				gtk_entry_set_has_frame (GTK_ENTRY (entry1), TRUE);
+ 				gtk_entry_set_has_frame (GTK_ENTRY (entry2), TRUE);
+-				gtk_entry_set_max_length (GTK_ENTRY (entry1), 128);
+-				gtk_entry_set_max_length (GTK_ENTRY (entry2), 128);
++				gtk_entry_set_max_length (GTK_ENTRY (entry1), 127);
++				gtk_entry_set_max_length (GTK_ENTRY (entry2), 127);
+ 				gtk_entry_set_activates_default (GTK_ENTRY (entry1), TRUE);
+ 				gtk_entry_set_activates_default (GTK_ENTRY (entry2), TRUE);
+-				
+-				gtk_signal_connect (GTK_OBJECT (entry1), "changed", GTK_SIGNAL_FUNC (enter_callback1), data);
+-				gtk_signal_connect (GTK_OBJECT (entry2), "changed", GTK_SIGNAL_FUNC (enter_callback2), data);
+-				
++
++				g_signal_connect (entry1, "changed", G_CALLBACK (enter_callback1), data);
++				g_signal_connect (entry2, "changed", G_CALLBACK (enter_callback2), data);
++
+ 				gtk_entry_set_text (GTK_ENTRY (entry1), data->command);
+ 				gtk_entry_set_text (GTK_ENTRY (entry2), data->icon);
+ 				gtk_editable_set_editable (GTK_EDITABLE (entry1), TRUE);
+ 				gtk_entry_set_visibility (GTK_ENTRY (entry1), TRUE);
+ 				gtk_editable_set_editable (GTK_EDITABLE (entry2), TRUE);
+ 				gtk_entry_set_visibility (GTK_ENTRY (entry2), TRUE);
+-				
++
+ 				// button parameters
+-				button = gtk_button_new_from_stock("gtk-ok");
+-				GTK_WIDGET_SET_FLAGS (button, GTK_CAN_DEFAULT);
+-				gtk_signal_connect (GTK_OBJECT (button), "clicked", GTK_SIGNAL_FUNC (close_callback), data);
+-				
+-				gtk_container_set_border_width (GTK_CONTAINER (GTK_DIALOG (dialog)->vbox), 5);
+-				gtk_container_add (GTK_CONTAINER (GTK_DIALOG (dialog)->action_area), button);
+-				gtk_container_add (GTK_CONTAINER (GTK_DIALOG (dialog)->vbox), entry1);
+-				gtk_container_add (GTK_CONTAINER (GTK_DIALOG (dialog)->vbox), entry2);
++				button = gtk_dialog_add_button (GTK_DIALOG (dialog), "_OK", GTK_RESPONSE_OK);
++				gtk_widget_set_can_default (button, TRUE);
++				g_signal_connect (button, "clicked", G_CALLBACK (close_callback), data);
++
++				content = gtk_dialog_get_content_area (GTK_DIALOG (dialog));
++				gtk_container_set_border_width (GTK_CONTAINER (content), 5);
++				gtk_container_add (GTK_CONTAINER (content), entry1);
++				gtk_container_add (GTK_CONTAINER (content), entry2);
+ 				gtk_window_set_default(GTK_WINDOW (dialog), button);
+ 				gtk_widget_show_all(dialog);
+ 
+-				return;
++				return TRUE;
+ 			}
+        	}
+-} 
++		return FALSE;
++}
+ 
+ 
+ /* some callback to handle change of values in entry boxes************************* */
+ void enter_callback1( 
+ 			GtkWidget *entry,
+ 			struct minidock *data){
+-  	char entry_text[sizeof(data->command)];
+-	memset(entry_text, 0, sizeof(entry_text));
+-  	strncpy (entry_text, gtk_entry_get_text (GTK_ENTRY (entry)), sizeof(entry_text));
+-	memset(data->command, 0, sizeof(data->command));
+-	strncpy (data->command, entry_text, sizeof(data->command));
+-	
++	g_strlcpy (data->command, gtk_entry_get_text (GTK_ENTRY (entry)), sizeof(data->command));
+ }
+-void enter_callback2( 
++void enter_callback2(
+ 			GtkWidget *entry,
+ 			struct minidock *data){
+-  	char entry_text[sizeof(data->icon)];
+-	memset(entry_text, 0, sizeof(entry_text));
+-  	strncpy (entry_text, gtk_entry_get_text (GTK_ENTRY (entry)), sizeof(entry_text));
+-	memset(data->icon, 0, sizeof(data->icon));
+-	strncpy (data->icon, entry_text, sizeof(data->icon));	
++	g_strlcpy (data->icon, gtk_entry_get_text (GTK_ENTRY (entry)), sizeof(data->icon));
+ }
+ 
+ void close_callback( 
+@@ -327,8 +313,9 @@ void close_callback(
+ 	replace_value_in_config(data->configfile, data->param_icon, data->icon);
+ 	parent = gtk_widget_get_ancestor(entry, GTK_TYPE_WINDOW); 
+ 	gtk_widget_destroy(parent);
+-	gtk_widget_destroy(dockapp);
+-	dockapp = (GtkWidget *) build_dockapp(data->configfile);
++	/* update the button in place: recreating the dockapp window would
++	 * make Window Maker drop it from the dock */
++	set_icon(data);
+ }
+ 
+ 
+@@ -354,12 +341,15 @@ int parse_from_config
+ 		if (strstr (line, "[") !=0) continue;
+ 		if (strstr (line, "#") !=0) continue;
+ 		memset(val, 0, sizeof(val));
+-		c = sscanf (line, "%s %s %s", buffer, sep, val); 
++		c = sscanf (line, "%127s %15s %127s", buffer, sep, val);
++		if (c < 2) continue;
+ 
+ 		if (strncmp (param, buffer, sizeof(buffer)) == 0) {
+-			memset(value, 0, sizeof(value));
+-
+-			strncpy(value,line + strlen(buffer) + strlen(sep) +2, 128);
++			/* value = everything after "param =" (may contain spaces) */
++			char *v = strchr (line, '=');
++			v = v ? v + 1 : line + strlen(line);
++			while (*v == ' ' || *v == '\t') v++;
++			g_strlcpy(value, v, 128);
+ 			//fprintf(stderr,"%s\n", value);
+ 			char *p = strchr (value, '\n');
+    			if (p){
+@@ -383,29 +373,26 @@ int replace_value_in_config
+ {
+ 	int c = 0;
+ 	FILE *file;
+-	char 	bigbuffer[4096], 
+-		sep[16], 
+-		buffer[128], 
+-		line[1024], 
++	GString *bigbuffer;
++	char 	sep[16],
++		buffer[128],
++		line[1024],
+ 		old_value[128];
+-	
++
+ 	if((file=fopen(filename, "rb")) == 0) {
+ 		fprintf (stderr,"Error opening file %s !\n",filename);
+ 		exit(EXIT_FAILURE);
+ 	}
+-	
+-	memset(bigbuffer, 0, sizeof(bigbuffer));
++
++	bigbuffer = g_string_new(NULL);
+ 	while (fgets (line, sizeof(line), file) !=NULL) {
+ 		memset(buffer, 0, sizeof(buffer));
+-		c = sscanf (line, "%s %s %s\n", buffer, sep, old_value); 
+-
+-		if (strncmp (param, buffer, sizeof(buffer)) == 0) {
+-			memset(line, 0, sizeof(line));
+-			sprintf(line, "%s %s %s\n", buffer, sep, new_value);
++		c = sscanf (line, "%127s %15s %127s", buffer, sep, old_value);
+ 
++		if (c >= 2 && strncmp (param, buffer, sizeof(buffer)) == 0) {
++			snprintf(line, sizeof(line), "%s %s %s\n", buffer, sep, new_value);
+ 		}
+-		strncat (bigbuffer, line, sizeof(line)); 
+-		memset(line, 0, sizeof(line));
++		g_string_append (bigbuffer, line);
+ 	}
+ 	fclose (file);
+ 
+@@ -413,10 +400,10 @@ int replace_value_in_config
+ 		fprintf (stderr,"Error opening file %s !\n",filename);
+ 		exit(EXIT_FAILURE);
+ 	}
+-	fprintf(file,bigbuffer);
++	fputs(bigbuffer->str, file);
+ 	fclose (file);
+-	memset(bigbuffer, 0, sizeof(bigbuffer));
+-	
++	g_string_free(bigbuffer, TRUE);
++
+ return(EXIT_SUCCESS);
+ } // end replace_value_in_config *************************************************************************
+ 
+diff --git a/minidock.h b/minidock.h
+index ea192ef..8ca5ab1 100755
+--- a/minidock.h
++++ b/minidock.h
+@@ -15,19 +15,22 @@
+ #endif
+ 
+ 
++#define CONFPATH_MAX 4096
++
+ // Prototypes ************************************************************
+ 
+ struct minidock {
+-	char configfile[128];
++	char configfile[CONFPATH_MAX];
+ 	char param_cmd[128];
+ 	char command[128];
+ 	char param_icon[128];
+ 	char icon[128];
++	GtkWidget *image;
+ };
+ 
+ GtkWidget * build_dockapp(char *configfile);
+ 
+-void launchonclick
++gboolean launchonclick
+ 		(GtkWidget *event_box, 
+ 		GdkEventButton *event,
+ 		struct minidock *data);

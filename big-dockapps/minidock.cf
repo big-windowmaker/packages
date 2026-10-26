@@ -1,0 +1,18 @@
+# Config file for minidock : set 4 commands with their respective icon
+# (an icon theme name, or the absolute path of an image file)
+
+[Terminal]
+command1 = big-wm-open terminal
+icon1 = utilities-terminal
+
+[File manager]
+command2 = big-wm-open files
+icon2 = system-file-manager
+
+[Web navigator]
+command3 = big-wm-open browser
+icon3 = web-browser
+
+[Applications]
+command4 = big-wm-open apps
+icon4 = system-run
