@@ -9,7 +9,7 @@ os patches.
 |---|---|---|---|
 | [`windowmaker/`](windowmaker/PKGBUILD) | `windowmaker` | `0.96.0.r130.g558e67f` | `master` do [window-maker/wmaker](https://github.com/window-maker/wmaker) fixado no commit `558e67f`. Substitui o `extra/windowmaker 0.96.0`. |
 | [`wlmaker/`](wlmaker/PKGBUILD) | `wlmaker` | `0.8.1` | Tag `v0.8.1` (branch-0.8) do [phkaeser/wlmaker](https://github.com/phkaeser/wlmaker), com XWayland, contra `wlroots0.20`. |
-| [`big-dockapps/`](big-dockapps/PKGBUILD) | `libdockapp`, `wmcpuload`, `wmbattery`, `wmusic`, `wmshutdown`, `wmmoonclock`, `wmcube`, `wmudmount`, `wmnet` | `20260412` | [window-maker/dockapps](https://github.com/window-maker/dockapps) fixado no commit `251e851`; `wmudmount` vem do tarball 3.0 do SourceForge. |
+| [`big-dockapps/`](big-dockapps/PKGBUILD) | `libdockapp`, `wmcpuload`, `wmbattery`, `wmusic`, `wmshutdown`, `wmmoonclock`, `wmcube`, `wmudmount`, `wmnet`, `wmclock`, `wmmemload`, `wmsystemtray` | `20260412` | [window-maker/dockapps](https://github.com/window-maker/dockapps) fixado no commit `251e851`; `wmudmount` (3.0) e `wmsystemtray` (1.4) vêm dos tarballs do SourceForge. |
 | [`biglinux-livecd/`](biglinux-livecd/PKGBUILD) | `biglinux-livecd` | `26.10.26` | **Temporário**, só para as ISOs de teste: branch `window-maker` de [big-windowmaker/biglinux-livecd](https://github.com/big-windowmaker/biglinux-livecd), com o suporte à sessão live do Window Maker proposto ao upstream. Sai daqui quando a mudança estiver no `biglinux-stable`. |
 
 ### Observações
@@ -27,10 +27,10 @@ os patches.
   por pacote. Por isso todos usam a data do commit fixado, que é maior que as
   versões do AUR. As versões upstream incluídas estão listadas no topo do
   `PKGBUILD`. A `libdockapp` (que não existe nos repositórios) entra no split
-  porque `wmusic` e `wmcube` dependem dela. Ficam de fora os dockapps que já
-  vêm do repositório BigLinux (`wmclock`, `wmix`, `wmsystemtray`,
-  `wmmemload`). O `wmnet` substitui o `wmnd` do BigLinux, que está ligado a
-  uma `libsnmp` que não existe mais.
+  porque `wmusic` e `wmcube` dependem dela. `wmclock`, `wmmemload` e `wmsystemtray` também
+  entram: o servidor atual da BigLinux (`packages.biglinux.com.br`) não os
+  tem mais, só o espelho antigo. Só o `wmix` continua vindo do BigLinux. O
+  `wmnet` substitui o `wmnd`, ligado a uma `libsnmp` que não existe mais.
 - **biglinux-livecd**: as dependências de execução só existem nos
   repositórios BigLinux, então o diretório tem `.ci-nodeps`: o CI compila sem
   resolver dependências e pula o teste de instalação.
