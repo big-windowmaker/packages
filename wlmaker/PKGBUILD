@@ -39,9 +39,17 @@
 #         ordem salva em ~/.config/wlmaker/Dockapps.plist
 #   0023  `wlmdock --clip`: lançadores (Clip.Launchers) logo abaixo do Clip
 #   0024  correção de vazamento num teste do lock_mgr
+#   0025  wlclient: corrige a inserção de um timer antes de outros na lista
+#   0026  wlclient: dorme até o próximo timer (timerfd) em vez de acordar a
+#         cada 100 ms; permite vigiar outros descritores (eventfd)
+#   0027  wlclient: repassa cliques e roda do mouse aos dockapps
+#   0028  primitives: padrões livres no display de 7 segmentos ("--")
+#   0029  wlmcalclock: relógio-calendário (como o wmclock), nomes do locale
+#   0030  wlmmixer: mixer de volume (como o wmix), via libpulse (PulseAudio
+#         ou PipeWire com pipewire-pulse)
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=2
+pkgrel=3
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -55,6 +63,7 @@ depends=(
   glibc
   hicolor-icon-theme
   libinput
+  libpulse  # wlmmixer (fala com o pipewire-pulse ou com o PulseAudio)
   libxcb
   libxdg-basedir
   libxkbcommon
@@ -69,6 +78,10 @@ makedepends=(
   wayland-protocols
 )
 checkdepends=(desktop-file-utils)
+optdepends=(
+  'pavucontrol: mixer completo, aberto pelo clique direito no wlmmixer'
+  'pipewire-pulse: servidor de som para o wlmmixer'
+)
 _patches=(
   0001-server-Adds-support-for-xdg-activation-v1-protocol.patch
   0002-xdg_decoration-Adds-support-for-the-KDE-server-decor.patch
@@ -94,6 +107,12 @@ _patches=(
   0022-clip-Places-dock-apps-in-a-configurable-order-re-arr.patch
   0023-dock-Adds-wlmdock-clip-for-launchers-attached-below-.patch
   0024-lock_mgr-Fixes-a-leak-in-the-lock_ends_grabs-test.patch
+  0025-wlclient-Fixes-inserting-a-timer-before-other-regist.patch
+  0026-wlclient-Sleeps-until-the-next-timer-and-permits-wat.patch
+  0027-wlclient-Forwards-pointer-button-and-axis-events-to-.patch
+  0028-primitives-Adds-wlm_cairo_7segment_display_segments-.patch
+  0029-apps-Adds-wlmcalclock-a-calendar-clock-DockApp.patch
+  0030-apps-Adds-wlmmixer-a-volume-mixer-DockApp-for-PulseA.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -127,7 +146,13 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'e8b904e1b8901d033a1696685e144fe02b4d9351212f3646961a15badd47e4eb'
             '91058238b9028e3ed1bb59c424dc3154b35f1e2ca49592ca990a8247ba8fe537'
             '0bb03e7ad28b5af0e53fdc1c5588457e82b077bd818fcd1b5e62c78e4d58ce1f'
-            '846ce7f7a31c887f51d5ab292e0e199f21354fcb2c1c952d54633048d80b551e')
+            '846ce7f7a31c887f51d5ab292e0e199f21354fcb2c1c952d54633048d80b551e'
+            '966b0d6e4d14a9678c02e42b9b185b423ecad4f06f7e07873b670029ca4060f8'
+            '38f2af15aa82548278c538db286ed07f7576ff89685ebfed7212a5d5a84ee50f'
+            'fa81b874e4b093fd0e0f8504b65cad1ad0ec2624708edb2ae9f3b0971a1439c8'
+            'ca071ec32c339976c28ad7556e71b9d2e2e6c2993ab7b49fe0aa183fe9ccb98e'
+            '1c316feeffeee33d193aa7ffea9ad69429fe602fb1b8cd8fe81e8dee500dcd30'
+            'e80f552c7e9fbc23a4a86130b6ba3123117596a8e9313ef6a931b10cf49691ff')
 
 prepare() {
   cd wlmaker

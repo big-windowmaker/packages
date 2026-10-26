@@ -1,0 +1,396 @@
+From a7a708fe764ec09b0cbd33302d3fea179d0c2b07 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 18:59:48 -0300
+Subject: [PATCH 26/30] wlclient: Sleeps until the next timer, and permits
+ watching file descriptors.
+
+The client's mainloop polled with a 100ms timeout, to check the timers.
+Every DockApp thus woke up 10 times per second, also when it had nothing
+to do (eg. a clock showing just minutes).
+
+The timers are now backed by a timerfd on CLOCK_REALTIME (the clock that
+bs_usec() uses), armed for the earliest timer before polling, and poll()
+waits without timeout. Being a realtime timer, it also expires correctly
+after a suspend. Should the realtime clock be set (eg. stepped by NTP),
+all pending timers are called right away, so clients can re-register
+for the new time. Timers registered from within a timer callback now
+wait for the next iteration.
+
+Adds wlmcl_client_register_fd() and wlmcl_client_unregister_fd(), for
+the mainloop to also watch other file descriptors, and call back when
+they are readable. Permits to integrate other event sources (eg. an
+eventfd signalled from a library's thread) without polling.
+
+Measured over 20 s with a headless wlmaker: wlmclock now has 42 context
+switches (one wakeup per second to draw), instead of 223.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ src/wlclient/wlclient.c | 214 ++++++++++++++++++++++++++++++++++++----
+ src/wlclient/wlclient.h |  36 +++++++
+ 2 files changed, 229 insertions(+), 21 deletions(-)
+
+diff --git a/src/wlclient/wlclient.c b/src/wlclient/wlclient.c
+index e64b4c9..cc624b0 100644
+--- a/src/wlclient/wlclient.c
++++ b/src/wlclient/wlclient.c
+@@ -33,6 +33,7 @@
+ #include <string.h>
+ #include <sys/mman.h>
+ #include <sys/signalfd.h>
++#include <sys/timerfd.h>
+ #include <sys/types.h>
+ #include <unistd.h>
+ #include <wayland-client-core.h>
+@@ -57,6 +58,19 @@ struct wl_surface;
+ 
+ /* == Declarations ========================================================= */
+ 
++/** Maximum number of file descriptors watched by @ref wlmcl_client_register_fd. */
++#define WLMCL_CLIENT_MAX_FD_WATCHES 4
++
++/** A file descriptor watched by the client's mainloop. */
++typedef struct {
++    /** The file descriptor. -1 if the slot is unused. */
++    int                       fd;
++    /** Callback for when `fd` is readable. */
++    wlmcl_client_callback_t   callback;
++    /** Argument to the callback. */
++    void                      *callback_ud_ptr;
++} wlmcl_client_fd_watch_t;
++
+ /** State of the wayland client. */
+ struct _wlmcl_client_t {
+     /** Shareable attributes. */
+@@ -91,6 +105,14 @@ struct _wlmcl_client_t {
+ 
+     /** List of registered timers. TODO(kaeser@gubbe.ch): Replace with HEAP. */
+     bs_dllist_t               timers;
++    /**
++     * Timer file descriptor, armed for the earliest of the registered timers.
++     * Uses CLOCK_REALTIME, the same as `bs_usec()`, so the timer also expires
++     * correctly after a suspend. -1 if not created.
++     */
++    int                       timer_fd;
++    /** File descriptors watched, see @ref wlmcl_client_register_fd. */
++    wlmcl_client_fd_watch_t   fd_watches[WLMCL_CLIENT_MAX_FD_WATCHES];
+ 
+     /** Output interface data. */
+     struct wlmcl_output_interface *output_interface_ptr;
+@@ -172,6 +194,10 @@ static wlmcl_client_timer_t *wlmcl_client_timer_create(
+     void *callback_ud_ptr);
+ static void wlmcl_client_timer_destroy(
+     wlmcl_client_timer_t *timer_ptr);
++static void _wlmcl_client_timer_fd_arm(wlmcl_client_t *client_ptr);
++static void _wlmcl_client_timers_flush(
++    wlmcl_client_t *client_ptr,
++    bool all);
+ 
+ static void wlmcl_client_seat_setup(
+     wlmcl_client_t *client_ptr,
+@@ -339,6 +365,10 @@ wlmcl_client_t *wlmcl_client_create(const char *app_id_ptr)
+ {
+     wlmcl_client_t *wlclient_ptr = logged_calloc(1, sizeof(*wlclient_ptr));
+     if (NULL == wlclient_ptr) return NULL;
++    wlclient_ptr->timer_fd = -1;
++    for (size_t i = 0; i < WLMCL_CLIENT_MAX_FD_WATCHES; ++i) {
++        wlclient_ptr->fd_watches[i].fd = -1;
++    }
+     wl_log_set_handler_client(wl_to_bs_log);
+ 
+     wl_signal_init(&wlclient_ptr->events.key);
+@@ -380,6 +410,15 @@ wlmcl_client_t *wlmcl_client_create(const char *app_id_ptr)
+         return NULL;
+     }
+ 
++    wlclient_ptr->timer_fd = timerfd_create(
++        CLOCK_REALTIME, TFD_NONBLOCK | TFD_CLOEXEC);
++    if (0 > wlclient_ptr->timer_fd) {
++        bs_log(BS_ERROR | BS_ERRNO, "Failed timerfd_create(CLOCK_REALTIME, "
++               "TFD_NONBLOCK | TFD_CLOEXEC)");
++        wlmcl_client_destroy(wlclient_ptr);
++        return NULL;
++    }
++
+     wlclient_ptr->xkb_context_ptr = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+     if (NULL == wlclient_ptr->xkb_context_ptr) {
+         bs_log(BS_ERROR, "Failex xkb_context_new(XKB_CONTEXT_NO_FLAGS)");
+@@ -465,6 +504,10 @@ void wlmcl_client_destroy(wlmcl_client_t *wlclient_ptr)
+         close(wlclient_ptr->signal_fd);
+         wlclient_ptr->signal_fd = 0;
+     }
++    if (0 <= wlclient_ptr->timer_fd) {
++        close(wlclient_ptr->timer_fd);
++        wlclient_ptr->timer_fd = -1;
++    }
+ 
+     if (NULL != wlclient_ptr->attributes.app_id_ptr) {
+         // Cheated when saying it's const...
+@@ -610,21 +653,39 @@ void wlmcl_client_run(wlmcl_client_t *wlclient_ptr)
+             }
+         }
+ 
+-        struct pollfd pollfds[2];
+-        pollfds[0].fd = wl_display_get_fd(wlclient_ptr->attributes.wl_display_ptr);
+-        pollfds[0].events = POLLIN;
+-        pollfds[0].revents = 0;
+-
+-        pollfds[1].fd = wlclient_ptr->signal_fd;
+-        pollfds[1].events = POLLIN;
+-        pollfds[1].revents = 0;
++        _wlmcl_client_timer_fd_arm(wlclient_ptr);
++
++        // Display, signal and timer FDs; followed by the watched FDs.
++        struct pollfd pollfds[3 + WLMCL_CLIENT_MAX_FD_WATCHES];
++        size_t watch_idx[WLMCL_CLIENT_MAX_FD_WATCHES];
++        nfds_t nfds = 0;
++        pollfds[nfds++] = (struct pollfd){
++            .fd = wl_display_get_fd(wlclient_ptr->attributes.wl_display_ptr),
++            .events = POLLIN };
++        pollfds[nfds++] = (struct pollfd){
++            .fd = wlclient_ptr->signal_fd, .events = POLLIN };
++        pollfds[nfds++] = (struct pollfd){
++            .fd = wlclient_ptr->timer_fd, .events = POLLIN };
++        size_t watches = 0;
++        for (size_t i = 0; i < WLMCL_CLIENT_MAX_FD_WATCHES; ++i) {
++            if (0 > wlclient_ptr->fd_watches[i].fd) continue;
++            watch_idx[watches++] = i;
++            pollfds[nfds++] = (struct pollfd){
++                .fd = wlclient_ptr->fd_watches[i].fd, .events = POLLIN };
++        }
+ 
+-        int rv = poll(&pollfds[0], 2, 100);
++        // No timeout: The timer FD wakes us up for the next timer.
++        int rv = poll(&pollfds[0], nfds, -1);
+         if (0 > rv && EINTR != errno) {
+-            bs_log(BS_ERROR | BS_ERRNO, "Failed poll(%p, 1, 100)", &pollfds);
++            bs_log(BS_ERROR | BS_ERRNO, "Failed poll(%p, %lu, -1)",
++                   &pollfds, (unsigned long)nfds);
+             wl_display_cancel_read(wlclient_ptr->attributes.wl_display_ptr);
+             break;  // Error!
+         }
++        if (0 > rv) {
++            // EINTR: Nothing is readable, revents may be stale.
++            for (nfds_t i = 0; i < nfds; ++i) pollfds[i].revents = 0;
++        }
+ 
+         if (pollfds[0].revents & POLLIN) {
+             if (0 > wl_display_read_events(wlclient_ptr->attributes.wl_display_ptr)) {
+@@ -652,6 +713,28 @@ void wlmcl_client_run(wlmcl_client_t *wlclient_ptr)
+             wlclient_ptr->keep_running = false;
+         }
+ 
++        bool clock_was_set = false;
++        if (pollfds[2].revents & POLLIN) {
++            uint64_t expirations;
++            if (0 > read(wlclient_ptr->timer_fd, &expirations,
++                         sizeof(expirations)) &&
++                ECANCELED == errno) {
++                // The realtime clock was set (eg. by NTP, or manually).
++                clock_was_set = true;
++            }
++        }
++
++        for (size_t i = 0; i < watches; ++i) {
++            if (!(pollfds[3 + i].revents & (POLLIN | POLLHUP | POLLERR))) {
++                continue;
++            }
++            // The callback of an earlier watch may have unregistered it.
++            wlmcl_client_fd_watch_t *watch_ptr =
++                &wlclient_ptr->fd_watches[watch_idx[i]];
++            if (watch_ptr->fd != pollfds[3 + i].fd) continue;
++            watch_ptr->callback(wlclient_ptr, watch_ptr->callback_ud_ptr);
++        }
++
+         if (0 > wl_display_dispatch_pending(wlclient_ptr->attributes.wl_display_ptr)) {
+             bs_log(BS_ERROR | BS_ERRNO,
+                    "Failed wl_display_dispatch_queue_pending(%p)",
+@@ -673,17 +756,7 @@ void wlmcl_client_run(wlmcl_client_t *wlclient_ptr)
+             break;  // Error!
+         }
+ 
+-        // Flush the timer queue.
+-        uint64_t current_usec = bs_usec();
+-        bs_dllist_node_t *dlnode_ptr;
+-        while (NULL != (dlnode_ptr = wlclient_ptr->timers.head_ptr) &&
+-               ((wlmcl_client_timer_t*)dlnode_ptr)->target_usec <= current_usec) {
+-            bs_dllist_pop_front(&wlclient_ptr->timers);
+-
+-            wlmcl_client_timer_t *timer_ptr = (wlmcl_client_timer_t*)dlnode_ptr;
+-            timer_ptr->callback(wlclient_ptr, timer_ptr->callback_ud_ptr);
+-            wlmcl_client_timer_destroy(timer_ptr);
+-        }
++        _wlmcl_client_timers_flush(wlclient_ptr, clock_was_set);
+ 
+     } while (wlclient_ptr->keep_running);
+ }
+@@ -712,6 +785,46 @@ bool wlmcl_client_register_timer(
+     return (timer_ptr != NULL);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++bool wlmcl_client_register_fd(
++    wlmcl_client_t *wlclient_ptr,
++    int fd,
++    wlmcl_client_callback_t callback,
++    void *callback_ud_ptr)
++{
++    if (0 > fd || NULL == callback) return false;
++    wlmcl_client_fd_watch_t *free_watch_ptr = NULL;
++    for (size_t i = 0; i < WLMCL_CLIENT_MAX_FD_WATCHES; ++i) {
++        wlmcl_client_fd_watch_t *watch_ptr = &wlclient_ptr->fd_watches[i];
++        if (fd == watch_ptr->fd) {
++            bs_log(BS_ERROR, "File descriptor %d is already watched.", fd);
++            return false;
++        }
++        if (0 > watch_ptr->fd && NULL == free_watch_ptr) {
++            free_watch_ptr = watch_ptr;
++        }
++    }
++    if (NULL == free_watch_ptr) {
++        bs_log(BS_ERROR, "Cannot watch more than %d file descriptors.",
++               WLMCL_CLIENT_MAX_FD_WATCHES);
++        return false;
++    }
++    free_watch_ptr->fd = fd;
++    free_watch_ptr->callback = callback;
++    free_watch_ptr->callback_ud_ptr = callback_ud_ptr;
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmcl_client_unregister_fd(wlmcl_client_t *wlclient_ptr, int fd)
++{
++    for (size_t i = 0; i < WLMCL_CLIENT_MAX_FD_WATCHES; ++i) {
++        wlmcl_client_fd_watch_t *watch_ptr = &wlclient_ptr->fd_watches[i];
++        if (fd != watch_ptr->fd) continue;
++        *watch_ptr = (wlmcl_client_fd_watch_t){ .fd = -1 };
++    }
++}
++
+ /* == Local (static) methods =============================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -909,6 +1022,65 @@ void wlmcl_client_timer_destroy(wlmcl_client_timer_t *timer_ptr)
+     free(timer_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Arms @ref wlmcl_client_t::timer_fd for the earliest registered timer, or
++ * disarms it if there is no timer registered.
++ *
++ * @param client_ptr
++ */
++void _wlmcl_client_timer_fd_arm(wlmcl_client_t *client_ptr)
++{
++    struct itimerspec itimerspec = {};
++    wlmcl_client_timer_t *timer_ptr =
++        (wlmcl_client_timer_t*)client_ptr->timers.head_ptr;
++    if (NULL != timer_ptr) {
++        // An all-zero it_value would disarm the timer.
++        uint64_t usec = BS_MAX(timer_ptr->target_usec, UINT64_C(1));
++        itimerspec.it_value.tv_sec = usec / 1000000;
++        itimerspec.it_value.tv_nsec = (usec % 1000000) * 1000;
++    }
++    if (0 != timerfd_settime(
++            client_ptr->timer_fd,
++            TFD_TIMER_ABSTIME | TFD_TIMER_CANCEL_ON_SET,
++            &itimerspec,
++            NULL)) {
++        bs_log(BS_WARNING | BS_ERRNO, "Failed timerfd_settime(%d, ...)",
++               client_ptr->timer_fd);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Calls and destroys the timers that are due.
++ *
++ * @param client_ptr
++ * @param all                 Whether to call all timers, irrespective of
++ *                            their target time. Used when the realtime clock
++ *                            was set: Clients then re-register their timers
++ *                            relative to the new time.
++ */
++void _wlmcl_client_timers_flush(wlmcl_client_t *client_ptr, bool all)
++{
++    // Moves the due timers to a separate list first: Callbacks may register
++    // new timers, and these must wait for the next iteration.
++    bs_dllist_t due_timers = {};
++    uint64_t current_usec = bs_usec();
++    bs_dllist_node_t *dlnode_ptr;
++    while (NULL != (dlnode_ptr = client_ptr->timers.head_ptr) &&
++           (all ||
++            ((wlmcl_client_timer_t*)dlnode_ptr)->target_usec <= current_usec)) {
++        bs_dllist_pop_front(&client_ptr->timers);
++        bs_dllist_push_back(&due_timers, dlnode_ptr);
++    }
++
++    while (NULL != (dlnode_ptr = bs_dllist_pop_front(&due_timers))) {
++        wlmcl_client_timer_t *timer_ptr = (wlmcl_client_timer_t*)dlnode_ptr;
++        timer_ptr->callback(client_ptr, timer_ptr->callback_ud_ptr);
++        wlmcl_client_timer_destroy(timer_ptr);
++    }
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Set up the seat: Registers the client's seat listeners. */
+ void wlmcl_client_seat_setup(
+diff --git a/src/wlclient/wlclient.h b/src/wlclient/wlclient.h
+index 6bfe37d..9dfd2f1 100644
+--- a/src/wlclient/wlclient.h
++++ b/src/wlclient/wlclient.h
+@@ -208,6 +208,9 @@ bs_dllist_t *wlmcl_client_outputs(wlmcl_client_t *wlmcl_client_ptr);
+  * be called with the provided arguments. This is a one-time registration. For
+  * repeated calls, clients need to re-register.
+  *
++ * Should the system clock be set (eg. stepped by NTP), all registered timers
++ * are called right away, permitting clients to re-register for the new time.
++ *
+  * @param wlmcl_client_ptr
+  * @param target_usec
+  * @param callback
+@@ -221,6 +224,39 @@ bool wlmcl_client_register_timer(
+     wlmcl_client_callback_t callback,
+     void *callback_ud_ptr);
+ 
++/**
++ * Registers a file descriptor to be watched by the client's mainloop.
++ *
++ * Once `fd` becomes readable (or reports an error or hangup), `callback` will
++ * be called from the mainloop. The callback must consume the data, or
++ * unregister `fd`; otherwise it will be called again right away. Permits to
++ * integrate other event sources (eg. an `eventfd` signalled by a thread) with
++ * the client, without polling.
++ *
++ * @param wlmcl_client_ptr
++ * @param fd
++ * @param callback
++ * @param callback_ud_ptr
++ *
++ * @return true on success. Fails if `fd` is already watched, or if too many
++ *     file descriptors are watched already.
++ */
++bool wlmcl_client_register_fd(
++    wlmcl_client_t *wlmcl_client_ptr,
++    int fd,
++    wlmcl_client_callback_t callback,
++    void *callback_ud_ptr);
++
++/**
++ * Unregisters a file descriptor registered by @ref wlmcl_client_register_fd.
++ *
++ * May be called from within the callback.
++ *
++ * @param wlmcl_client_ptr
++ * @param fd
++ */
++void wlmcl_client_unregister_fd(wlmcl_client_t *wlmcl_client_ptr, int fd);
++
+ #ifdef __cplusplus
+ }  // extern "C"
+ #endif  // __cplusplus
+-- 
+2.55.0
+

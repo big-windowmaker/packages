@@ -1,0 +1,1084 @@
+From 50f3cfa18855a87f5c8da9e6cfde9a95515618b3 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 19:00:27 -0300
+Subject: [PATCH 29/30] apps: Adds wlmcalclock, a calendar clock DockApp.
+
+Shows the time on a LED-style display, and weekday, day of the month
+and month on a calendar page below; similar to Window Maker's `wmclock`.
+
+Weekday and month are the abbreviated names of the session's locale
+(LC_TIME, via nl_langinfo), in upper case as per LC_CTYPE, eg. "MON 26
+OCT" in English, or "SEG 26 OUT" in Brazilian Portuguese. Other locale
+categories remain "C".
+
+Options: --twelve_hour shows the time in 12-hour format, with an AM/PM
+indicator; --seconds also shows seconds.
+
+The app wakes up only on each full minute (or second, with --seconds).
+The time to show is taken from the timers' clock (gettimeofday): time()
+may be served from a coarse clock that still shows the previous second
+when the timer fires, and the display then missed the new minute.
+
+Formatting and the computation of the next wakeup are in wlm_calendar,
+with unit tests run as `apps_test`. Adds a .desktop file and an icon.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ README.md                            |   3 +-
+ apps/CMakeLists.txt                  |  14 +
+ apps/apps_test.c                     |  42 +++
+ apps/wlm_calendar.c                  | 304 +++++++++++++++++++++
+ apps/wlm_calendar.h                  | 105 ++++++++
+ apps/wlmcalclock.c                   | 390 +++++++++++++++++++++++++++
+ share/CMakeLists.txt                 |  16 ++
+ share/wlmaker.wlmcalclock.desktop.in |   9 +
+ share/wlmcalclock-64x64.png          | Bin 0 -> 2715 bytes
+ 9 files changed, 882 insertions(+), 1 deletion(-)
+ create mode 100644 apps/apps_test.c
+ create mode 100644 apps/wlm_calendar.c
+ create mode 100644 apps/wlm_calendar.h
+ create mode 100644 apps/wlmcalclock.c
+ create mode 100644 share/wlmaker.wlmcalclock.desktop.in
+ create mode 100644 share/wlmcalclock-64x64.png
+
+diff --git a/README.md b/README.md
+index ae03ec0..01a557e 100644
+--- a/README.md
++++ b/README.md
+@@ -44,7 +44,8 @@ Highlights for current version ([0.8.1](https://github.com/phkaeser/wlmaker/rele
+ * Support for Wayland XDG shell (mostly complete. Bug reports welcome).
+ * Initial support for X11 applications (positioning and specific modes are missing).
+   Use `--start_xwayland` argument to enable XWayland, it's off by default.
+-* DockApps (`apps/wlmclock`, `apps/wlmbattery`, `apps/wlmcpugraph`, ...).
++* DockApps (`apps/wlmclock`, `apps/wlmbattery`, `apps/wlmcpugraph`,
++  `apps/wlmcalclock`, ...).
+ 
+ ### All the details?
+ 
+diff --git a/apps/CMakeLists.txt b/apps/CMakeLists.txt
+index 17aa9ce..8614d78 100644
+--- a/apps/CMakeLists.txt
++++ b/apps/CMakeLists.txt
+@@ -48,7 +48,20 @@ if(iwyu_path_and_options)
+     C_INCLUDE_WHAT_YOU_USE "${iwyu_path_and_options}")
+ endif()
+ 
++add_library(wlm_calendar STATIC wlm_calendar.c wlm_calendar.h)
++target_link_libraries(wlm_calendar libbase)
++if(iwyu_path_and_options)
++  set_target_properties(
++    wlm_calendar PROPERTIES
++    C_INCLUDE_WHAT_YOU_USE "${iwyu_path_and_options}")
++endif()
++
++add_executable(apps_test apps_test.c)
++target_link_libraries(apps_test wlm_calendar libbase)
++add_test(NAME apps_test COMMAND apps_test)
++
+ add_wlm_app(wlmclock wlmclient_lib primitives m)
++add_wlm_app(wlmcalclock wlm_calendar wlmclient_lib primitives)
+ add_wlm_app(wlmeyes m wlmclient_lib)
+ add_wlm_app(wlmcpugraph wlm_graph_shared wlmclient_lib primitives)
+ add_wlm_app(wlmmemgraph wlm_graph_shared wlmclient_lib primitives)
+@@ -57,4 +70,5 @@ add_wlm_app(wlmbattery libbase wlmclient_lib primitives)
+ 
+ install(
+   TARGETS wlmclock wlmeyes wlmcpugraph wlmmemgraph wlmnetgraph wlmbattery
++  wlmcalclock
+   DESTINATION "${CMAKE_INSTALL_BINDIR}")
+diff --git a/apps/apps_test.c b/apps/apps_test.c
+new file mode 100644
+index 0000000..3fc3ece
+--- /dev/null
++++ b/apps/apps_test.c
+@@ -0,0 +1,42 @@
++/* ========================================================================= */
++/**
++ * @file apps_test.c
++ *
++ * Unit tests for the DockApps' helper modules.
++ *
++ * @copyright
++ * Copyright (c) 2026 Philipp Kaeser (kaeser@gubbe.ch)
++ * Copyright 2026 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <libbase/libbase.h>
++#include <stddef.h>
++
++#include "wlm_calendar.h"
++
++/** Unit tests. */
++const bs_test_set_t *test_sets[] = {
++    &wlm_calendar_test_set,
++    NULL,
++};
++
++/** Main program, runs the unit tests. */
++int main(int argc, const char **argv)
++{
++    const bs_test_param_t params = {};
++    return bs_test_sets(test_sets, argc, argv, &params);
++}
++
++/* == End of apps_test.c =================================================== */
+diff --git a/apps/wlm_calendar.c b/apps/wlm_calendar.c
+new file mode 100644
+index 0000000..d54438c
+--- /dev/null
++++ b/apps/wlm_calendar.c
+@@ -0,0 +1,304 @@
++/* ========================================================================= */
++/**
++ * @file wlm_calendar.c
++ *
++ * @copyright
++ * Copyright (c) 2026 Philipp Kaeser (kaeser@gubbe.ch)
++ * Copyright 2026 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "wlm_calendar.h"
++
++#include <langinfo.h>
++#include <limits.h>
++#include <locale.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <wchar.h>
++#include <wctype.h>
++
++/* == Declarations ========================================================= */
++
++static void _wlm_calendar_name(
++    char *dest_ptr,
++    size_t dest_size,
++    nl_item item);
++
++/* == Exported methods ===================================================== */
++
++/* ------------------------------------------------------------------------- */
++void wlm_calendar_format(
++    const struct tm *tm_ptr,
++    bool twelve_hour,
++    bool seconds,
++    wlm_calendar_t *calendar_ptr)
++{
++    *calendar_ptr = (wlm_calendar_t){};
++
++    int hour = tm_ptr->tm_hour;
++    if (twelve_hour) {
++        calendar_ptr->pm = 12 <= hour;
++        hour %= 12;
++        if (0 == hour) hour = 12;
++    }
++    // Values are clamped for the compiler to see they fit the buffer.
++    snprintf(calendar_ptr->digits, sizeof(calendar_ptr->digits),
++             seconds ? "%02d%02d%02d" : "%02d%02d",
++             BS_MIN(BS_MAX(hour, 0), 23),
++             BS_MIN(BS_MAX(tm_ptr->tm_min, 0), 59),
++             BS_MIN(BS_MAX(tm_ptr->tm_sec, 0), 60));
++    if (twelve_hour && '0' == calendar_ptr->digits[0]) {
++        calendar_ptr->digits[0] = ' ';
++    }
++
++    calendar_ptr->mday = tm_ptr->tm_mday;
++    _wlm_calendar_name(calendar_ptr->weekday, sizeof(calendar_ptr->weekday),
++                       ABDAY_1 + BS_MIN(BS_MAX(tm_ptr->tm_wday, 0), 6));
++    _wlm_calendar_name(calendar_ptr->month, sizeof(calendar_ptr->month),
++                       ABMON_1 + BS_MIN(BS_MAX(tm_ptr->tm_mon, 0), 11));
++}
++
++/* ------------------------------------------------------------------------- */
++void wlm_calendar_upcase(char *dest_ptr, size_t dest_size, const char *src_ptr)
++{
++    if (0 == dest_size) return;
++    mbstate_t in_state = {}, out_state = {};
++    size_t src_len = strlen(src_ptr);
++    size_t pos = 0;
++
++    while (0 < src_len) {
++        wchar_t wc;
++        char mb[MB_LEN_MAX];
++        size_t in_len = mbrtowc(&wc, src_ptr, src_len, &in_state);
++        size_t out_len;
++        if ((size_t)-1 == in_len || (size_t)-2 == in_len || 0 == in_len) {
++            // Invalid or incomplete sequence: Copy the byte as-is.
++            in_state = (mbstate_t){};
++            mb[0] = *src_ptr;
++            in_len = 1;
++            out_len = 1;
++        } else {
++            out_len = wcrtomb(mb, (wchar_t)towupper((wint_t)wc), &out_state);
++            if ((size_t)-1 == out_len) {
++                out_state = (mbstate_t){};
++                memcpy(mb, src_ptr, in_len);
++                out_len = in_len;
++            }
++        }
++        if (pos + out_len >= dest_size) break;
++        memcpy(dest_ptr + pos, mb, out_len);
++        pos += out_len;
++        src_ptr += in_len;
++        src_len -= in_len;
++    }
++    dest_ptr[pos] = '\0';
++}
++
++/* ------------------------------------------------------------------------- */
++uint64_t wlm_calendar_next_period_usec(uint64_t now_usec, uint64_t period_usec)
++{
++    if (0 == period_usec) return now_usec + 1;
++    return (now_usec / period_usec + 1) * period_usec;
++}
++
++/* == Local (static) methods =============================================== */
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Stores the upper-cased locale's string for `item` into `dest_ptr`, with
++ * trailing periods removed.
++ *
++ * @param dest_ptr
++ * @param dest_size
++ * @param item
++ */
++void _wlm_calendar_name(char *dest_ptr, size_t dest_size, nl_item item)
++{
++    wlm_calendar_upcase(dest_ptr, dest_size, nl_langinfo(item));
++    size_t len = strlen(dest_ptr);
++    while (0 < len && '.' == dest_ptr[len - 1]) dest_ptr[--len] = '\0';
++}
++
++/* == Unit tests =========================================================== */
++
++static void test_format(bs_test_t *test_ptr);
++static void test_format_12h(bs_test_t *test_ptr);
++static void test_format_pt_br(bs_test_t *test_ptr);
++static void test_upcase(bs_test_t *test_ptr);
++static void test_next_period(bs_test_t *test_ptr);
++
++/** Test cases. */
++static const bs_test_case_t _wlm_calendar_test_cases[] = {
++    { 1, "format", test_format },
++    { 1, "format_12h", test_format_12h },
++    { 1, "format_pt_br", test_format_pt_br },
++    { 1, "upcase", test_upcase },
++    { 1, "next_period", test_next_period },
++    BS_TEST_CASE_SENTINEL()
++};
++
++const bs_test_set_t wlm_calendar_test_set = BS_TEST_SET(
++    true, "calendar", _wlm_calendar_test_cases);
++
++/** Monday, 2026-10-26 09:05:07. */
++static const struct tm _test_tm = {
++    .tm_year = 126, .tm_mon = 9, .tm_mday = 26, .tm_wday = 1,
++    .tm_hour = 9, .tm_min = 5, .tm_sec = 7
++};
++
++/* ------------------------------------------------------------------------- */
++/** Tests formatting in 24-hour mode, in the "C" locale. */
++void test_format(bs_test_t *test_ptr)
++{
++    char *old_locale_ptr = logged_strdup(setlocale(LC_ALL, NULL));
++    setlocale(LC_ALL, "C");
++
++    wlm_calendar_t c;
++    wlm_calendar_format(&_test_tm, false, false, &c);
++    BS_TEST_VERIFY_STREQ(test_ptr, "0905", c.digits);
++    BS_TEST_VERIFY_FALSE(test_ptr, c.pm);
++    BS_TEST_VERIFY_EQ(test_ptr, 26, c.mday);
++    BS_TEST_VERIFY_STREQ(test_ptr, "MON", c.weekday);
++    BS_TEST_VERIFY_STREQ(test_ptr, "OCT", c.month);
++
++    wlm_calendar_format(&_test_tm, false, true, &c);
++    BS_TEST_VERIFY_STREQ(test_ptr, "090507", c.digits);
++
++    struct tm tm = _test_tm;
++    tm.tm_hour = 23;
++    tm.tm_wday = 6;
++    tm.tm_mon = 0;
++    wlm_calendar_format(&tm, false, false, &c);
++    BS_TEST_VERIFY_STREQ(test_ptr, "2305", c.digits);
++    BS_TEST_VERIFY_STREQ(test_ptr, "SAT", c.weekday);
++    BS_TEST_VERIFY_STREQ(test_ptr, "JAN", c.month);
++
++    if (NULL != old_locale_ptr) {
++        setlocale(LC_ALL, old_locale_ptr);
++        free(old_locale_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Tests formatting in 12-hour mode. */
++void test_format_12h(bs_test_t *test_ptr)
++{
++    wlm_calendar_t c;
++    struct tm tm = _test_tm;
++    wlm_calendar_format(&tm, true, false, &c);
++    BS_TEST_VERIFY_STREQ(test_ptr, " 905", c.digits);
++    BS_TEST_VERIFY_FALSE(test_ptr, c.pm);
++
++    tm.tm_hour = 0;
++    wlm_calendar_format(&tm, true, false, &c);
++    BS_TEST_VERIFY_STREQ(test_ptr, "1205", c.digits);
++    BS_TEST_VERIFY_FALSE(test_ptr, c.pm);
++
++    tm.tm_hour = 12;
++    wlm_calendar_format(&tm, true, false, &c);
++    BS_TEST_VERIFY_STREQ(test_ptr, "1205", c.digits);
++    BS_TEST_VERIFY_TRUE(test_ptr, c.pm);
++
++    tm.tm_hour = 21;
++    wlm_calendar_format(&tm, true, true, &c);
++    BS_TEST_VERIFY_STREQ(test_ptr, " 90507", c.digits);
++    BS_TEST_VERIFY_TRUE(test_ptr, c.pm);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Tests the Brazilian Portuguese names, if that locale is available. */
++void test_format_pt_br(bs_test_t *test_ptr)
++{
++    char *old_locale_ptr = logged_strdup(setlocale(LC_ALL, NULL));
++    if (NULL == setlocale(LC_ALL, "pt_BR.UTF-8")) {
++        bs_log(BS_WARNING, "Locale pt_BR.UTF-8 not available, skipping.");
++        free(old_locale_ptr);
++        return;
++    }
++
++    wlm_calendar_t c;
++    wlm_calendar_format(&_test_tm, false, false, &c);
++    BS_TEST_VERIFY_STREQ(test_ptr, "SEG", c.weekday);
++    BS_TEST_VERIFY_STREQ(test_ptr, "OUT", c.month);
++
++    // Saturday has an accented letter, which must be upper-cased, too.
++    struct tm tm = _test_tm;
++    tm.tm_wday = 6;
++    tm.tm_mon = 1;
++    wlm_calendar_format(&tm, false, false, &c);
++    BS_TEST_VERIFY_STREQ(test_ptr, "S\xc3\x81" "B", c.weekday);
++    BS_TEST_VERIFY_STREQ(test_ptr, "FEV", c.month);
++
++    if (NULL != old_locale_ptr) {
++        setlocale(LC_ALL, old_locale_ptr);
++        free(old_locale_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Tests @ref wlm_calendar_upcase. */
++void test_upcase(bs_test_t *test_ptr)
++{
++    char *old_locale_ptr = logged_strdup(setlocale(LC_ALL, NULL));
++    setlocale(LC_ALL, "C");
++
++    char buf[8];
++    wlm_calendar_upcase(buf, sizeof(buf), "abc");
++    BS_TEST_VERIFY_STREQ(test_ptr, "ABC", buf);
++    wlm_calendar_upcase(buf, sizeof(buf), "");
++    BS_TEST_VERIFY_STREQ(test_ptr, "", buf);
++    // Truncates.
++    wlm_calendar_upcase(buf, 3, "abcdef");
++    BS_TEST_VERIFY_STREQ(test_ptr, "AB", buf);
++    // Non-ASCII bytes are kept unchanged in the "C" locale.
++    wlm_calendar_upcase(buf, sizeof(buf), "s\xc3\xa1" "b");
++    BS_TEST_VERIFY_STREQ(test_ptr, "S\xc3\xa1" "B", buf);
++
++    if (NULL != setlocale(LC_ALL, "C.UTF-8")) {
++        wlm_calendar_upcase(buf, sizeof(buf), "s\xc3\xa1" "b");
++        BS_TEST_VERIFY_STREQ(test_ptr, "S\xc3\x81" "B", buf);
++        // Does not split a multi-byte character when truncating.
++        wlm_calendar_upcase(buf, 3, "s\xc3\xa1" "b");
++        BS_TEST_VERIFY_STREQ(test_ptr, "S", buf);
++    }
++
++    if (NULL != old_locale_ptr) {
++        setlocale(LC_ALL, old_locale_ptr);
++        free(old_locale_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Tests @ref wlm_calendar_next_period_usec. */
++void test_next_period(bs_test_t *test_ptr)
++{
++    const uint64_t minute = UINT64_C(60000000);
++    BS_TEST_VERIFY_EQ(test_ptr, minute,
++                      wlm_calendar_next_period_usec(0, minute));
++    BS_TEST_VERIFY_EQ(test_ptr, minute,
++                      wlm_calendar_next_period_usec(1, minute));
++    BS_TEST_VERIFY_EQ(test_ptr, minute,
++                      wlm_calendar_next_period_usec(minute - 1, minute));
++    // Exactly at the boundary: The *next* boundary.
++    BS_TEST_VERIFY_EQ(test_ptr, 2 * minute,
++                      wlm_calendar_next_period_usec(minute, minute));
++    BS_TEST_VERIFY_EQ(test_ptr, UINT64_C(1793000000000000),
++                      wlm_calendar_next_period_usec(
++                          UINT64_C(1792999999999999), UINT64_C(1000000)));
++    BS_TEST_VERIFY_EQ(test_ptr, 43, wlm_calendar_next_period_usec(42, 0));
++}
++
++/* == End of wlm_calendar.c ================================================ */
+diff --git a/apps/wlm_calendar.h b/apps/wlm_calendar.h
+new file mode 100644
+index 0000000..7e669ac
+--- /dev/null
++++ b/apps/wlm_calendar.h
+@@ -0,0 +1,105 @@
++/* ========================================================================= */
++/**
++ * @file wlm_calendar.h
++ *
++ * Date & time formatting for the calendar clock DockApp (`wlmcalclock`).
++ *
++ * @copyright
++ * Copyright (c) 2026 Philipp Kaeser (kaeser@gubbe.ch)
++ * Copyright 2026 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#ifndef __WLM_CALENDAR_H__
++#define __WLM_CALENDAR_H__
++
++#include <libbase/libbase.h>
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <time.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif  // __cplusplus
++
++/** Size of the buffers for weekday and month names, including the NUL. */
++#define WLM_CALENDAR_NAME_SIZE 32
++
++/** What the calendar clock shows, formatted for display. */
++typedef struct {
++    /**
++     * Digits of the time: "HHMM", or "HHMMSS" if seconds are shown. In 12-hour
++     * mode, a leading zero of the hour is a ' '. NUL-terminated.
++     */
++    char                      digits[7];
++    /** In 12-hour mode: Whether it is after noon. False otherwise. */
++    bool                      pm;
++    /** Day of the month, 1..31. */
++    int                       mday;
++    /** Abbreviated name of the weekday, in upper case, UTF-8. Eg. "MON". */
++    char                      weekday[WLM_CALENDAR_NAME_SIZE];
++    /** Abbreviated name of the month, in upper case, UTF-8. Eg. "OCT". */
++    char                      month[WLM_CALENDAR_NAME_SIZE];
++} wlm_calendar_t;
++
++/**
++ * Formats `tm_ptr` for display.
++ *
++ * Weekday and month names are taken from the locale's LC_TIME category, and
++ * converted to upper case using the LC_CTYPE category. Trailing periods (as in
++ * some locales' abbreviations, eg. "lun.") are removed.
++ *
++ * @param tm_ptr
++ * @param twelve_hour         Whether to use the 12-hour format.
++ * @param seconds             Whether to include seconds in the digits.
++ * @param calendar_ptr        Output.
++ */
++void wlm_calendar_format(
++    const struct tm *tm_ptr,
++    bool twelve_hour,
++    bool seconds,
++    wlm_calendar_t *calendar_ptr);
++
++/**
++ * Converts the multibyte string `src_ptr` to upper case, as per LC_CTYPE.
++ *
++ * Invalid sequences are copied unchanged. The output is always terminated,
++ * and truncated at a character boundary if it does not fit.
++ *
++ * @param dest_ptr
++ * @param dest_size
++ * @param src_ptr
++ */
++void wlm_calendar_upcase(char *dest_ptr, size_t dest_size, const char *src_ptr);
++
++/**
++ * Computes when the next period starts, eg. the next full minute.
++ *
++ * @param now_usec            Current time, in microseconds since the epoch.
++ * @param period_usec         Length of the period, eg. 60000000 for minutes.
++ *
++ * @return The start of the next period, in microseconds since the epoch. This
++ *     is always later than `now_usec`.
++ */
++uint64_t wlm_calendar_next_period_usec(uint64_t now_usec, uint64_t period_usec);
++
++/** Unit tests. */
++extern const bs_test_set_t wlm_calendar_test_set;
++
++#ifdef __cplusplus
++}  // extern "C"
++#endif  // __cplusplus
++
++#endif /* __WLM_CALENDAR_H__ */
++/* == End of wlm_calendar.h ================================================ */
+diff --git a/apps/wlmcalclock.c b/apps/wlmcalclock.c
+new file mode 100644
+index 0000000..cb461c3
+--- /dev/null
++++ b/apps/wlmcalclock.c
+@@ -0,0 +1,390 @@
++/* ========================================================================= */
++/**
++ * @file wlmcalclock.c
++ *
++ * Calendar clock DockApp: Shows the time on a LED-style display, and weekday,
++ * day and month on a calendar page. Similar in spirit to Window Maker's
++ * `wmclock`.
++ *
++ * Weekday and month names are taken from the session's locale (LC_TIME). The
++ * app wakes up only once per minute (or once per second, with --seconds).
++ *
++ * @copyright
++ * Copyright (c) 2026 Philipp Kaeser (kaeser@gubbe.ch)
++ * Copyright 2026 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <cairo.h>
++#include <libbase/libbase.h>
++#include <locale.h>
++#include <primitives/primitives.h>
++#include <primitives/segment_display.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++#include <wayland-client-core.h>
++#include <wlclient/dblbuf.h>
++#include <wlclient/icon.h>
++#include <wlclient/wlclient.h>
++
++#include "wlm_calendar.h"
++
++/* == Declarations ========================================================= */
++
++/** Logical size of the icon. Drawing is scaled to the actual size. */
++#define ICON_SIZE 56.0
++
++/** State of the client. */
++static wlmcl_client_t *wlclient_ptr;
++/** Double buffer. */
++static wlmcl_dblbuf_t *dblbuf_ptr;
++
++/** Whether to use the 12-hour format. */
++static bool arg_twelve_hour = false;
++/** Whether to show seconds. */
++static bool arg_seconds = false;
++
++/** Commandline arguments. */
++static const bs_arg_t wlmcalclock_args[] = {
++    BS_ARG_BOOL(
++        "twelve_hour",
++        "Optional: Show the time in 12-hour format, with AM/PM indicator. "
++        "Default: 24-hour format.",
++        false,
++        &arg_twelve_hour),
++    BS_ARG_BOOL(
++        "seconds",
++        "Optional: Also show seconds. The app then wakes up every second, "
++        "instead of every minute.",
++        false,
++        &arg_seconds),
++    bs_arg_log_level,
++    BS_ARG_SENTINEL()
++};
++
++/** Foreground color of a LED in the VFD-style display. */
++static const uint32_t color_led = 0xff55ffff;
++/** Color of a turned-off element in the VFD-style display. */
++static const uint32_t color_off = 0xff114444;
++/** Background color in the VFD-style display. */
++static const uint32_t color_background = 0xff111111;
++/** Color of the calendar page. */
++static const uint32_t color_paper = 0xffe8e4d8;
++/** Color of the band with the weekday, and of the month's name. */
++static const uint32_t color_red = 0xffa01c1c;
++/** Color of the day's number. */
++static const uint32_t color_ink = 0xff1c1c1c;
++
++/** Segments for the hours & minutes digits. */
++static const wlm_cairo_7segment_param_t param_large = {
++    .offset = 0.8,
++    .width = 1.4,
++    .hlength = 6.5,
++    .vlength = 6.0
++};
++
++/** Font face for the calendar page. */
++static const char font_face[] = "Sans";
++
++/* == Local (static) methods =============================================== */
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Draws `text_ptr` horizontally centered at `x`, with baseline at `y`.
++ *
++ * If wider than `max_width`, the font size is reduced to fit.
++ *
++ * @param cairo_ptr
++ * @param text_ptr
++ * @param x
++ * @param y
++ * @param size
++ * @param max_width
++ */
++static void _draw_text_centered(
++    cairo_t *cairo_ptr,
++    const char *text_ptr,
++    double x,
++    double y,
++    double size,
++    double max_width)
++{
++    cairo_set_font_size(cairo_ptr, size);
++    cairo_text_extents_t extents;
++    cairo_text_extents(cairo_ptr, text_ptr, &extents);
++    if (extents.x_advance > max_width && 0 < extents.x_advance) {
++        cairo_set_font_size(cairo_ptr, size * max_width / extents.x_advance);
++        cairo_text_extents(cairo_ptr, text_ptr, &extents);
++    }
++    cairo_move_to(cairo_ptr, x - extents.x_bearing - extents.width / 2.0, y);
++    cairo_show_text(cairo_ptr, text_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Draws the digits of the time, on the LED panel.
++ *
++ * @param cairo_ptr
++ * @param calendar_ptr
++ */
++static void _draw_time(cairo_t *cairo_ptr, const wlm_calendar_t *calendar_ptr)
++{
++    // LED panel, sunken.
++    cairo_set_source_argb8888(cairo_ptr, color_background);
++    cairo_rectangle(cairo_ptr, 1, 1, ICON_SIZE - 2, 19);
++    cairo_fill(cairo_ptr);
++    wlm_primitives_draw_bezel_at(cairo_ptr, 0, 0, ICON_SIZE, 21, 1.0, false);
++
++    // Layout: Hours & minutes are centered, unless seconds or the AM/PM
++    // indicator need space on the right.
++    uint32_t x = 8;
++    if (arg_seconds) {
++        x = 2;
++    } else if (arg_twelve_hour) {
++        x = 4;
++    }
++    const uint32_t baseline = 17;
++    for (int i = 0; i < 4; ++i) {
++        char c = calendar_ptr->digits[i];
++        uint32_t pos = x + i * 9 + (i / 2) * 5;
++        if ('0' <= c && c <= '9') {
++            wlm_cairo_7segment_display_digit(
++                cairo_ptr, &param_large, pos, baseline,
++                color_led, color_off, c - '0');
++        } else {
++            wlm_cairo_7segment_display_segments(
++                cairo_ptr, &param_large, pos, baseline,
++                color_led, color_off, 0);
++        }
++    }
++
++    // The colon.
++    cairo_set_source_argb8888(cairo_ptr, color_led);
++    cairo_rectangle(cairo_ptr, x + 18.8, 7.0, 1.4, 1.4);
++    cairo_rectangle(cairo_ptr, x + 18.8, 12.6, 1.4, 1.4);
++    cairo_fill(cairo_ptr);
++
++    if (arg_seconds) {
++        for (int i = 4; i < 6; ++i) {
++            wlm_cairo_7segment_display_digit(
++                cairo_ptr, &wlm_cairo_7segment_param_6x8,
++                44 + (i - 4) * 6, baseline,
++                color_led, color_off, calendar_ptr->digits[i] - '0');
++        }
++    }
++
++    if (arg_twelve_hour) {
++        cairo_select_font_face(cairo_ptr, font_face, CAIRO_FONT_SLANT_NORMAL,
++                               CAIRO_FONT_WEIGHT_BOLD);
++        if (arg_seconds) {
++            // Just one indicator, above the seconds.
++            cairo_set_source_argb8888(cairo_ptr, color_led);
++            _draw_text_centered(cairo_ptr, calendar_ptr->pm ? "PM" : "AM",
++                                49.5, 8.0, 5.5, 10.0);
++        } else {
++            cairo_set_source_argb8888(
++                cairo_ptr, calendar_ptr->pm ? color_off : color_led);
++            _draw_text_centered(cairo_ptr, "AM", 50.0, 9.5, 5.5, 8.0);
++            cairo_set_source_argb8888(
++                cairo_ptr, calendar_ptr->pm ? color_led : color_off);
++            _draw_text_centered(cairo_ptr, "PM", 50.0, 17.0, 5.5, 8.0);
++        }
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Draws the calendar page, with weekday, day and month.
++ *
++ * @param cairo_ptr
++ * @param calendar_ptr
++ */
++static void _draw_page(cairo_t *cairo_ptr, const wlm_calendar_t *calendar_ptr)
++{
++    const double top = 22;
++
++    cairo_set_source_argb8888(cairo_ptr, color_paper);
++    cairo_rectangle(cairo_ptr, 1, top + 1, ICON_SIZE - 2, ICON_SIZE - top - 2);
++    cairo_fill(cairo_ptr);
++
++    // The band with the weekday.
++    cairo_set_source_argb8888(cairo_ptr, color_red);
++    cairo_rectangle(cairo_ptr, 1, top + 1, ICON_SIZE - 2, 9);
++    cairo_fill(cairo_ptr);
++
++    wlm_primitives_draw_bezel_at(
++        cairo_ptr, 0, top, ICON_SIZE, ICON_SIZE - top, 1.0, true);
++
++    cairo_select_font_face(cairo_ptr, font_face, CAIRO_FONT_SLANT_NORMAL,
++                           CAIRO_FONT_WEIGHT_BOLD);
++    cairo_set_source_argb8888(cairo_ptr, 0xfff8f4ec);
++    _draw_text_centered(cairo_ptr, calendar_ptr->weekday,
++                        ICON_SIZE / 2, top + 8.6, 8.5, ICON_SIZE - 8);
++
++    char day[4];
++    snprintf(day, sizeof(day), "%d", BS_MIN(BS_MAX(calendar_ptr->mday, 0), 99));
++    cairo_set_source_argb8888(cairo_ptr, color_ink);
++    _draw_text_centered(cairo_ptr, day,
++                        ICON_SIZE / 2, top + 24.0, 16.0, ICON_SIZE - 8);
++
++    cairo_set_source_argb8888(cairo_ptr, color_red);
++    _draw_text_centered(cairo_ptr, calendar_ptr->month,
++                        ICON_SIZE / 2, top + 32.0, 7.5, ICON_SIZE - 8);
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Draws contents into the icon buffer.
++ *
++ * @param gfxbuf_ptr
++ * @param ud_ptr
++ *
++ * @return true on success.
++ */
++static bool _icon_callback(bs_gfxbuf_t *gfxbuf_ptr, __UNUSED__ void *ud_ptr)
++{
++    bs_gfxbuf_clear(gfxbuf_ptr, 0);
++
++    cairo_t *cairo_ptr = cairo_create_from_bs_gfxbuf(gfxbuf_ptr);
++    if (NULL == cairo_ptr) {
++        bs_log(BS_ERROR, "Failed cairo_create_from_bs_gfxbuf(%p)", gfxbuf_ptr);
++        return false;
++    }
++    cairo_scale(cairo_ptr,
++                gfxbuf_ptr->width / ICON_SIZE,
++                gfxbuf_ptr->height / ICON_SIZE);
++
++    // Uses the timers' clock: `time()` may be served from a coarse clock that
++    // still shows the previous second when the timer fires.
++    time_t now = bs_usec() / 1000000;
++    struct tm tm;
++    if (NULL == localtime_r(&now, &tm)) memset(&tm, 0, sizeof(tm));
++    wlm_calendar_t calendar;
++    wlm_calendar_format(&tm, arg_twelve_hour, arg_seconds, &calendar);
++
++    _draw_time(cairo_ptr, &calendar);
++    _draw_page(cairo_ptr, &calendar);
++
++    cairo_destroy(cairo_ptr);
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++/** @return When to draw next: At the next full minute, or second. */
++static uint64_t _next_draw_usec(void)
++{
++    return wlm_calendar_next_period_usec(
++        bs_usec(), arg_seconds ? UINT64_C(1000000) : UINT64_C(60000000));
++}
++
++/* ------------------------------------------------------------------------- */
++/** Called on each full minute (or second): Redraws. */
++static void _timer_callback(wlmcl_client_t *client_ptr, void *ud_ptr)
++{
++    if (NULL != dblbuf_ptr) {
++        wlmcl_dblbuf_register_ready_callback(dblbuf_ptr, _icon_callback, NULL);
++    }
++    wlmcl_client_register_timer(
++        client_ptr, _next_draw_usec(), _timer_callback, ud_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles configure events: (Re)creates the buffer and draws. */
++static void _handle_configure(void *ud_ptr, uint32_t width, uint32_t height)
++{
++    wlmcl_icon_t *icon_ptr = ud_ptr;
++    if (NULL != dblbuf_ptr) {
++        wlmcl_dblbuf_destroy(dblbuf_ptr);
++    }
++    dblbuf_ptr = wlmcl_dblbuf_create(
++        wlmcl_client_attributes(wlclient_ptr)->app_id_ptr,
++        wlmcl_icon_wl_surface(icon_ptr),
++        wlmcl_client_attributes(wlclient_ptr)->wl_shm_ptr,
++        width,
++        height);
++    if (NULL == dblbuf_ptr) {
++        bs_log(BS_FATAL, "Failed wlmcl_dblbuf_create.");
++        return;
++    }
++    wlmcl_dblbuf_register_ready_callback(dblbuf_ptr, _icon_callback, NULL);
++}
++
++/* == Main program ========================================================= */
++/** Main program. */
++int main(int argc, const char **argv)
++{
++    if (!bs_arg_parse(wlmcalclock_args, BS_ARG_MODE_EXTRA_ARGS, &argc, argv)) {
++        fprintf(stderr, "Failed to parse commandline arguments.\n");
++        bs_arg_print_usage(stderr, wlmcalclock_args);
++        return EXIT_FAILURE;
++    }
++    for (int i = 1; i < argc; ++i) {
++        if (0 == strcmp(argv[i], "--help")) {
++            bs_arg_print_usage(stdout, wlmcalclock_args);
++            bs_arg_cleanup(wlmcalclock_args);
++            return EXIT_SUCCESS;
++        }
++        fprintf(stderr, "Unknown argument \"%s\".\n", argv[i]);
++        bs_arg_print_usage(stderr, wlmcalclock_args);
++        bs_arg_cleanup(wlmcalclock_args);
++        return EXIT_FAILURE;
++    }
++
++    // Names of weekday and month, and their case conversion, follow the
++    // session's locale. Other categories (eg. LC_NUMERIC) remain "C".
++    setlocale(LC_TIME, "");
++    setlocale(LC_CTYPE, "");
++
++    wlclient_ptr = wlmcl_client_create("wlmaker.wlmcalclock");
++    if (NULL == wlclient_ptr) return EXIT_FAILURE;
++
++    // TODO(kaeser@gubbe.ch): Move icon_protocol to @ref wlmcl_client_register,
++    // and permit clients to be registerd as 'required'.
++    wl_display_roundtrip(
++        wlmcl_client_attributes(wlclient_ptr)->wl_display_ptr);
++    wl_display_roundtrip(
++        wlmcl_client_attributes(wlclient_ptr)->wl_display_ptr);
++    int rv = EXIT_SUCCESS;
++    if (wlmcl_icon_supported(wlclient_ptr)) {
++        wlmcl_icon_t *icon_ptr = wlmcl_icon_create(wlclient_ptr);
++        if (NULL == icon_ptr) {
++            bs_log(BS_ERROR, "Failed wlmcl_icon_create(%p)", wlclient_ptr);
++            rv = EXIT_FAILURE;
++        } else {
++            wlmcl_icon_register_configure_callback(
++                icon_ptr, _handle_configure, icon_ptr);
++            wlmcl_client_register_timer(
++                wlclient_ptr, _next_draw_usec(), _timer_callback, icon_ptr);
++
++            wlmcl_client_run(wlclient_ptr);
++            wlmcl_icon_destroy(icon_ptr);
++            if (NULL != dblbuf_ptr) {
++                wlmcl_dblbuf_destroy(dblbuf_ptr);
++                dblbuf_ptr = NULL;
++            }
++        }
++    } else {
++        bs_log(BS_ERROR, "icon protocol is not supported.");
++        rv = EXIT_FAILURE;
++    }
++
++    wlmcl_client_destroy(wlclient_ptr);
++    bs_arg_cleanup(wlmcalclock_args);
++    return rv;
++}
++/* == End of wlmcalclock.c ================================================= */
+diff --git a/share/CMakeLists.txt b/share/CMakeLists.txt
+index 5116708..48d2c58 100644
+--- a/share/CMakeLists.txt
++++ b/share/CMakeLists.txt
+@@ -31,6 +31,10 @@ configure_file(
+   "${CMAKE_CURRENT_SOURCE_DIR}/wlmaker.wlmbattery.desktop.in"
+   "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmbattery.desktop"
+   @ONLY)
++configure_file(
++  "${CMAKE_CURRENT_SOURCE_DIR}/wlmaker.wlmcalclock.desktop.in"
++  "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmcalclock.desktop"
++  @ONLY)
+ configure_file(
+   "${CMAKE_CURRENT_SOURCE_DIR}/wlmaker.wlmclock.desktop.in"
+   "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmclock.desktop"
+@@ -59,6 +63,7 @@ configure_file(
+ install(FILES
+   "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.desktop"
+   "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmbattery.desktop"
++  "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmcalclock.desktop"
+   "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmclock.desktop"
+   "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmcpugraph.desktop"
+   "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmeyes.desktop"
+@@ -89,6 +94,13 @@ if(DESKTOP_FILE_VALIDATOR)
+   set_property(
+     TEST wlmbattery_desktop_test
+     PROPERTY FAIL_REGULAR_EXPRESSION " error: ")
++  add_test(
++    NAME wlmcalclock_desktop_test
++    COMMAND "${DESKTOP_FILE_VALIDATOR}" "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmcalclock.desktop")
++  # We also want to report errors that are not "fatal" yet.
++  set_property(
++    TEST wlmcalclock_desktop_test
++    PROPERTY FAIL_REGULAR_EXPRESSION " error: ")
+   add_test(
+     NAME wlmclock_desktop_test
+     COMMAND "${DESKTOP_FILE_VALIDATOR}" "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmclock.desktop")
+@@ -189,6 +201,10 @@ install(FILES
+   "wlmbattery-64x64.png"
+   DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps"
+   RENAME "wlmbattery.png")
++install(FILES
++  "wlmcalclock-64x64.png"
++  DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps"
++  RENAME "wlmcalclock.png")
+ install(FILES
+   "wlmclock-64x64.png"
+   DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps"
+diff --git a/share/wlmaker.wlmcalclock.desktop.in b/share/wlmaker.wlmcalclock.desktop.in
+new file mode 100644
+index 0000000..5d03824
+--- /dev/null
++++ b/share/wlmaker.wlmcalclock.desktop.in
+@@ -0,0 +1,9 @@
++[Desktop Entry]
++Name=WLMCalClock
++GenericName="Wayland Maker Calendar Clock dockapp"
++Comment="Display time, weekday, day and month"
++Exec=@CMAKE_INSTALL_PREFIX@/bin/wlmcalclock
++Type=Application
++Categories=Utility;Clock;
++Keywords=clock;calendar;date;dockapp;wlmaker
++Icon=wlmcalclock
+diff --git a/share/wlmcalclock-64x64.png b/share/wlmcalclock-64x64.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..cffb5d7e2b52f867b07f32bdf07b86085f8d8778
+GIT binary patch
+literal 2715
+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
+HDWM4fNXbn1
+
+literal 0
+HcmV?d00001
+
+-- 
+2.55.0
+

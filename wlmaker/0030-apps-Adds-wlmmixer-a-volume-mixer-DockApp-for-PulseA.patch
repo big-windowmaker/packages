@@ -1,0 +1,1342 @@
+From 8e194d8089ff0b9cb019809fb3e95cb7382eae00 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 19:00:42 -0300
+Subject: [PATCH 30/30] apps: Adds wlmmixer, a volume mixer DockApp for
+ PulseAudio and PipeWire.
+
+Shows the volume of the default audio output (sink) in percent and as a
+meter of increasing bars, and whether it is muted; similar to Window
+Maker's `wmix`. The mouse wheel changes the volume in steps of 5% (up to
+100%), a left click toggles mute, and a right or middle click runs
+`pavucontrol`.
+
+Talks to the sound server through the PulseAudio client library, which
+works with PulseAudio and with PipeWire (through `pipewire-pulse`). It
+subscribes to changes of sinks and of the server's default sink, so
+changes made elsewhere (eg. `pactl`, keyboard volume keys) show up right
+away, without polling. The PulseAudio mainloop runs in its own thread,
+and wakes up the Wayland mainloop through an eventfd.
+
+Without a sound server or without a default sink, the app shows "--".
+It does not auto-spawn a server; if the server is missing or goes away,
+it reconnects with an increasing delay (0.5 s up to 8 s).
+
+Options: --mixer_command (default: pavucontrol, empty disables it),
+--step (percent per wheel step), --max_volume (limit when raising with
+the wheel, in percent).
+
+libpulse is an optional dependency: Without it, wlmmixer is not built.
+Volume computations are in wlm_volume, with unit tests in `apps_test`.
+Adds a .desktop file and an icon.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ CMakeLists.txt                    |   2 +
+ README.md                         |   2 +-
+ apps/CMakeLists.txt               |  14 +-
+ apps/apps_test.c                  |   2 +
+ apps/wlm_volume.c                 | 172 +++++++
+ apps/wlm_volume.h                 | 104 ++++
+ apps/wlmmixer.c                   | 795 ++++++++++++++++++++++++++++++
+ doc/BUILD.md                      |   4 +
+ share/CMakeLists.txt              |  20 +
+ share/wlmaker.wlmmixer.desktop.in |   9 +
+ share/wlmmixer-64x64.png          | Bin 0 -> 1816 bytes
+ 11 files changed, 1121 insertions(+), 3 deletions(-)
+ create mode 100644 apps/wlm_volume.c
+ create mode 100644 apps/wlm_volume.h
+ create mode 100644 apps/wlmmixer.c
+ create mode 100644 share/wlmaker.wlmmixer.desktop.in
+ create mode 100644 share/wlmmixer-64x64.png
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 77c9d93..e23623a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -90,6 +90,8 @@ pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo>=1.16.0)
+ pkg_check_modules(LIBRSVG REQUIRED IMPORTED_TARGET librsvg-2.0)
+ pkg_check_modules(LIBXDGBASEDIR REQUIRED IMPORTED_TARGET libxdg-basedir>=1.2)
+ pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon>=1.5.0)
++# Optional: For the `wlmmixer` DockApp. Works with PulseAudio and PipeWire.
++pkg_check_modules(LIBPULSE IMPORTED_TARGET libpulse>=13.0)
+ 
+ # https://github.com/ianlancetaylor/libbacktrace.
+ # The REQUIRED arg is available only from cmake 3.28.
+diff --git a/README.md b/README.md
+index 01a557e..216f752 100644
+--- a/README.md
++++ b/README.md
+@@ -45,7 +45,7 @@ Highlights for current version ([0.8.1](https://github.com/phkaeser/wlmaker/rele
+ * Initial support for X11 applications (positioning and specific modes are missing).
+   Use `--start_xwayland` argument to enable XWayland, it's off by default.
+ * DockApps (`apps/wlmclock`, `apps/wlmbattery`, `apps/wlmcpugraph`,
+-  `apps/wlmcalclock`, ...).
++  `apps/wlmcalclock`, `apps/wlmmixer`, ...).
+ 
+ ### All the details?
+ 
+diff --git a/apps/CMakeLists.txt b/apps/CMakeLists.txt
+index 8614d78..9a29dcb 100644
+--- a/apps/CMakeLists.txt
++++ b/apps/CMakeLists.txt
+@@ -50,14 +50,16 @@ endif()
+ 
+ add_library(wlm_calendar STATIC wlm_calendar.c wlm_calendar.h)
+ target_link_libraries(wlm_calendar libbase)
++add_library(wlm_volume STATIC wlm_volume.c wlm_volume.h)
++target_link_libraries(wlm_volume libbase)
+ if(iwyu_path_and_options)
+   set_target_properties(
+-    wlm_calendar PROPERTIES
++    wlm_calendar wlm_volume PROPERTIES
+     C_INCLUDE_WHAT_YOU_USE "${iwyu_path_and_options}")
+ endif()
+ 
+ add_executable(apps_test apps_test.c)
+-target_link_libraries(apps_test wlm_calendar libbase)
++target_link_libraries(apps_test wlm_calendar wlm_volume libbase)
+ add_test(NAME apps_test COMMAND apps_test)
+ 
+ add_wlm_app(wlmclock wlmclient_lib primitives m)
+@@ -72,3 +74,11 @@ install(
+   TARGETS wlmclock wlmeyes wlmcpugraph wlmmemgraph wlmnetgraph wlmbattery
+   wlmcalclock
+   DESTINATION "${CMAKE_INSTALL_BINDIR}")
++
++# The mixer talks to PulseAudio, or to PipeWire through pipewire-pulse.
++if(LIBPULSE_FOUND)
++  add_wlm_app(wlmmixer wlm_volume wlmclient_lib primitives PkgConfig::LIBPULSE m)
++  install(TARGETS wlmmixer DESTINATION "${CMAKE_INSTALL_BINDIR}")
++else()
++  message(STATUS "libpulse not found. Will not build wlmmixer.")
++endif()
+diff --git a/apps/apps_test.c b/apps/apps_test.c
+index 3fc3ece..3e16231 100644
+--- a/apps/apps_test.c
++++ b/apps/apps_test.c
+@@ -25,10 +25,12 @@
+ #include <stddef.h>
+ 
+ #include "wlm_calendar.h"
++#include "wlm_volume.h"
+ 
+ /** Unit tests. */
+ const bs_test_set_t *test_sets[] = {
+     &wlm_calendar_test_set,
++    &wlm_volume_test_set,
+     NULL,
+ };
+ 
+diff --git a/apps/wlm_volume.c b/apps/wlm_volume.c
+new file mode 100644
+index 0000000..3d2d00b
+--- /dev/null
++++ b/apps/wlm_volume.c
+@@ -0,0 +1,172 @@
++/* ========================================================================= */
++/**
++ * @file wlm_volume.c
++ *
++ * @copyright
++ * Copyright (c) 2026 Philipp Kaeser (kaeser@gubbe.ch)
++ * Copyright 2026 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "wlm_volume.h"
++
++#include <stdbool.h>
++
++/* == Exported methods ===================================================== */
++
++/* ------------------------------------------------------------------------- */
++unsigned wlm_volume_to_percent(uint32_t volume)
++{
++    return (unsigned)(((uint64_t)volume * 100 + WLM_VOLUME_NORM / 2) /
++                      WLM_VOLUME_NORM);
++}
++
++/* ------------------------------------------------------------------------- */
++uint32_t wlm_volume_from_percent(unsigned percent)
++{
++    return (uint32_t)(((uint64_t)percent * WLM_VOLUME_NORM + 50) / 100);
++}
++
++/* ------------------------------------------------------------------------- */
++uint32_t wlm_volume_step(
++    uint32_t volume,
++    int steps,
++    unsigned step_percent,
++    unsigned max_percent)
++{
++    if (0 == steps || 0 == step_percent) return volume;
++    long percent = wlm_volume_to_percent(volume);
++    long step = step_percent;
++
++    long new_percent;
++    if (0 < steps) {
++        if (percent >= (long)max_percent) return volume;
++        // Down to the grid, then up.
++        new_percent = (percent / step + steps) * step;
++        new_percent = BS_MIN(new_percent, (long)max_percent);
++    } else {
++        // Up to the grid, then down.
++        new_percent = ((percent + step - 1) / step + steps) * step;
++        new_percent = BS_MAX(new_percent, 0L);
++    }
++    return wlm_volume_from_percent((unsigned)new_percent);
++}
++
++/* ------------------------------------------------------------------------- */
++int wlm_volume_axis_steps(double *accumulator_ptr, int discrete, double value)
++{
++    if (0 != discrete) {
++        *accumulator_ptr = 0;
++        return -discrete;
++    }
++    *accumulator_ptr += value;
++    int steps = (int)(*accumulator_ptr / WLM_VOLUME_AXIS_STEP_DISTANCE);
++    *accumulator_ptr -= steps * WLM_VOLUME_AXIS_STEP_DISTANCE;
++    return -steps;
++}
++
++/* == Unit tests =========================================================== */
++
++static void test_percent(bs_test_t *test_ptr);
++static void test_step(bs_test_t *test_ptr);
++static void test_axis_steps(bs_test_t *test_ptr);
++
++/** Test cases. */
++static const bs_test_case_t _wlm_volume_test_cases[] = {
++    { 1, "percent", test_percent },
++    { 1, "step", test_step },
++    { 1, "axis_steps", test_axis_steps },
++    BS_TEST_CASE_SENTINEL()
++};
++
++const bs_test_set_t wlm_volume_test_set = BS_TEST_SET(
++    true, "volume", _wlm_volume_test_cases);
++
++/* ------------------------------------------------------------------------- */
++/** Tests conversion from and to percent. */
++void test_percent(bs_test_t *test_ptr)
++{
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlm_volume_to_percent(0));
++    BS_TEST_VERIFY_EQ(test_ptr, 100, wlm_volume_to_percent(WLM_VOLUME_NORM));
++    BS_TEST_VERIFY_EQ(test_ptr, 50, wlm_volume_to_percent(WLM_VOLUME_NORM / 2));
++    BS_TEST_VERIFY_EQ(test_ptr, 150,
++                      wlm_volume_to_percent(WLM_VOLUME_NORM * 3 / 2));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlm_volume_from_percent(0));
++    BS_TEST_VERIFY_EQ(test_ptr, WLM_VOLUME_NORM, wlm_volume_from_percent(100));
++    // Round trip is exact for all percentages.
++    for (unsigned p = 0; p <= 150; ++p) {
++        BS_TEST_VERIFY_EQ(test_ptr, p,
++                          wlm_volume_to_percent(wlm_volume_from_percent(p)));
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Tests @ref wlm_volume_step. */
++void test_step(bs_test_t *test_ptr)
++{
++/** Steps from `_from` percent by `_steps` steps of 5%, up to 100%. */
++#define STEP(_from, _steps) \
++    wlm_volume_to_percent(wlm_volume_step( \
++        wlm_volume_from_percent(_from), _steps, 5, 100))
++    BS_TEST_VERIFY_EQ(test_ptr, 55, STEP(50, 1));
++    BS_TEST_VERIFY_EQ(test_ptr, 45, STEP(50, -1));
++    BS_TEST_VERIFY_EQ(test_ptr, 50, STEP(47, 1));
++    BS_TEST_VERIFY_EQ(test_ptr, 45, STEP(47, -1));
++    BS_TEST_VERIFY_EQ(test_ptr, 60, STEP(47, 3));
++    BS_TEST_VERIFY_EQ(test_ptr, 35, STEP(47, -3));
++    BS_TEST_VERIFY_EQ(test_ptr, 100, STEP(98, 1));
++    BS_TEST_VERIFY_EQ(test_ptr, 100, STEP(100, 1));
++    BS_TEST_VERIFY_EQ(test_ptr, 100, STEP(90, 10));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, STEP(3, -1));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, STEP(0, -1));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, STEP(20, -10));
++    BS_TEST_VERIFY_EQ(test_ptr, 5, STEP(0, 1));
++    // Above the maximum: Stepping up keeps it, stepping down lowers it.
++    BS_TEST_VERIFY_EQ(test_ptr, 120, STEP(120, 1));
++    BS_TEST_VERIFY_EQ(test_ptr, 115, STEP(120, -1));
++    BS_TEST_VERIFY_EQ(test_ptr, 120, STEP(122, -1));
++#undef STEP
++
++    // No steps: Unchanged, also when not on a percent value.
++    BS_TEST_VERIFY_EQ(test_ptr, 12345, wlm_volume_step(12345, 0, 5, 100));
++    // A larger maximum.
++    BS_TEST_VERIFY_EQ(
++        test_ptr, wlm_volume_from_percent(150),
++        wlm_volume_step(wlm_volume_from_percent(140), 3, 5, 150));
++    // Other step size.
++    BS_TEST_VERIFY_EQ(
++        test_ptr, wlm_volume_from_percent(30),
++        wlm_volume_step(wlm_volume_from_percent(25), 1, 10, 100));
++}
++
++/* ------------------------------------------------------------------------- */
++/** Tests @ref wlm_volume_axis_steps. */
++void test_axis_steps(bs_test_t *test_ptr)
++{
++    double acc = 0;
++    // Wheel: One click up (negative) is one step up.
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlm_volume_axis_steps(&acc, -1, -15.0));
++    BS_TEST_VERIFY_EQ(test_ptr, -2, wlm_volume_axis_steps(&acc, 2, 30.0));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, acc);
++
++    // Touchpad: Accumulates.
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlm_volume_axis_steps(&acc, 0, -10.0));
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlm_volume_axis_steps(&acc, 0, -10.0));
++    BS_TEST_VERIFY_EQ(test_ptr, -5.0, acc);
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlm_volume_axis_steps(&acc, 0, 10.0));
++    BS_TEST_VERIFY_EQ(test_ptr, -2, wlm_volume_axis_steps(&acc, 0, 30.0));
++    BS_TEST_VERIFY_EQ(test_ptr, 5.0, acc);
++}
++
++/* == End of wlm_volume.c ================================================== */
+diff --git a/apps/wlm_volume.h b/apps/wlm_volume.h
+new file mode 100644
+index 0000000..6c90912
+--- /dev/null
++++ b/apps/wlm_volume.h
+@@ -0,0 +1,104 @@
++/* ========================================================================= */
++/**
++ * @file wlm_volume.h
++ *
++ * Volume computations for the mixer DockApp (`wlmmixer`). Independent of the
++ * sound server's library, to permit testing.
++ *
++ * @copyright
++ * Copyright (c) 2026 Philipp Kaeser (kaeser@gubbe.ch)
++ * Copyright 2026 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#ifndef __WLM_VOLUME_H__
++#define __WLM_VOLUME_H__
++
++#include <libbase/libbase.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif  // __cplusplus
++
++/** The volume at 100%. Same value as PulseAudio's `PA_VOLUME_NORM`. */
++#define WLM_VOLUME_NORM UINT32_C(0x10000)
++
++/** Scroll distance that counts as one step, for continuous axis sources. */
++#define WLM_VOLUME_AXIS_STEP_DISTANCE 15.0
++
++/**
++ * Converts a volume to percent, rounded to the nearest integer.
++ *
++ * @param volume              Linear volume, @ref WLM_VOLUME_NORM is 100%.
++ *
++ * @return The volume in percent.
++ */
++unsigned wlm_volume_to_percent(uint32_t volume);
++
++/**
++ * Converts percent to volume.
++ *
++ * @param percent
++ *
++ * @return The volume, where @ref WLM_VOLUME_NORM is 100%.
++ */
++uint32_t wlm_volume_from_percent(unsigned percent);
++
++/**
++ * Computes the volume after `steps` steps up (positive) or down (negative).
++ *
++ * The result is aligned to multiples of `step_percent`: From 47%, one step of
++ * 5% up yields 50%, and one step down yields 45%. Stepping up does not exceed
++ * `max_percent`, and does not lower a volume that is already above. Stepping
++ * down does not go below 0%.
++ *
++ * @param volume              Current volume.
++ * @param steps               Number of steps. Positive values increase.
++ * @param step_percent        Size of a step, in percent. Must be > 0.
++ * @param max_percent         Upper limit when stepping up, in percent.
++ *
++ * @return The new volume.
++ */
++uint32_t wlm_volume_step(
++    uint32_t volume,
++    int steps,
++    unsigned step_percent,
++    unsigned max_percent);
++
++/**
++ * Converts pointer axis motion into volume steps.
++ *
++ * Discrete steps (eg. mouse wheel clicks) are used if provided. Otherwise
++ * (eg. touchpad scrolling), the continuous `value` is accumulated in
++ * `*accumulator_ptr`, and a step is taken for each
++ * @ref WLM_VOLUME_AXIS_STEP_DISTANCE of motion. Scrolling up (negative axis
++ * values) yields positive steps, ie. increases the volume.
++ *
++ * @param accumulator_ptr     Accumulated continuous motion. Initialize to 0.
++ * @param discrete            Discrete steps of the axis event, or 0.
++ * @param value               Continuous value of the axis event.
++ *
++ * @return Number of volume steps.
++ */
++int wlm_volume_axis_steps(double *accumulator_ptr, int discrete, double value);
++
++/** Unit tests. */
++extern const bs_test_set_t wlm_volume_test_set;
++
++#ifdef __cplusplus
++}  // extern "C"
++#endif  // __cplusplus
++
++#endif /* __WLM_VOLUME_H__ */
++/* == End of wlm_volume.h ================================================== */
+diff --git a/apps/wlmmixer.c b/apps/wlmmixer.c
+new file mode 100644
+index 0000000..961aad3
+--- /dev/null
++++ b/apps/wlmmixer.c
+@@ -0,0 +1,795 @@
++/* ========================================================================= */
++/**
++ * @file wlmmixer.c
++ *
++ * Volume mixer DockApp: Shows and controls the volume of the default audio
++ * output ("sink"). Similar in spirit to Window Maker's `wmix`.
++ *
++ * Talks to the sound server through the PulseAudio client library, which
++ * works with PulseAudio and with PipeWire (through `pipewire-pulse`). Changes
++ * are received as events, there is no polling. The mouse wheel changes the
++ * volume, a left click toggles mute, and a right or middle click starts a
++ * full mixer application (`pavucontrol`, by default).
++ *
++ * The PulseAudio mainloop runs in a separate thread, and signals updates to
++ * the Wayland mainloop through an `eventfd`.
++ *
++ * @copyright
++ * Copyright (c) 2026 Philipp Kaeser (kaeser@gubbe.ch)
++ * Copyright 2026 Google LLC
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include <cairo.h>
++#include <errno.h>
++#include <libbase/libbase.h>
++#include <linux/input-event-codes.h>
++#include <math.h>
++#include <primitives/primitives.h>
++#include <primitives/segment_display.h>
++#include <pulse/pulseaudio.h>
++#include <signal.h>
++#include <spawn.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/eventfd.h>
++#include <unistd.h>
++#include <wayland-client-core.h>
++#include <wayland-client-protocol.h>
++#include <wayland-server-core.h>
++#include <wlclient/dblbuf.h>
++#include <wlclient/icon.h>
++#include <wlclient/wlclient.h>
++
++#include "wlm_volume.h"
++
++/* == Declarations ========================================================= */
++
++/** Logical size of the icon. Drawing is scaled to the actual size. */
++#define ICON_SIZE 56.0
++
++/** Number of bars in the volume meter. */
++#define BARS 12
++
++/** Initial delay for reconnecting to the sound server. */
++#define RECONNECT_MIN_USEC (500 * PA_USEC_PER_MSEC)
++/** Maximum delay for reconnecting to the sound server. */
++#define RECONNECT_MAX_USEC (8 * PA_USEC_PER_SEC)
++
++/** What is shown: State of the default sink. */
++typedef struct {
++    /** Whether connected to the sound server. */
++    bool                      connected;
++    /** Whether there is a default sink. */
++    bool                      have_sink;
++    /** Index of the sink. */
++    uint32_t                  sink_index;
++    /** Volume of the sink, per channel. */
++    pa_cvolume                cvolume;
++    /** Whether the sink is muted. */
++    bool                      mute;
++} sink_state_t;
++
++/** State of the mixer. */
++typedef struct {
++    /** Wayland client. */
++    wlmcl_client_t            *wlclient_ptr;
++    /** The icon. */
++    wlmcl_icon_t              *icon_ptr;
++    /** Double buffer of the icon's surface. */
++    wlmcl_dblbuf_t            *dblbuf_ptr;
++    /** Listener for @ref wlmcl_client_events::pointer_button. */
++    struct wl_listener        pointer_button_listener;
++    /** Listener for @ref wlmcl_client_events::pointer_axis. */
++    struct wl_listener        pointer_axis_listener;
++    /** Accumulated continuous scroll motion. */
++    double                    axis_accumulator;
++    /** The state as shown on the icon. Accessed from the Wayland thread. */
++    sink_state_t              shown;
++
++    /** Signals the Wayland thread that @ref mixer_t::state was updated. */
++    int                       event_fd;
++
++    /** The PulseAudio threaded mainloop. */
++    pa_threaded_mainloop      *mainloop_ptr;
++    /** Context. Accessed with the mainloop lock held. */
++    pa_context                *context_ptr;
++    /** Timer event for reconnecting. Accessed with the mainloop lock held. */
++    pa_time_event             *reconnect_event_ptr;
++    /** Current delay before reconnecting. */
++    pa_usec_t                 reconnect_usec;
++    /** State of the sink. Accessed with the mainloop lock held. */
++    sink_state_t              state;
++} mixer_t;
++
++static void _context_connect(mixer_t *mixer_ptr);
++static void _schedule_reconnect(mixer_t *mixer_ptr);
++static void _notify(mixer_t *mixer_ptr);
++
++/** Command to run on right or middle click. */
++static char *arg_mixer_command_ptr = NULL;
++/** Volume step, in percent. */
++static uint32_t arg_step = 5;
++/** Maximum volume to step up to, in percent. */
++static uint32_t arg_max_volume = 100;
++
++/** Commandline arguments. */
++static const bs_arg_t wlmmixer_args[] = {
++    BS_ARG_STRING(
++        "mixer_command",
++        "Optional: Command to run on a right or middle click. It is run "
++        "through `/bin/sh -c`. An empty string disables it.",
++        "pavucontrol",
++        &arg_mixer_command_ptr),
++    BS_ARG_UINT32(
++        "step",
++        "Optional: Volume change per mouse wheel step, in percent.",
++        5, 1, 50,
++        &arg_step),
++    BS_ARG_UINT32(
++        "max_volume",
++        "Optional: Maximum volume to raise to with the mouse wheel, in "
++        "percent.",
++        100, 10, 150,
++        &arg_max_volume),
++    bs_arg_log_level,
++    BS_ARG_SENTINEL()
++};
++
++/** Illuminated LED, as in the other DockApps. */
++static const uint32_t color_led = 0xff55ffff;
++/** Color of a turned-off element in the VFD-style display. */
++static const uint32_t color_off = 0xff114444;
++/** Background color in the VFD-style display. */
++static const uint32_t color_background = 0xff111111;
++/** Color for 'muted'. */
++static const uint32_t color_mute = 0xffff4040;
++/** Color of illuminated meter bars while muted. */
++static const uint32_t color_bar_muted = 0xff3c6464;
++
++/** Segments for the percentage. */
++static const wlm_cairo_7segment_param_t param_digits = {
++    .offset = 0.8,
++    .width = 1.2,
++    .hlength = 5.0,
++    .vlength = 5.0
++};
++
++/* == PulseAudio thread ==================================================== */
++
++/* ------------------------------------------------------------------------- */
++/** Callback for pa_context_get_sink_info_by_name: Stores the sink's state. */
++static void _sink_info_callback(
++    __UNUSED__ pa_context *context_ptr,
++    const pa_sink_info *info_ptr,
++    int eol,
++    void *ud_ptr)
++{
++    mixer_t *mixer_ptr = ud_ptr;
++    if (0 > eol) {
++        // No default sink.
++        if (mixer_ptr->state.have_sink) {
++            mixer_ptr->state.have_sink = false;
++            _notify(mixer_ptr);
++        }
++        return;
++    }
++    if (NULL == info_ptr) return;  // End of list.
++
++    mixer_ptr->state.have_sink = true;
++    mixer_ptr->state.sink_index = info_ptr->index;
++    mixer_ptr->state.cvolume = info_ptr->volume;
++    mixer_ptr->state.mute = info_ptr->mute;
++    _notify(mixer_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Queries the state of the default sink. */
++static void _query_default_sink(mixer_t *mixer_ptr)
++{
++    pa_operation *op_ptr = pa_context_get_sink_info_by_name(
++        mixer_ptr->context_ptr, "@DEFAULT_SINK@",
++        _sink_info_callback, mixer_ptr);
++    if (NULL != op_ptr) pa_operation_unref(op_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Subscription callback: A sink or the server (default sink) changed. */
++static void _subscribe_callback(
++    __UNUSED__ pa_context *context_ptr,
++    pa_subscription_event_type_t type,
++    __UNUSED__ uint32_t index,
++    void *ud_ptr)
++{
++    mixer_t *mixer_ptr = ud_ptr;
++    switch (type & PA_SUBSCRIPTION_EVENT_FACILITY_MASK) {
++    case PA_SUBSCRIPTION_EVENT_SINK:
++    case PA_SUBSCRIPTION_EVENT_SERVER:
++        _query_default_sink(mixer_ptr);
++        break;
++    default:
++        break;
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Timer event callback: Reconnects to the server. */
++static void _reconnect_callback(
++    pa_mainloop_api *api_ptr,
++    pa_time_event *time_event_ptr,
++    __UNUSED__ const struct timeval *tv_ptr,
++    void *ud_ptr)
++{
++    mixer_t *mixer_ptr = ud_ptr;
++    api_ptr->time_free(time_event_ptr);
++    mixer_ptr->reconnect_event_ptr = NULL;
++    _context_connect(mixer_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Schedules a reconnect, with exponential backoff. */
++void _schedule_reconnect(mixer_t *mixer_ptr)
++{
++    if (NULL != mixer_ptr->reconnect_event_ptr) return;
++    struct timeval tv;
++    pa_timeval_add(pa_gettimeofday(&tv), mixer_ptr->reconnect_usec);
++    pa_mainloop_api *api_ptr = pa_threaded_mainloop_get_api(
++        mixer_ptr->mainloop_ptr);
++    mixer_ptr->reconnect_event_ptr = api_ptr->time_new(
++        api_ptr, &tv, _reconnect_callback, mixer_ptr);
++    mixer_ptr->reconnect_usec = BS_MIN(
++        2 * mixer_ptr->reconnect_usec, RECONNECT_MAX_USEC);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Context state callback: Subscribes when ready, reconnects on failure. */
++static void _context_state_callback(pa_context *context_ptr, void *ud_ptr)
++{
++    mixer_t *mixer_ptr = ud_ptr;
++
++    switch (pa_context_get_state(context_ptr)) {
++    case PA_CONTEXT_READY: {
++        bs_log(BS_INFO, "Connected to sound server %s",
++               pa_context_get_server(context_ptr));
++        mixer_ptr->reconnect_usec = RECONNECT_MIN_USEC;
++        mixer_ptr->state.connected = true;
++        pa_context_set_subscribe_callback(
++            context_ptr, _subscribe_callback, mixer_ptr);
++        pa_operation *op_ptr = pa_context_subscribe(
++            context_ptr,
++            PA_SUBSCRIPTION_MASK_SINK | PA_SUBSCRIPTION_MASK_SERVER,
++            NULL, NULL);
++        if (NULL != op_ptr) pa_operation_unref(op_ptr);
++        _query_default_sink(mixer_ptr);
++        _notify(mixer_ptr);
++        break;
++    }
++
++    case PA_CONTEXT_FAILED:
++    case PA_CONTEXT_TERMINATED:
++        // Logs the loss of a connection, but not each failed retry.
++        bs_log(mixer_ptr->state.connected ? BS_INFO : BS_DEBUG,
++               "Disconnected from sound server: %s",
++               pa_strerror(pa_context_errno(context_ptr)));
++        mixer_ptr->state = (sink_state_t){};
++        _notify(mixer_ptr);
++        // Retry later, the context is replaced from the timer callback.
++        _schedule_reconnect(mixer_ptr);
++        break;
++
++    default:
++        break;
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * (Re)creates the context and connects to the sound server. Must be called
++ * from the mainloop thread, or with the mainloop lock held.
++ *
++ * @param mixer_ptr
++ */
++void _context_connect(mixer_t *mixer_ptr)
++{
++    if (NULL != mixer_ptr->context_ptr) {
++        pa_context_set_state_callback(mixer_ptr->context_ptr, NULL, NULL);
++        pa_context_set_subscribe_callback(mixer_ptr->context_ptr, NULL, NULL);
++        pa_context_disconnect(mixer_ptr->context_ptr);
++        pa_context_unref(mixer_ptr->context_ptr);
++        mixer_ptr->context_ptr = NULL;
++    }
++
++    pa_proplist *proplist_ptr = pa_proplist_new();
++    pa_proplist_sets(proplist_ptr, PA_PROP_APPLICATION_NAME, "wlmmixer");
++    pa_proplist_sets(proplist_ptr, PA_PROP_APPLICATION_ID, "wlmaker.wlmmixer");
++    pa_proplist_sets(proplist_ptr, PA_PROP_APPLICATION_ICON_NAME,
++                     "multimedia-volume-control");
++    mixer_ptr->context_ptr = pa_context_new_with_proplist(
++        pa_threaded_mainloop_get_api(mixer_ptr->mainloop_ptr),
++        "wlmmixer",
++        proplist_ptr);
++    pa_proplist_free(proplist_ptr);
++    if (NULL == mixer_ptr->context_ptr) {
++        bs_log(BS_ERROR, "Failed pa_context_new_with_proplist()");
++        _schedule_reconnect(mixer_ptr);
++        return;
++    }
++    pa_context_set_state_callback(
++        mixer_ptr->context_ptr, _context_state_callback, mixer_ptr);
++
++    // Don't auto-spawn a server: That's for the session to do. Should the
++    // server be absent, the state callback will retry later.
++    if (0 > pa_context_connect(mixer_ptr->context_ptr, NULL,
++                               PA_CONTEXT_NOAUTOSPAWN, NULL)) {
++        bs_log(BS_DEBUG, "Failed pa_context_connect(): %s",
++               pa_strerror(pa_context_errno(mixer_ptr->context_ptr)));
++        _schedule_reconnect(mixer_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Wakes up the Wayland thread, to show the updated state. */
++void _notify(mixer_t *mixer_ptr)
++{
++    uint64_t one = 1;
++    if (0 > write(mixer_ptr->event_fd, &one, sizeof(one)) && EAGAIN != errno) {
++        bs_log(BS_WARNING | BS_ERRNO, "Failed write(%d, ...)",
++               mixer_ptr->event_fd);
++    }
++}
++
++/* == Drawing ============================================================== */
++
++/* ------------------------------------------------------------------------- */
++/** Draws a speaker symbol, with sound waves or a cross for 'muted'. */
++static void _draw_speaker(cairo_t *cairo_ptr, const sink_state_t *state_ptr)
++{
++    bool active = state_ptr->connected && state_ptr->have_sink;
++    uint32_t color = active ? color_led : color_off;
++    if (active && state_ptr->mute) color = color_mute;
++
++    cairo_set_source_argb8888(cairo_ptr, color);
++    cairo_move_to(cairo_ptr, 4, 10);
++    cairo_line_to(cairo_ptr, 7, 10);
++    cairo_line_to(cairo_ptr, 11.5, 5.5);
++    cairo_line_to(cairo_ptr, 11.5, 19.5);
++    cairo_line_to(cairo_ptr, 7, 15);
++    cairo_line_to(cairo_ptr, 4, 15);
++    cairo_close_path(cairo_ptr);
++    cairo_fill(cairo_ptr);
++
++    cairo_set_line_width(cairo_ptr, 1.3);
++    if (active && state_ptr->mute) {
++        cairo_move_to(cairo_ptr, 14.5, 9.5);
++        cairo_line_to(cairo_ptr, 20, 15.5);
++        cairo_move_to(cairo_ptr, 20, 9.5);
++        cairo_line_to(cairo_ptr, 14.5, 15.5);
++        cairo_stroke(cairo_ptr);
++        return;
++    }
++
++    // Sound waves; the outer one lights up above 50%.
++    unsigned percent = wlm_volume_to_percent(pa_cvolume_max(&state_ptr->cvolume));
++    for (int i = 0; i < 2; ++i) {
++        bool lit = active && 0 < percent && (0 == i || 50 < percent);
++        cairo_set_source_argb8888(cairo_ptr, lit ? color_led : color_off);
++        cairo_new_sub_path(cairo_ptr);
++        cairo_arc(cairo_ptr, 10.5, 12.5, 4.5 + 3.8 * i, -M_PI / 4, M_PI / 4);
++        cairo_stroke(cairo_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Draws the volume in percent, or "--" if there is no sink. */
++static void _draw_percent(cairo_t *cairo_ptr, const sink_state_t *state_ptr)
++{
++    const uint32_t baseline = 18;
++    const uint32_t x = 27;
++    if (!state_ptr->connected || !state_ptr->have_sink) {
++        for (int i = 0; i < 3; ++i) {
++            wlm_cairo_7segment_display_segments(
++                cairo_ptr, &param_digits, x + i * 8, baseline,
++                color_led, color_off,
++                0 < i ? WLM_CAIRO_7SEGMENT_MINUS : 0);
++        }
++        return;
++    }
++
++    unsigned percent = BS_MIN(
++        wlm_volume_to_percent(pa_cvolume_max(&state_ptr->cvolume)), 999U);
++    uint32_t color = state_ptr->mute ? color_mute : color_led;
++    char digits[4];
++    snprintf(digits, sizeof(digits), "%3u", percent);
++    for (int i = 0; i < 3; ++i) {
++        if (' ' == digits[i]) {
++            wlm_cairo_7segment_display_segments(
++                cairo_ptr, &param_digits, x + i * 8, baseline,
++                color, color_off, 0);
++        } else {
++            wlm_cairo_7segment_display_digit(
++                cairo_ptr, &param_digits, x + i * 8, baseline,
++                color, color_off, digits[i] - '0');
++        }
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Draws the volume meter: Bars of increasing height, illuminated up to the
++ * volume. Colors go from green over yellow to red.
++ */
++static void _draw_meter(cairo_t *cairo_ptr, const sink_state_t *state_ptr)
++{
++    const double left = 5.0, bottom = 50.0, max_height = 22.0;
++    const double bar_width = 2.6, bar_pitch = 3.85;
++
++    double ratio = 0;
++    if (state_ptr->connected && state_ptr->have_sink) {
++        ratio = (double)pa_cvolume_max(&state_ptr->cvolume) / PA_VOLUME_NORM;
++    }
++    // Each bar stands for 1/BARS of 100%. Bars are lit if at least half-way.
++    int lit = (int)floor(ratio * BARS + 0.5);
++
++    for (int i = 0; i < BARS; ++i) {
++        double height = 4.0 + (max_height - 4.0) * i / (BARS - 1);
++        uint32_t color = color_off;
++        if (i < lit) {
++            if (state_ptr->mute) {
++                color = color_bar_muted;
++            } else if (i < BARS / 2) {
++                color = 0xff40e040;
++            } else if (i < BARS * 5 / 6) {
++                color = 0xffe0e040;
++            } else {
++                color = 0xffff5030;
++            }
++        }
++        cairo_set_source_argb8888(cairo_ptr, color);
++        cairo_rectangle(cairo_ptr, left + i * bar_pitch, bottom - height,
++                        bar_width, height);
++        cairo_fill(cairo_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Draws the icon. */
++static bool _icon_callback(bs_gfxbuf_t *gfxbuf_ptr, void *ud_ptr)
++{
++    mixer_t *mixer_ptr = ud_ptr;
++
++    bs_gfxbuf_clear(gfxbuf_ptr, 0);
++    cairo_t *cairo_ptr = cairo_create_from_bs_gfxbuf(gfxbuf_ptr);
++    if (NULL == cairo_ptr) {
++        bs_log(BS_ERROR, "Failed cairo_create_from_bs_gfxbuf(%p)", gfxbuf_ptr);
++        return false;
++    }
++    cairo_scale(cairo_ptr,
++                gfxbuf_ptr->width / ICON_SIZE,
++                gfxbuf_ptr->height / ICON_SIZE);
++
++    cairo_set_source_argb8888(cairo_ptr, color_background);
++    cairo_rectangle(cairo_ptr, 1, 1, ICON_SIZE - 2, ICON_SIZE - 2);
++    cairo_fill(cairo_ptr);
++    wlm_primitives_draw_bezel_at(
++        cairo_ptr, 0, 0, ICON_SIZE, ICON_SIZE, 1.0, false);
++
++    _draw_speaker(cairo_ptr, &mixer_ptr->shown);
++    _draw_percent(cairo_ptr, &mixer_ptr->shown);
++    _draw_meter(cairo_ptr, &mixer_ptr->shown);
++
++    cairo_destroy(cairo_ptr);
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Requests a redraw of the icon. */
++static void _redraw(mixer_t *mixer_ptr)
++{
++    if (NULL == mixer_ptr->dblbuf_ptr) return;
++    wlmcl_dblbuf_register_ready_callback(
++        mixer_ptr->dblbuf_ptr, _icon_callback, mixer_ptr);
++}
++
++/* == Wayland thread ======================================================= */
++
++/* ------------------------------------------------------------------------- */
++/** Called when @ref mixer_t::event_fd is readable: Shows the new state. */
++static void _handle_event_fd(__UNUSED__ wlmcl_client_t *client_ptr, void *ud_ptr)
++{
++    mixer_t *mixer_ptr = ud_ptr;
++    uint64_t value;
++    if (0 > read(mixer_ptr->event_fd, &value, sizeof(value)) &&
++        EAGAIN != errno) {
++        bs_log(BS_WARNING | BS_ERRNO, "Failed read(%d, ...)",
++               mixer_ptr->event_fd);
++    }
++
++    pa_threaded_mainloop_lock(mixer_ptr->mainloop_ptr);
++    sink_state_t state = mixer_ptr->state;
++    pa_threaded_mainloop_unlock(mixer_ptr->mainloop_ptr);
++
++    if (0 != memcmp(&state, &mixer_ptr->shown, sizeof(state))) {
++        mixer_ptr->shown = state;
++        _redraw(mixer_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Changes the volume by `steps` steps. */
++static void _change_volume(mixer_t *mixer_ptr, int steps)
++{
++    pa_threaded_mainloop_lock(mixer_ptr->mainloop_ptr);
++    sink_state_t *state_ptr = &mixer_ptr->state;
++    if (state_ptr->connected && state_ptr->have_sink &&
++        pa_cvolume_valid(&state_ptr->cvolume)) {
++        pa_volume_t volume = wlm_volume_step(
++            pa_cvolume_max(&state_ptr->cvolume), steps,
++            arg_step, arg_max_volume);
++        // Scales all channels, keeping the balance.
++        pa_cvolume_scale(&state_ptr->cvolume, volume);
++        pa_operation *op_ptr = pa_context_set_sink_volume_by_index(
++            mixer_ptr->context_ptr, state_ptr->sink_index,
++            &state_ptr->cvolume, NULL, NULL);
++        if (NULL != op_ptr) pa_operation_unref(op_ptr);
++        _notify(mixer_ptr);
++    }
++    pa_threaded_mainloop_unlock(mixer_ptr->mainloop_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Toggles mute of the sink. */
++static void _toggle_mute(mixer_t *mixer_ptr)
++{
++    pa_threaded_mainloop_lock(mixer_ptr->mainloop_ptr);
++    sink_state_t *state_ptr = &mixer_ptr->state;
++    if (state_ptr->connected && state_ptr->have_sink) {
++        state_ptr->mute = !state_ptr->mute;
++        pa_operation *op_ptr = pa_context_set_sink_mute_by_index(
++            mixer_ptr->context_ptr, state_ptr->sink_index,
++            state_ptr->mute, NULL, NULL);
++        if (NULL != op_ptr) pa_operation_unref(op_ptr);
++        _notify(mixer_ptr);
++    }
++    pa_threaded_mainloop_unlock(mixer_ptr->mainloop_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Starts the mixer command, in its own process group, default signals. */
++static void _start_mixer_command(void)
++{
++    if (NULL == arg_mixer_command_ptr || '\0' == *arg_mixer_command_ptr) return;
++
++    posix_spawnattr_t attr;
++    if (0 != posix_spawnattr_init(&attr)) return;
++    sigset_t sigset;
++    sigemptyset(&sigset);
++    posix_spawnattr_setsigmask(&attr, &sigset);
++    sigaddset(&sigset, SIGCHLD);
++    sigaddset(&sigset, SIGINT);
++    sigaddset(&sigset, SIGPIPE);
++    posix_spawnattr_setsigdefault(&attr, &sigset);
++    // A process group of its own: Keeps it running when we are stopped.
++    posix_spawnattr_setpgroup(&attr, 0);
++    posix_spawnattr_setflags(
++        &attr,
++        POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETPGROUP);
++
++    char *const argv[] = {
++        "/bin/sh", "-c", arg_mixer_command_ptr, NULL };
++    extern char **environ;
++    pid_t pid;
++    int rv = posix_spawn(&pid, "/bin/sh", NULL, &attr, argv, environ);
++    if (0 != rv) {
++        bs_log(BS_WARNING, "Failed to start \"%s\": %s",
++               arg_mixer_command_ptr, strerror(rv));
++    } else {
++        bs_log(BS_INFO, "Started \"%s\", pid %d", arg_mixer_command_ptr, pid);
++    }
++    posix_spawnattr_destroy(&attr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles pointer buttons on the icon. */
++static void _handle_pointer_button(
++    struct wl_listener *listener_ptr,
++    void *data_ptr)
++{
++    mixer_t *mixer_ptr = BS_CONTAINER_OF(
++        listener_ptr, mixer_t, pointer_button_listener);
++    struct wlmcl_client_pointer_button_event *event_ptr = data_ptr;
++    if (event_ptr->wl_surface_ptr != wlmcl_icon_wl_surface(mixer_ptr->icon_ptr) ||
++        !event_ptr->pressed) return;
++
++    switch (event_ptr->button) {
++    case BTN_LEFT:
++        _toggle_mute(mixer_ptr);
++        break;
++    case BTN_RIGHT:
++    case BTN_MIDDLE:
++        _start_mixer_command();
++        break;
++    default:
++        break;
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles the scroll wheel on the icon. */
++static void _handle_pointer_axis(
++    struct wl_listener *listener_ptr,
++    void *data_ptr)
++{
++    mixer_t *mixer_ptr = BS_CONTAINER_OF(
++        listener_ptr, mixer_t, pointer_axis_listener);
++    struct wlmcl_client_pointer_axis_event *event_ptr = data_ptr;
++    if (event_ptr->wl_surface_ptr != wlmcl_icon_wl_surface(mixer_ptr->icon_ptr) ||
++        WL_POINTER_AXIS_VERTICAL_SCROLL != event_ptr->axis) return;
++
++    int steps = wlm_volume_axis_steps(
++        &mixer_ptr->axis_accumulator, event_ptr->discrete, event_ptr->value);
++    if (0 != steps) _change_volume(mixer_ptr, steps);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles configure events: (Re)creates the buffer and draws. */
++static void _handle_configure(void *ud_ptr, uint32_t width, uint32_t height)
++{
++    mixer_t *mixer_ptr = ud_ptr;
++    if (NULL != mixer_ptr->dblbuf_ptr) {
++        wlmcl_dblbuf_destroy(mixer_ptr->dblbuf_ptr);
++    }
++    mixer_ptr->dblbuf_ptr = wlmcl_dblbuf_create(
++        wlmcl_client_attributes(mixer_ptr->wlclient_ptr)->app_id_ptr,
++        wlmcl_icon_wl_surface(mixer_ptr->icon_ptr),
++        wlmcl_client_attributes(mixer_ptr->wlclient_ptr)->wl_shm_ptr,
++        width,
++        height);
++    if (NULL == mixer_ptr->dblbuf_ptr) {
++        bs_log(BS_FATAL, "Failed wlmcl_dblbuf_create.");
++        return;
++    }
++    _redraw(mixer_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Runs the mixer: Sets up the icon and the sound server connection. */
++static int _run(mixer_t *mixer_ptr)
++{
++    // TODO(kaeser@gubbe.ch): Move icon_protocol to @ref wlmcl_client_register,
++    // and permit clients to be registerd as 'required'.
++    wl_display_roundtrip(
++        wlmcl_client_attributes(mixer_ptr->wlclient_ptr)->wl_display_ptr);
++    wl_display_roundtrip(
++        wlmcl_client_attributes(mixer_ptr->wlclient_ptr)->wl_display_ptr);
++    if (!wlmcl_icon_supported(mixer_ptr->wlclient_ptr)) {
++        bs_log(BS_ERROR, "icon protocol is not supported.");
++        return EXIT_FAILURE;
++    }
++    mixer_ptr->icon_ptr = wlmcl_icon_create(mixer_ptr->wlclient_ptr);
++    if (NULL == mixer_ptr->icon_ptr) {
++        bs_log(BS_ERROR, "Failed wlmcl_icon_create(%p)", mixer_ptr->wlclient_ptr);
++        return EXIT_FAILURE;
++    }
++    wlmcl_icon_register_configure_callback(
++        mixer_ptr->icon_ptr, _handle_configure, mixer_ptr);
++
++    struct wlmcl_client_events *events_ptr = wlmcl_client_events(
++        mixer_ptr->wlclient_ptr);
++    mixer_ptr->pointer_button_listener.notify = _handle_pointer_button;
++    wl_signal_add(&events_ptr->pointer_button,
++                  &mixer_ptr->pointer_button_listener);
++    mixer_ptr->pointer_axis_listener.notify = _handle_pointer_axis;
++    wl_signal_add(&events_ptr->pointer_axis,
++                  &mixer_ptr->pointer_axis_listener);
++
++    int rv = EXIT_FAILURE;
++    if (wlmcl_client_register_fd(mixer_ptr->wlclient_ptr, mixer_ptr->event_fd,
++                                 _handle_event_fd, mixer_ptr)) {
++        // Created after the Wayland client: The thread inherits the signal
++        // mask, and leaves SIGINT to the client's signalfd.
++        mixer_ptr->mainloop_ptr = pa_threaded_mainloop_new();
++        if (NULL != mixer_ptr->mainloop_ptr) {
++            pa_threaded_mainloop_set_name(mixer_ptr->mainloop_ptr, "wlmmixer-pa");
++            pa_threaded_mainloop_lock(mixer_ptr->mainloop_ptr);
++            mixer_ptr->reconnect_usec = RECONNECT_MIN_USEC;
++            _context_connect(mixer_ptr);
++            if (0 == pa_threaded_mainloop_start(mixer_ptr->mainloop_ptr)) {
++                pa_threaded_mainloop_unlock(mixer_ptr->mainloop_ptr);
++
++                wlmcl_client_run(mixer_ptr->wlclient_ptr);
++                rv = EXIT_SUCCESS;
++
++                pa_threaded_mainloop_lock(mixer_ptr->mainloop_ptr);
++            } else {
++                bs_log(BS_ERROR, "Failed pa_threaded_mainloop_start()");
++            }
++            if (NULL != mixer_ptr->reconnect_event_ptr) {
++                pa_threaded_mainloop_get_api(mixer_ptr->mainloop_ptr)->time_free(
++                    mixer_ptr->reconnect_event_ptr);
++                mixer_ptr->reconnect_event_ptr = NULL;
++            }
++            if (NULL != mixer_ptr->context_ptr) {
++                pa_context_set_state_callback(mixer_ptr->context_ptr, NULL, NULL);
++                pa_context_disconnect(mixer_ptr->context_ptr);
++                pa_context_unref(mixer_ptr->context_ptr);
++                mixer_ptr->context_ptr = NULL;
++            }
++            pa_threaded_mainloop_unlock(mixer_ptr->mainloop_ptr);
++            pa_threaded_mainloop_stop(mixer_ptr->mainloop_ptr);
++            pa_threaded_mainloop_free(mixer_ptr->mainloop_ptr);
++            mixer_ptr->mainloop_ptr = NULL;
++        } else {
++            bs_log(BS_ERROR, "Failed pa_threaded_mainloop_new()");
++        }
++        wlmcl_client_unregister_fd(mixer_ptr->wlclient_ptr, mixer_ptr->event_fd);
++    }
++
++    wl_list_remove(&mixer_ptr->pointer_axis_listener.link);
++    wl_list_remove(&mixer_ptr->pointer_button_listener.link);
++    if (NULL != mixer_ptr->dblbuf_ptr) {
++        wlmcl_dblbuf_destroy(mixer_ptr->dblbuf_ptr);
++        mixer_ptr->dblbuf_ptr = NULL;
++    }
++    wlmcl_icon_destroy(mixer_ptr->icon_ptr);
++    mixer_ptr->icon_ptr = NULL;
++    return rv;
++}
++
++/* == Main program ========================================================= */
++/** Main program. */
++int main(int argc, const char **argv)
++{
++    if (!bs_arg_parse(wlmmixer_args, BS_ARG_MODE_EXTRA_ARGS, &argc, argv)) {
++        fprintf(stderr, "Failed to parse commandline arguments.\n");
++        bs_arg_print_usage(stderr, wlmmixer_args);
++        return EXIT_FAILURE;
++    }
++    for (int i = 1; i < argc; ++i) {
++        if (0 == strcmp(argv[i], "--help")) {
++            bs_arg_print_usage(stdout, wlmmixer_args);
++            bs_arg_cleanup(wlmmixer_args);
++            return EXIT_SUCCESS;
++        }
++        fprintf(stderr, "Unknown argument \"%s\".\n", argv[i]);
++        bs_arg_print_usage(stderr, wlmmixer_args);
++        bs_arg_cleanup(wlmmixer_args);
++        return EXIT_FAILURE;
++    }
++
++    // The mixer command's processes are reaped automatically. SIGPIPE is
++    // ignored, for writes to a sound server that went away.
++    signal(SIGCHLD, SIG_IGN);
++    signal(SIGPIPE, SIG_IGN);
++
++    mixer_t mixer = { .event_fd = -1 };
++    int rv = EXIT_FAILURE;
++    mixer.event_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
++    if (0 > mixer.event_fd) {
++        bs_log(BS_ERROR | BS_ERRNO, "Failed eventfd()");
++    } else {
++        mixer.wlclient_ptr = wlmcl_client_create("wlmaker.wlmmixer");
++        if (NULL != mixer.wlclient_ptr) {
++            rv = _run(&mixer);
++            wlmcl_client_destroy(mixer.wlclient_ptr);
++        }
++        close(mixer.event_fd);
++    }
++
++    bs_arg_cleanup(wlmmixer_args);
++    return rv;
++}
++/* == End of wlmmixer.c ==================================================== */
+diff --git a/doc/BUILD.md b/doc/BUILD.md
+index 52d508f..ce5c67c 100644
+--- a/doc/BUILD.md
++++ b/doc/BUILD.md
+@@ -35,6 +35,10 @@ apt-get install -y \
+   xwayland
+ ```
+ 
++Optional: `libpulse-dev`, for the `wlmmixer` DockApp. It works with PulseAudio
++and with PipeWire (through `pipewire-pulse`). Without it, `wlmmixer` is not
++built.
++
+ See the [github build workflow](../.github/workflows/build-for-linux.yml)
+ as reference.
+ 
+diff --git a/share/CMakeLists.txt b/share/CMakeLists.txt
+index 48d2c58..c187564 100644
+--- a/share/CMakeLists.txt
++++ b/share/CMakeLists.txt
+@@ -51,6 +51,10 @@ configure_file(
+   "${CMAKE_CURRENT_SOURCE_DIR}/wlmaker.wlmmemgraph.desktop.in"
+   "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmmemgraph.desktop"
+   @ONLY)
++configure_file(
++  "${CMAKE_CURRENT_SOURCE_DIR}/wlmaker.wlmmixer.desktop.in"
++  "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmmixer.desktop"
++  @ONLY)
+ configure_file(
+   "${CMAKE_CURRENT_SOURCE_DIR}/wlmaker.wlmnetgraph.desktop.in"
+   "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmnetgraph.desktop"
+@@ -71,6 +75,15 @@ install(FILES
+   "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmnetgraph.desktop"
+   "${CMAKE_CURRENT_BINARY_DIR}/wlmdock.desktop"
+   DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
++if(LIBPULSE_FOUND)
++  install(FILES
++    "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmmixer.desktop"
++    DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
++  install(FILES
++    "wlmmixer-64x64.png"
++    DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps"
++    RENAME "wlmmixer.png")
++endif()
+ 
+ # Install `wlmaker.desktop` both to wayland-sessions/ and applications/ -- it
+ # can run both as main compositor, and in windowed mode.
+@@ -136,6 +149,13 @@ if(DESKTOP_FILE_VALIDATOR)
+   set_property(
+     TEST wlmmemgraph_desktop_test
+     PROPERTY FAIL_REGULAR_EXPRESSION " error: ")
++  add_test(
++    NAME wlmmixer_desktop_test
++    COMMAND "${DESKTOP_FILE_VALIDATOR}" "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmmixer.desktop")
++  # We also want to report errors that are not "fatal" yet.
++  set_property(
++    TEST wlmmixer_desktop_test
++    PROPERTY FAIL_REGULAR_EXPRESSION " error: ")
+   add_test(
+     NAME wlmeyes_desktop_test
+     COMMAND "${DESKTOP_FILE_VALIDATOR}" "${CMAKE_CURRENT_BINARY_DIR}/wlmaker.wlmeyes.desktop")
+diff --git a/share/wlmaker.wlmmixer.desktop.in b/share/wlmaker.wlmmixer.desktop.in
+new file mode 100644
+index 0000000..c0d8a32
+--- /dev/null
++++ b/share/wlmaker.wlmmixer.desktop.in
+@@ -0,0 +1,9 @@
++[Desktop Entry]
++Name=WLMMixer
++GenericName="Wayland Maker Volume Mixer dockapp"
++Comment="Display and change the audio volume"
++Exec=@CMAKE_INSTALL_PREFIX@/bin/wlmmixer
++Type=Application
++Categories=AudioVideo;Audio;Mixer;
++Keywords=volume;mixer;audio;sound;dockapp;wlmaker
++Icon=wlmmixer
+diff --git a/share/wlmmixer-64x64.png b/share/wlmmixer-64x64.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..becb04e52a4085a820b1c35a287a02617283d770
+GIT binary patch
+literal 1816
+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
+
+literal 0
+HcmV?d00001
+
+-- 
+2.55.0
+

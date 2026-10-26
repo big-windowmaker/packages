@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r80.g7481afe
-	pkgrel = 2
+	pkgrel = 3
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -15,12 +15,15 @@ pkgbase = wlmaker
 	depends = glibc
 	depends = hicolor-icon-theme
 	depends = libinput
+	depends = libpulse
 	depends = libxcb
 	depends = libxdg-basedir
 	depends = libxkbcommon
 	depends = wayland
 	depends = wlroots0.20
 	depends = xorg-xwayland
+	optdepends = pavucontrol: mixer completo, aberto pelo clique direito no wlmmixer
+	optdepends = pipewire-pulse: servidor de som para o wlmmixer
 	source = git+https://github.com/phkaeser/wlmaker.git#commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 	source = git+https://github.com/phkaeser/libbase.git#commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
 	source = git+https://github.com/benhoyt/inih.git#commit=26254ee9de7681f8825433415443e7116ff24b98
@@ -48,6 +51,12 @@ pkgbase = wlmaker
 	source = 0022-clip-Places-dock-apps-in-a-configurable-order-re-arr.patch
 	source = 0023-dock-Adds-wlmdock-clip-for-launchers-attached-below-.patch
 	source = 0024-lock_mgr-Fixes-a-leak-in-the-lock_ends_grabs-test.patch
+	source = 0025-wlclient-Fixes-inserting-a-timer-before-other-regist.patch
+	source = 0026-wlclient-Sleeps-until-the-next-timer-and-permits-wat.patch
+	source = 0027-wlclient-Forwards-pointer-button-and-axis-events-to-.patch
+	source = 0028-primitives-Adds-wlm_cairo_7segment_display_segments-.patch
+	source = 0029-apps-Adds-wlmcalclock-a-calendar-clock-DockApp.patch
+	source = 0030-apps-Adds-wlmmixer-a-volume-mixer-DockApp-for-PulseA.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
 	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
@@ -75,5 +84,11 @@ pkgbase = wlmaker
 	sha256sums = 91058238b9028e3ed1bb59c424dc3154b35f1e2ca49592ca990a8247ba8fe537
 	sha256sums = 0bb03e7ad28b5af0e53fdc1c5588457e82b077bd818fcd1b5e62c78e4d58ce1f
 	sha256sums = 846ce7f7a31c887f51d5ab292e0e199f21354fcb2c1c952d54633048d80b551e
+	sha256sums = 966b0d6e4d14a9678c02e42b9b185b423ecad4f06f7e07873b670029ca4060f8
+	sha256sums = 38f2af15aa82548278c538db286ed07f7576ff89685ebfed7212a5d5a84ee50f
+	sha256sums = fa81b874e4b093fd0e0f8504b65cad1ad0ec2624708edb2ae9f3b0971a1439c8
+	sha256sums = ca071ec32c339976c28ad7556e71b9d2e2e6c2993ab7b49fe0aa183fe9ccb98e
+	sha256sums = 1c316feeffeee33d193aa7ffea9ad69429fe602fb1b8cd8fe81e8dee500dcd30
+	sha256sums = e80f552c7e9fbc23a4a86130b6ba3123117596a8e9313ef6a931b10cf49691ff
 
 pkgname = wlmaker
