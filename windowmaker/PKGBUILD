@@ -12,7 +12,7 @@
 pkgname=windowmaker
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
-pkgrel=1
+pkgrel=2
 pkgdesc='X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)'
 arch=(x86_64)
 url='https://www.windowmaker.org/'
@@ -47,8 +47,12 @@ depends=(
 )
 makedepends=(git)
 conflicts=(windowmaker-git)
-source=("git+https://github.com/window-maker/wmaker.git#commit=${_commit}")
-sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf')
+source=(
+  "git+https://github.com/window-maker/wmaker.git#commit=${_commit}"
+  0001-setstyle-keep-absolute-texture-paths.patch
+)
+sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
+            '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337')
 
 prepare() {
   cd wmaker
@@ -60,6 +64,11 @@ prepare() {
     echo "pkgver (${pkgver}) não confere com git describe (${_desc})" >&2
     return 1
   fi
+
+  # setstyle prefixava o diretório do tema também em caminhos absolutos
+  # (".../X.themed//usr/share/backgrounds/x.jpg"): o papel de parede dos
+  # temas não carregava. Enviar ao upstream (wmaker-dev@googlegroups.com).
+  patch -Np1 -i "${srcdir}/0001-setstyle-keep-absolute-texture-paths.patch"
 
   # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
   # sed que o Arch faz na 0.96.0 não é necessário aqui.
