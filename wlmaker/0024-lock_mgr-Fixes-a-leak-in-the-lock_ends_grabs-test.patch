@@ -1,0 +1,25 @@
+From 20abf28f773ffbd7411960422009bb24ce9dcb5b Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 18:51:55 -0300
+Subject: [PATCH 24/24] lock_mgr: Fixes a leak in the lock_ends_grabs test.
+
+Destroys the wl_client created for the test's lock surface resource. Found
+with AddressSanitizer.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ src/lock_mgr.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/lock_mgr.c b/src/lock_mgr.c
+index 36caae5..6e1423d 100644
+--- a/src/lock_mgr.c
++++ b/src/lock_mgr.c
+@@ -1449,6 +1449,7 @@ void test_lock_ends_grabs(bs_test_t *test_ptr)
+     wl_signal_emit(&lock.events.unlock, NULL);
+     _wlmaker_lock_destroy(lock_ptr);
+     wlr_seat_keyboard_clear_focus(server.wlr_seat_ptr);
++    wl_client_destroy(wl_client_ptr);
+     wlmtk_desktop_remove_workspace(server.desktop_ptr, workspace_ptr);
+     wlmtk_workspace_destroy(workspace_ptr);
+     wlmtk_desktop_destroy(server.desktop_ptr);

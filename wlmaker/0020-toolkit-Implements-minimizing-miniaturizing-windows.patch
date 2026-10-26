@@ -1,0 +1,414 @@
+From c6618ab8184e13e1afdf91f52ac12b00154c6e68 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 18:36:06 -0300
+Subject: [PATCH 20/24] toolkit: Implements minimizing (miniaturizing) windows.
+
+wlmtk_window_request_minimize() was a stub, so the title bar's minimize
+button, and clients' xdg_toplevel.set_minimized did nothing.
+
+A minimized window is hidden, but remains on its workspace and in the
+task list. If it was activated, the topmost visible window gets activated
+instead. Raising the window restores it: When selected in the task list
+(Alt+Tab), when activated through xdg-activation, and so on. Unmapping
+the window clears the state.
+
+Until there is an icon area for mini-windows, this permits to get windows
+out of the way, as with Window Maker's "Miniaturize".
+
+* Adds wlmtk_workspace_minimize_window() and wlmtk_window_is_minimized().
+* Adds the `WindowMinimize` action, and "Miniaturize" to the window menu.
+* Forwards xdg_toplevel's request_minimize.
+
+Adds a unit test.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ include/toolkit/window.h    |  15 +++++
+ include/toolkit/workspace.h |  17 ++++-
+ src/action.c                |  10 +++
+ src/action.h                |   1 +
+ src/tl_menu.c               |  11 +++
+ src/toolkit/window.c        |  20 +++++-
+ src/toolkit/workspace.c     | 130 ++++++++++++++++++++++++++++++++++--
+ src/xdg_toplevel.c          |   2 +-
+ 8 files changed, 196 insertions(+), 10 deletions(-)
+
+diff --git a/include/toolkit/window.h b/include/toolkit/window.h
+index 9b65622..c92654a 100644
+--- a/include/toolkit/window.h
++++ b/include/toolkit/window.h
+@@ -339,10 +339,25 @@ void wlmtk_window_request_close(wlmtk_window_t *window_ptr);
+ /**
+  * Requests to minimize (iconify) the window.
+  *
++ * The window is hidden, but remains on its workspace, and in the task list.
++ * Raising the window (@ref wlmtk_workspace_raise_window) restores it.
++ *
+  * @param window_ptr
+  */
+ void wlmtk_window_request_minimize(wlmtk_window_t *window_ptr);
+ 
++/** @return Whether the window is minimized. */
++bool wlmtk_window_is_minimized(wlmtk_window_t *window_ptr);
++
++/**
++ * Sets the window's minimized state. Private: To be called by the workspace
++ * only. Emits @ref wlmtk_window_events_t::state_changed.
++ *
++ * @param window_ptr
++ * @param minimized
++ */
++void wlmtk_window_set_minimized(wlmtk_window_t *window_ptr, bool minimized);
++
+ /**
+  * Requests the window to be fullscreen (or end fullscreen).
+  *
+diff --git a/include/toolkit/workspace.h b/include/toolkit/workspace.h
+index 31a9d7c..d208530 100644
+--- a/include/toolkit/workspace.h
++++ b/include/toolkit/workspace.h
+@@ -255,11 +255,26 @@ void wlmtk_workspace_activate_previous_window(
+ void wlmtk_workspace_activate_next_window(
+     wlmtk_workspace_t *workspace_ptr);
+ 
+-/** Raises `window_ptr`: Will show it atop all other windows. */
++/**
++ * Raises `window_ptr`: Will show it atop all other windows. A minimized
++ * window is restored.
++ */
+ void wlmtk_workspace_raise_window(
+     wlmtk_workspace_t *workspace_ptr,
+     wlmtk_window_t *window_ptr);
+ 
++/**
++ * Minimizes `window_ptr`: Hides it, but keeps it on the workspace. If it was
++ * activated, the topmost visible window gets activated instead. Restore it
++ * through @ref wlmtk_workspace_raise_window.
++ *
++ * @param workspace_ptr
++ * @param window_ptr
++ */
++void wlmtk_workspace_minimize_window(
++    wlmtk_workspace_t *workspace_ptr,
++    wlmtk_window_t *window_ptr);
++
+ /** @return Pointer to @ref wlmtk_workspace_t::window_container's element. */
+ wlmtk_element_t *wlmtk_workspace_window_element(
+     wlmtk_workspace_t *workspace_ptr);
+diff --git a/src/action.c b/src/action.c
+index 1fe409e..9a91c35 100644
+--- a/src/action.c
++++ b/src/action.c
+@@ -125,6 +125,7 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
+     BSPL_ENUM("WindowFullscreen", WLMAKER_ACTION_WINDOW_FULLSCREEN),
+     BSPL_ENUM("WindowShade", WLMAKER_ACTION_WINDOW_SHADE),
+     BSPL_ENUM("WindowUnshade", WLMAKER_ACTION_WINDOW_UNSHADE),
++    BSPL_ENUM("WindowMinimize", WLMAKER_ACTION_WINDOW_MINIMIZE),
+     BSPL_ENUM("WindowClose", WLMAKER_ACTION_WINDOW_CLOSE),
+     BSPL_ENUM("WindowToNextWorkspace", WLMAKER_ACTION_WINDOW_TO_NEXT_WORKSPACE),
+     BSPL_ENUM("WindowToPreviousWorkspace", WLMAKER_ACTION_WINDOW_TO_PREVIOUS_WORKSPACE),
+@@ -364,6 +365,15 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
+         }
+         break;
+ 
++    case WLMAKER_ACTION_WINDOW_MINIMIZE:
++        workspace_ptr = wlmtk_desktop_get_current_workspace(
++            server_ptr->desktop_ptr);
++        window_ptr = wlmtk_workspace_get_activated_window(workspace_ptr);
++        if (NULL != window_ptr) {
++            wlmtk_window_request_minimize(window_ptr);
++        }
++        break;
++
+     case WLMAKER_ACTION_WINDOW_TO_NEXT_WORKSPACE:
+         workspace_ptr = wlmtk_desktop_get_current_workspace(
+             server_ptr->desktop_ptr);
+diff --git a/src/action.h b/src/action.h
+index 1ff656b..1f69f51 100644
+--- a/src/action.h
++++ b/src/action.h
+@@ -61,6 +61,7 @@ typedef enum {
+     WLMAKER_ACTION_WINDOW_FULLSCREEN,
+     WLMAKER_ACTION_WINDOW_SHADE,
+     WLMAKER_ACTION_WINDOW_UNSHADE,
++    WLMAKER_ACTION_WINDOW_MINIMIZE,
+     WLMAKER_ACTION_WINDOW_CLOSE,
+     WLMAKER_ACTION_WINDOW_TO_NEXT_WORKSPACE,
+     WLMAKER_ACTION_WINDOW_TO_PREVIOUS_WORKSPACE,
+diff --git a/src/tl_menu.c b/src/tl_menu.c
+index 6ad72a2..e95dbf4 100644
+--- a/src/tl_menu.c
++++ b/src/tl_menu.c
+@@ -58,6 +58,8 @@ struct _wlmaker_tl_menu_t {
+     wlmaker_action_item_t     *unmaximize_ai_ptr;
+     /** Action item for 'Fullscreen'. */
+     wlmaker_action_item_t     *fullscreen_ai_ptr;
++    /** Action item for 'Miniaturize'. */
++    wlmaker_action_item_t     *minimize_ai_ptr;
+     /** Action item for 'Shade'. */
+     wlmaker_action_item_t     *shade_ai_ptr;
+     /** Action item for 'Unshade'. */
+@@ -131,6 +133,12 @@ static const wlmaker_action_item_desc_t _tl_menu_items[] = {
+         NULL,
+         offsetof(wlmaker_tl_menu_t, fullscreen_ai_ptr)
+     },
++    {
++        "Miniaturize",
++        WLMAKER_ACTION_WINDOW_MINIMIZE,
++        NULL,
++        offsetof(wlmaker_tl_menu_t, minimize_ai_ptr)
++    },
+     {
+         "Shade",
+         WLMAKER_ACTION_WINDOW_SHADE,
+@@ -258,6 +266,9 @@ void _wlmaker_tl_menu_handle_window_state_changed(
+     wlmtk_menu_item_set_enabled(
+         wlmaker_action_item_menu_item(tl_menu_ptr->fullscreen_ai_ptr),
+         !wlmtk_window_is_fullscreen(window_ptr));
++    wlmtk_menu_item_set_enabled(
++        wlmaker_action_item_menu_item(tl_menu_ptr->minimize_ai_ptr),
++        !wlmtk_window_is_minimized(window_ptr));
+ 
+     wlmtk_menu_item_set_enabled(
+         wlmaker_action_item_menu_item(tl_menu_ptr->maximize_ai_ptr),
+diff --git a/src/toolkit/window.c b/src/toolkit/window.c
+index 068ff74..dfeb9a7 100644
+--- a/src/toolkit/window.c
++++ b/src/toolkit/window.c
+@@ -136,6 +136,8 @@ struct _wlmtk_window_t {
+     bool                      maximized;
+     /** Whether this window is currently shaded. */
+     bool                      shaded;
++    /** Whether this window is currently minimized (hidden). */
++    bool                      minimized;
+     /** Whether this window is currently activated (has keyboard focus). */
+     bool                      activated;
+ };
+@@ -573,7 +575,23 @@ void wlmtk_window_request_close(wlmtk_window_t *window_ptr)
+ /* ------------------------------------------------------------------------- */
+ void wlmtk_window_request_minimize(wlmtk_window_t *window_ptr)
+ {
+-    bs_log(BS_ERROR, "TODO: Request minimize for window %p", window_ptr);
++    wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(window_ptr);
++    if (NULL == workspace_ptr) return;
++    wlmtk_workspace_minimize_window(workspace_ptr, window_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmtk_window_is_minimized(wlmtk_window_t *window_ptr)
++{
++    return window_ptr->minimized;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmtk_window_set_minimized(wlmtk_window_t *window_ptr, bool minimized)
++{
++    if (window_ptr->minimized == minimized) return;
++    window_ptr->minimized = minimized;
++    wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/toolkit/workspace.c b/src/toolkit/workspace.c
+index 7694b3a..f673f20 100644
+--- a/src/toolkit/workspace.c
++++ b/src/toolkit/workspace.c
+@@ -198,6 +198,9 @@ static const wlmtk_fsm_transition_t pfsm_transitions[] = {
+ /** For window placement: Pixel distance between each stacked position. */
+ static const int _wlmtk_workspace_placement_step = 24;
+ 
++static wlmtk_window_t *_wlmtk_workspace_topmost_visible_window(
++    wlmtk_workspace_t *workspace_ptr);
++
+ /* == Exported methods ===================================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -480,15 +483,12 @@ void wlmtk_workspace_unmap_window(wlmtk_workspace_t *workspace_ptr,
+             window_ptr);
+     }
+ 
++    wlmtk_window_set_minimized(window_ptr, false);
++
+     if (need_activation) {
+         // FIXME: What about raising?
+-        bs_dllist_node_t *dlnode_ptr =
+-            workspace_ptr->window_container.elements.head_ptr;
+-        if (NULL != dlnode_ptr) {
+-            wlmtk_element_t *element_ptr = wlmtk_element_from_dlnode(dlnode_ptr);
+-            wlmtk_window_t *window_ptr = wlmtk_window_from_element(element_ptr);
+-            wlmtk_workspace_activate_window(workspace_ptr, window_ptr);
+-        }
++        wlmtk_workspace_activate_window(
++            workspace_ptr, _wlmtk_workspace_topmost_visible_window(workspace_ptr));
+     }
+ }
+ 
+@@ -666,6 +666,12 @@ void wlmtk_workspace_raise_window(
+ {
+     BS_ASSERT(workspace_ptr == wlmtk_window_get_workspace(window_ptr));
+ 
++    // Raising a minimized window restores it.
++    if (wlmtk_window_is_minimized(window_ptr)) {
++        wlmtk_element_set_visible(wlmtk_window_element(window_ptr), true);
++        wlmtk_window_set_minimized(window_ptr, false);
++    }
++
+     // No raising if this window isn't int the window container, eg. when
+     // being full-screen.
+     if (wlmtk_window_element(window_ptr)->parent_container_ptr !=
+@@ -679,6 +685,28 @@ void wlmtk_workspace_raise_window(
+                                          wlmtk_window_element(window_ptr));
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmtk_workspace_minimize_window(
++    wlmtk_workspace_t *workspace_ptr,
++    wlmtk_window_t *window_ptr)
++{
++    BS_ASSERT(workspace_ptr == wlmtk_window_get_workspace(window_ptr));
++    if (wlmtk_window_is_minimized(window_ptr)) return;
++
++    if (workspace_ptr->grabbed_window_ptr == window_ptr) {
++        wlmtk_fsm_event(&workspace_ptr->fsm, PFSME_RESET, NULL);
++    }
++
++    wlmtk_element_set_visible(wlmtk_window_element(window_ptr), false);
++    wlmtk_window_set_minimized(window_ptr, true);
++
++    if (workspace_ptr->activated_window_ptr == window_ptr) {
++        wlmtk_workspace_activate_window(
++            workspace_ptr,
++            _wlmtk_workspace_topmost_visible_window(workspace_ptr));
++    }
++}
++
+ /* ------------------------------------------------------------------------- */
+ wlmtk_element_t *wlmtk_workspace_window_element(wlmtk_workspace_t *workspace_ptr)
+ {
+@@ -723,6 +751,25 @@ wlmtk_workspace_t *wlmtk_workspace_from_dlnode(
+ 
+ /* == Local (static) methods =============================================== */
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * @return The topmost visible (ie. not minimized) window in the workspace's
++ *     window container, or NULL if there is none.
++ */
++wlmtk_window_t *_wlmtk_workspace_topmost_visible_window(
++    wlmtk_workspace_t *workspace_ptr)
++{
++    for (bs_dllist_node_t *dlnode_ptr =
++             workspace_ptr->window_container.elements.head_ptr;
++         NULL != dlnode_ptr;
++         dlnode_ptr = dlnode_ptr->next_ptr) {
++        wlmtk_element_t *element_ptr = wlmtk_element_from_dlnode(dlnode_ptr);
++        if (!element_ptr->visible) continue;
++        return wlmtk_window_from_element(element_ptr);
++    }
++    return NULL;
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Virtual destructor, wraps to our dtor. */
+ void _wlmtk_workspace_window_element_destroy(wlmtk_element_t *element_ptr)
+@@ -1096,6 +1143,7 @@ static void test_resize(bs_test_t *test_ptr);
+ static void test_enable(bs_test_t *test_ptr);
+ static void test_activate(bs_test_t *test_ptr);
+ static void test_activate_cycling(bs_test_t *test_ptr);
++static void test_minimize(bs_test_t *test_ptr);
+ static void test_multi_output_extents(bs_test_t *test_ptr);
+ static void test_multi_output_reposition(bs_test_t *test_ptr);
+ static void test_window_position(bs_test_t *test_ptr);
+@@ -1115,6 +1163,7 @@ static const bs_test_case_t _wlmtk_workspace_test_cases[] = {
+     { 1, "enable", test_enable } ,
+     { 1, "activate", test_activate },
+     { 1, "activate_cycling", test_activate_cycling },
++    { 1, "minimize", test_minimize },
+     { 1, "multi_output_extents", test_multi_output_extents },
+     { 1, "multi_output_reposition", test_multi_output_reposition },
+     { 1, "window_position", test_window_position },
+@@ -2006,4 +2055,71 @@ void test_window_position(bs_test_t *test_ptr)
+     wlr_output_layout_remove(c_ptr->wlr_output_layout_ptr, &o1);
+ }
+ 
++
++/* ------------------------------------------------------------------------- */
++/** Tests minimizing and restoring windows. */
++void test_minimize(bs_test_t *test_ptr)
++{
++    struct wl_display *display_ptr = wl_display_create();
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, display_ptr);
++    struct wlr_output_layout *wlr_output_layout_ptr =
++        wlr_output_layout_create(display_ptr);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, wlr_output_layout_ptr);
++    struct wlr_output output = { .width = 1024, .height = 768, .scale = 1 };
++    wlmtk_test_wlr_output_init(&output);
++    wlr_output_layout_add(wlr_output_layout_ptr, &output, 0, 0);
++    wlmtk_workspace_t *ws_ptr = wlmtk_workspace_create(
++        wlr_output_layout_ptr, "t", &_wlmtk_workspace_test_tile_style);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, ws_ptr);
++    wlmtk_element_set_visible(wlmtk_workspace_window_element(ws_ptr), true);
++    wlmtk_workspace_enable(ws_ptr, true);
++
++    wlmtk_fake_element_t *fe1_ptr = wlmtk_fake_element_create();
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, fe1_ptr);
++    wlmtk_fake_element_set_dimensions(fe1_ptr, 100, 100);
++    wlmtk_window_t *w1 = wlmtk_test_window_create(&fe1_ptr->element);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, w1);
++    wlmtk_fake_element_t *fe2_ptr = wlmtk_fake_element_create();
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, fe2_ptr);
++    wlmtk_fake_element_set_dimensions(fe2_ptr, 100, 100);
++    wlmtk_window_t *w2 = wlmtk_test_window_create(&fe2_ptr->element);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, w2);
++
++    wlmtk_workspace_map_window(ws_ptr, w1);
++    wlmtk_workspace_map_window(ws_ptr, w2);
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_activated(w2));
++
++    // Minimize w2: Hidden, w1 gets activated. Stays on the workspace.
++    wlmtk_window_request_minimize(w2);
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_minimized(w2));
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_window_element(w2)->visible);
++    BS_TEST_VERIFY_EQ(test_ptr, ws_ptr, wlmtk_window_get_workspace(w2));
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_window_is_activated(w2));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_activated(w1));
++
++    // Minimize w1 too: Nothing is activated.
++    wlmtk_window_request_minimize(w1);
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_window_is_activated(w1));
++    BS_TEST_VERIFY_EQ(test_ptr, NULL, wlmtk_workspace_get_activated_window(ws_ptr));
++
++    // Raising (eg. from the task list, or xdg-activation) restores.
++    wlmtk_workspace_activate_window(ws_ptr, w2);
++    wlmtk_workspace_raise_window(ws_ptr, w2);
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_window_is_minimized(w2));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_element(w2)->visible);
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_activated(w2));
++
++    // Unmapping a minimized window clears the state.
++    wlmtk_workspace_unmap_window(ws_ptr, w1);
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_window_is_minimized(w1));
++
++    wlmtk_workspace_unmap_window(ws_ptr, w2);
++    wlmtk_window_destroy(w2);
++    wlmtk_element_destroy(&fe2_ptr->element);
++    wlmtk_window_destroy(w1);
++    wlmtk_element_destroy(&fe1_ptr->element);
++    wlmtk_workspace_destroy(ws_ptr);
++    wl_display_destroy(display_ptr);
++}
++
+ /* == End of workspace.c =================================================== */
+diff --git a/src/xdg_toplevel.c b/src/xdg_toplevel.c
+index 464b59e..d694ceb 100644
+--- a/src/xdg_toplevel.c
++++ b/src/xdg_toplevel.c
+@@ -618,7 +618,7 @@ void _wlmaker_xdg_toplevel_handle_request_minimize(
+     struct wlmaker_xdg_toplevel *wlmaker_xdg_toplevel_ptr = BS_CONTAINER_OF(
+         listener_ptr, struct wlmaker_xdg_toplevel, request_minimize_listener);
+ 
+-    bs_log(BS_ERROR, "TODO: Request minimize %p", wlmaker_xdg_toplevel_ptr);
++    wlmtk_window_request_minimize(wlmaker_xdg_toplevel_ptr->window_ptr);
+ }
+ 
+ /* ------------------------------------------------------------------------- */

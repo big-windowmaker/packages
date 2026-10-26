@@ -1,0 +1,1331 @@
+From 7e96be37b39fe43db098746da18b3360ba525a9b Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 18:50:07 -0300
+Subject: [PATCH 22/24] clip: Places dock-apps in a configurable order,
+ re-arrangeable by drag.
+
+Dock-apps (wlmclock, wlmcpugraph, ...) were attached to the Clip in the
+order they happened to start, and could not be moved, unlike in Window
+Maker.
+
+* Adds `Dockapps` to the state file's `Clip` dictionary: An array with the
+  dock-apps' names (the client's process name), in the order they get
+  attached to the Clip. Unlisted dock-apps follow the listed ones.
+* Dragging a dock-app with the left button and the window move modifier
+  (same as for moving windows, default Alt) moves it in the Clip. The new
+  order is stored in `Dockapps.plist` in the configuration directory, and
+  restored at the next start.
+* toolkit: Adds wlmtk_dock_tiles(), wlmtk_dock_tile_index(),
+  wlmtk_dock_move_tile() and wlmtk_dock_get_positioning().
+
+Moving dock-apps into the Dock is not possible: The Dock is the separate
+wlmdock process, which cannot host other clients' surfaces.
+
+Adds unit tests for moving dock tiles, and for the dock-app placement.
+Documents the state file's Clip in doc/config.md.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ doc/config.md          |  24 ++
+ include/toolkit/dock.h |  31 +++
+ src/CMakeLists.txt     |   2 +
+ src/clip.c             |  23 ++
+ src/dockapps.c         | 560 +++++++++++++++++++++++++++++++++++++++++
+ src/dockapps.h         | 129 ++++++++++
+ src/icon_manager.c     | 182 +++++++++++++-
+ src/server.h           |   2 +
+ src/toolkit/dock.c     | 128 ++++++++++
+ tests/wlmaker_test.c   |   2 +
+ 10 files changed, 1075 insertions(+), 8 deletions(-)
+ create mode 100644 src/dockapps.c
+ create mode 100644 src/dockapps.h
+
+diff --git a/doc/config.md b/doc/config.md
+index 83e9fcf..58bbfe4 100644
+--- a/doc/config.md
++++ b/doc/config.md
+@@ -162,3 +162,27 @@ Example:
+ 
+ That example will configure any added output to use `Normal` transformation
+ with a scale of `1.0`.
++
++# State file {#state_file}
++
++The state file (`State.plist`, see [etc/State.plist](../etc/State.plist))
++holds the workspaces, and the setup of the *Dock* (`wlmdock`) and the *Clip*.
++
++## Clip {#state_clip}
++
++* `Edge`, `Anchor`: Where the clip is placed, eg. `Edge = LEFT; Anchor = TOP;`.
++
++* *Optional* `Output`: Dictionary, see @ref config_output.
++
++* *Optional* `Dockapps`: Array of strings, the order in which dock-apps (eg.
++  `wlmclock`, `wlmcpugraph`) are attached to the Clip, going away from the
++  Clip. A dock-app is identified by the name of its executable. Dock-apps that
++  are not listed are attached after the listed ones, in the order they start.
++
++  Example: `Dockapps = ( "wlmclock", "wlmcpugraph", "wlmnetgraph" );`
++
++  Dock-apps can be re-arranged by dragging them with the left mouse button,
++  while holding the `MoveWindowModifier` (see @ref config_file, default
++  `Alt`). The resulting order is stored in `Dockapps.plist`, in the user's
++  configuration directory (`~/.config/wlmaker/`). When that file exists, it
++  takes precedence over `Dockapps`. Remove it to return to `Dockapps`.
+diff --git a/include/toolkit/dock.h b/include/toolkit/dock.h
+index 363d9b1..fd6680e 100644
+--- a/include/toolkit/dock.h
++++ b/include/toolkit/dock.h
+@@ -110,6 +110,37 @@ void wlmtk_dock_remove_tile(
+     wlmtk_dock_t *dock_ptr,
+     wlmtk_tile_t *tile_ptr);
+ 
++/** @return The positioning `dock_ptr` was created with. */
++const wlmtk_dock_positioning_t *wlmtk_dock_get_positioning(
++    wlmtk_dock_t *dock_ptr);
++
++/** @return Number of tiles in the dock. */
++size_t wlmtk_dock_tiles(wlmtk_dock_t *dock_ptr);
++
++/**
++ * Returns the index of `tile_ptr` in the dock, counted from the dock's anchor:
++ * The tile nearest to the anchor has index 0.
++ *
++ * @param dock_ptr
++ * @param tile_ptr
++ *
++ * @return The index, or -1 if `tile_ptr` is not in the dock.
++ */
++int wlmtk_dock_tile_index(wlmtk_dock_t *dock_ptr, wlmtk_tile_t *tile_ptr);
++
++/**
++ * Moves `tile_ptr` to position `index`, counted from the dock's anchor. An
++ * index beyond the last tile moves it to the far end.
++ *
++ * @param dock_ptr
++ * @param tile_ptr
++ * @param index
++ */
++void wlmtk_dock_move_tile(
++    wlmtk_dock_t *dock_ptr,
++    wlmtk_tile_t *tile_ptr,
++    size_t index);
++
+ /** @return Pointer to the superclass @ref wlmtk_panel_t of `dock_ptr`. */
+ wlmtk_panel_t *wlmtk_dock_panel(wlmtk_dock_t *dock_ptr);
+ 
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 7badae4..2e8e9ae 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -32,6 +32,7 @@ set(public_header_files
+   clip.h
+   config.h
+   corner.h
++  dockapps.h
+   icon_manager.h
+   idle.h
+   input_observation.h
+@@ -56,6 +57,7 @@ target_sources(wlmaker_lib PRIVATE
+   clip.c
+   config.c
+   corner.c
++  dockapps.c
+   icon_manager.c
+   idle.c
+   input_observation.c
+diff --git a/src/clip.c b/src/clip.c
+index e1e2d12..97ef6d9 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -39,6 +39,7 @@
+ 
+ #include "backend/backend.h"
+ #include "backend/output_config.h"
++#include "dockapps.h"
+ #include "toolkit/toolkit.h"
+ #include "util/files.h"
+ 
+@@ -56,6 +57,8 @@ struct _wlmaker_clip_t {
+ 
+     /** The toolkit dock, holding the clip tile. */
+     wlmtk_dock_t              *wlmtk_dock_ptr;
++    /** Placement of the dock-apps in the clip's dock. */
++    wlmaker_dockapps_t        *dockapps_ptr;
+ 
+     /** The tile's texture buffer without any buttons pressed */
+     struct wlr_buffer         *tile_buffer_ptr;
+@@ -309,6 +312,21 @@ wlmaker_clip_t *wlmaker_clip_create(
+         server_ptr->wlr_output_layout_ptr->events.change.listener_list.next,
+         &clip_ptr->output_layout_change_listener.link);
+ 
++    // Dock-apps are placed in the order of the `Dockapps` array, or as
++    // re-arranged by the user (stored in `Dockapps.plist`).
++    char *fname_ptr = wlm_util_files_xdg_config_fname(
++        server_ptr->files_ptr, "Dockapps.plist");
++    clip_ptr->dockapps_ptr = wlmaker_dockapps_create(
++        clip_ptr->wlmtk_dock_ptr,
++        bspl_dict_get_array(dict_ptr, "Dockapps"),
++        fname_ptr);
++    if (NULL != fname_ptr) free(fname_ptr);
++    if (NULL == clip_ptr->dockapps_ptr) {
++        wlmaker_clip_destroy(clip_ptr);
++        return NULL;
++    }
++    server_ptr->dockapps_ptr = clip_ptr->dockapps_ptr;
++
+     server_ptr->clip_dock_ptr = clip_ptr->wlmtk_dock_ptr;
+     bs_log(BS_INFO, "Created clip %p", clip_ptr);
+     return clip_ptr;
+@@ -319,6 +337,11 @@ void wlmaker_clip_destroy(wlmaker_clip_t *clip_ptr)
+ {
+     if (NULL != clip_ptr->server_ptr) {
+         clip_ptr->server_ptr->clip_dock_ptr = NULL;
++        clip_ptr->server_ptr->dockapps_ptr = NULL;
++    }
++    if (NULL != clip_ptr->dockapps_ptr) {
++        wlmaker_dockapps_destroy(clip_ptr->dockapps_ptr);
++        clip_ptr->dockapps_ptr = NULL;
+     }
+ 
+     wlmtk_util_disconnect_listener(&clip_ptr->output_layout_change_listener);
+diff --git a/src/dockapps.c b/src/dockapps.c
+new file mode 100644
+index 0000000..9d13444
+--- /dev/null
++++ b/src/dockapps.c
+@@ -0,0 +1,560 @@
++/* ========================================================================= */
++/**
++ * @file dockapps.c
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "dockapps.h"
++
++#include <inttypes.h>
++#include <libbase/libbase.h>
++#include <libbase/plist.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <unistd.h>
++#include <wayland-server-core.h>
++#define WLR_USE_UNSTABLE
++#include <wlr/util/edges.h>
++#undef WLR_USE_UNSTABLE
++
++/* == Declarations ========================================================= */
++
++/** A dock-app placed in the dock. */
++typedef struct {
++    /** Node within @ref wlmaker_dockapps_t::placed. */
++    bs_dllist_node_t          dlnode;
++    /** The dock-app's tile. */
++    wlmtk_tile_t              *tile_ptr;
++    /** Name of the dock-app. May be NULL. */
++    char                      *name_ptr;
++} wlmaker_dockapp_t;
++
++/** State of the dock-app placement. */
++struct _wlmaker_dockapps_t {
++    /** The dock holding the dock-apps. */
++    wlmtk_dock_t              *dock_ptr;
++    /** Desired order of names, from the anchor. */
++    char                      **names_ptr;
++    /** Number of names in @ref wlmaker_dockapps_t::names_ptr. */
++    size_t                    names_len;
++    /** Placed dock-apps, in order from the anchor. */
++    bs_dllist_t               placed;
++    /** File for loading and storing the order. May be NULL. */
++    char                      *state_fname_ptr;
++};
++
++static bool _wlmaker_dockapps_set_names_from_array(
++    wlmaker_dockapps_t *dockapps_ptr,
++    bspl_array_t *array_ptr);
++static void _wlmaker_dockapps_clear_names(wlmaker_dockapps_t *dockapps_ptr);
++static size_t _wlmaker_dockapps_rank(
++    wlmaker_dockapps_t *dockapps_ptr,
++    const char *name_ptr);
++static wlmaker_dockapp_t *_wlmaker_dockapps_find(
++    wlmaker_dockapps_t *dockapps_ptr,
++    wlmtk_tile_t *tile_ptr,
++    size_t *index_ptr);
++static void _wlmaker_dockapps_update_names(wlmaker_dockapps_t *dockapps_ptr);
++static bool _wlmaker_dockapps_save(wlmaker_dockapps_t *dockapps_ptr);
++
++/** Key of the array holding the order, in the state file. */
++static const char *_wlmaker_dockapps_order_key = "Order";
++
++/* == Exported methods ===================================================== */
++
++/* ------------------------------------------------------------------------- */
++wlmaker_dockapps_t *wlmaker_dockapps_create(
++    wlmtk_dock_t *dock_ptr,
++    bspl_array_t *order_array_ptr,
++    const char *state_fname_ptr)
++{
++    wlmaker_dockapps_t *dockapps_ptr = logged_calloc(
++        1, sizeof(wlmaker_dockapps_t));
++    if (NULL == dockapps_ptr) return NULL;
++    dockapps_ptr->dock_ptr = dock_ptr;
++
++    bool loaded = false;
++    if (NULL != state_fname_ptr) {
++        dockapps_ptr->state_fname_ptr = logged_strdup(state_fname_ptr);
++        if (NULL == dockapps_ptr->state_fname_ptr) {
++            wlmaker_dockapps_destroy(dockapps_ptr);
++            return NULL;
++        }
++
++        if (bs_file_realpath_is(state_fname_ptr, S_IFREG)) {
++            bspl_object_t *o = bspl_create_object_from_plist_file(
++                state_fname_ptr);
++            bspl_array_t *a = bspl_dict_get_array(
++                bspl_dict_from_object(o), _wlmaker_dockapps_order_key);
++            if (NULL != a && 0 < bspl_array_size(a)) {
++                loaded = _wlmaker_dockapps_set_names_from_array(
++                    dockapps_ptr, a);
++            } else {
++                bs_log(BS_WARNING, "No '%s' array in dock-apps state \"%s\"",
++                       _wlmaker_dockapps_order_key, state_fname_ptr);
++            }
++            if (NULL != o) bspl_object_unref(o);
++        }
++    }
++
++    if (!loaded && NULL != order_array_ptr &&
++        !_wlmaker_dockapps_set_names_from_array(
++            dockapps_ptr, order_array_ptr)) {
++        wlmaker_dockapps_destroy(dockapps_ptr);
++        return NULL;
++    }
++    return dockapps_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_dockapps_destroy(wlmaker_dockapps_t *dockapps_ptr)
++{
++    bs_dllist_node_t *dlnode_ptr;
++    while (NULL != (dlnode_ptr = bs_dllist_pop_front(&dockapps_ptr->placed))) {
++        wlmaker_dockapp_t *dockapp_ptr = BS_CONTAINER_OF(
++            dlnode_ptr, wlmaker_dockapp_t, dlnode);
++        if (NULL != dockapp_ptr->name_ptr) free(dockapp_ptr->name_ptr);
++        free(dockapp_ptr);
++    }
++    _wlmaker_dockapps_clear_names(dockapps_ptr);
++    if (NULL != dockapps_ptr->state_fname_ptr) {
++        free(dockapps_ptr->state_fname_ptr);
++        dockapps_ptr->state_fname_ptr = NULL;
++    }
++    free(dockapps_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dockapps_add(
++    wlmaker_dockapps_t *dockapps_ptr,
++    wlmtk_tile_t *tile_ptr,
++    const char *name_ptr)
++{
++    wlmaker_dockapp_t *dockapp_ptr = logged_calloc(
++        1, sizeof(wlmaker_dockapp_t));
++    if (NULL == dockapp_ptr) return false;
++    dockapp_ptr->tile_ptr = tile_ptr;
++    if (NULL != name_ptr) {
++        dockapp_ptr->name_ptr = logged_strdup(name_ptr);
++        if (NULL == dockapp_ptr->name_ptr) {
++            free(dockapp_ptr);
++            return false;
++        }
++    }
++
++    // Tiles before the dock-apps (eg. the Clip itself) stay where they are.
++    size_t base = wlmtk_dock_tiles(dockapps_ptr->dock_ptr) -
++        bs_dllist_size(&dockapps_ptr->placed);
++
++    // Insert before the first placed dock-app with a higher rank.
++    size_t rank = _wlmaker_dockapps_rank(dockapps_ptr, name_ptr);
++    size_t index = 0;
++    bs_dllist_node_t *dlnode_ptr = dockapps_ptr->placed.head_ptr;
++    for (; NULL != dlnode_ptr; dlnode_ptr = dlnode_ptr->next_ptr, ++index) {
++        wlmaker_dockapp_t *d_ptr = BS_CONTAINER_OF(
++            dlnode_ptr, wlmaker_dockapp_t, dlnode);
++        if (_wlmaker_dockapps_rank(dockapps_ptr, d_ptr->name_ptr) > rank) break;
++    }
++    if (NULL == dlnode_ptr) {
++        bs_dllist_push_back(&dockapps_ptr->placed, &dockapp_ptr->dlnode);
++    } else {
++        bs_dllist_insert_node_before(
++            &dockapps_ptr->placed, dlnode_ptr, &dockapp_ptr->dlnode);
++    }
++
++    wlmtk_dock_add_tile(dockapps_ptr->dock_ptr, tile_ptr);
++    wlmtk_dock_move_tile(dockapps_ptr->dock_ptr, tile_ptr, base + index);
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_dockapps_remove(
++    wlmaker_dockapps_t *dockapps_ptr,
++    wlmtk_tile_t *tile_ptr)
++{
++    wlmaker_dockapp_t *dockapp_ptr = _wlmaker_dockapps_find(
++        dockapps_ptr, tile_ptr, NULL);
++    if (NULL == dockapp_ptr) return;
++
++    wlmtk_dock_remove_tile(dockapps_ptr->dock_ptr, tile_ptr);
++    bs_dllist_remove(&dockapps_ptr->placed, &dockapp_ptr->dlnode);
++    if (NULL != dockapp_ptr->name_ptr) free(dockapp_ptr->name_ptr);
++    free(dockapp_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_dockapps_move(
++    wlmaker_dockapps_t *dockapps_ptr,
++    wlmtk_tile_t *tile_ptr,
++    int delta)
++{
++    size_t index;
++    wlmaker_dockapp_t *dockapp_ptr = _wlmaker_dockapps_find(
++        dockapps_ptr, tile_ptr, &index);
++    if (NULL == dockapp_ptr || 0 == delta) return;
++
++    size_t n = bs_dllist_size(&dockapps_ptr->placed);
++    int new_index = BS_MAX(0, BS_MIN((int)n - 1, (int)index + delta));
++    if ((size_t)new_index == index) return;
++
++    bs_dllist_remove(&dockapps_ptr->placed, &dockapp_ptr->dlnode);
++    bs_dllist_node_t *dlnode_ptr = dockapps_ptr->placed.head_ptr;
++    for (int i = 0; i < new_index && NULL != dlnode_ptr; ++i) {
++        dlnode_ptr = dlnode_ptr->next_ptr;
++    }
++    if (NULL == dlnode_ptr) {
++        bs_dllist_push_back(&dockapps_ptr->placed, &dockapp_ptr->dlnode);
++    } else {
++        bs_dllist_insert_node_before(
++            &dockapps_ptr->placed, dlnode_ptr, &dockapp_ptr->dlnode);
++    }
++
++    size_t base = wlmtk_dock_tiles(dockapps_ptr->dock_ptr) - n;
++    wlmtk_dock_move_tile(dockapps_ptr->dock_ptr, tile_ptr, base + new_index);
++
++    _wlmaker_dockapps_update_names(dockapps_ptr);
++    // Without any named dock-app, there is no order worth storing.
++    if (NULL != dockapps_ptr->state_fname_ptr &&
++        0 < dockapps_ptr->names_len &&
++        !_wlmaker_dockapps_save(dockapps_ptr)) {
++        bs_log(BS_WARNING, "Failed to store dock-apps order in \"%s\"",
++               dockapps_ptr->state_fname_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++int wlmaker_dockapps_drag_delta(
++    wlmaker_dockapps_t *dockapps_ptr,
++    double dx,
++    double dy,
++    int tile_pitch)
++{
++    if (0 >= tile_pitch) return 0;
++    const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
++        dockapps_ptr->dock_ptr);
++
++    // Tiles are stacked vertically on the left & right edges.
++    double d = (WLR_EDGE_LEFT == pos_ptr->edge ||
++                WLR_EDGE_RIGHT == pos_ptr->edge) ? dy : dx;
++    int slots = (0 <= d) ?
++        (int)((d + tile_pitch / 2.0) / tile_pitch) :
++        -(int)((-d + tile_pitch / 2.0) / tile_pitch);
++
++    // Positions count away from the anchor.
++    if (WLR_EDGE_BOTTOM == pos_ptr->anchor ||
++        WLR_EDGE_RIGHT == pos_ptr->anchor) slots = -slots;
++    return slots;
++}
++
++/* ------------------------------------------------------------------------- */
++char *wlmaker_dockapps_client_name(struct wl_client *wl_client_ptr)
++{
++    pid_t pid;
++    wl_client_get_credentials(wl_client_ptr, &pid, NULL, NULL);
++
++    char path[64];
++    snprintf(path, sizeof(path), "/proc/%"PRIdMAX"/comm", (intmax_t)pid);
++    FILE *f = fopen(path, "r");
++    if (NULL == f) return NULL;
++    char name[64] = {};
++    char *rv = NULL;
++    if (NULL != fgets(name, sizeof(name), f)) {
++        name[strcspn(name, "\n")] = '\0';
++        if ('\0' != name[0]) rv = logged_strdup(name);
++    }
++    fclose(f);
++    return rv;
++}
++
++/* == Local (static) methods =============================================== */
++
++/* ------------------------------------------------------------------------- */
++/** Sets @ref wlmaker_dockapps_t::names_ptr from an array of strings. */
++bool _wlmaker_dockapps_set_names_from_array(
++    wlmaker_dockapps_t *dockapps_ptr,
++    bspl_array_t *array_ptr)
++{
++    _wlmaker_dockapps_clear_names(dockapps_ptr);
++    size_t n = bspl_array_size(array_ptr);
++    if (0 == n) return true;
++    dockapps_ptr->names_ptr = logged_calloc(n, sizeof(char*));
++    if (NULL == dockapps_ptr->names_ptr) return false;
++    for (size_t i = 0; i < n; ++i) {
++        const char *s = bspl_array_string_value_at(array_ptr, i);
++        if (NULL == s) {
++            bs_log(BS_WARNING, "Dock-apps order: Element %zu not a string", i);
++            continue;
++        }
++        char *d = logged_strdup(s);
++        if (NULL == d) return false;
++        dockapps_ptr->names_ptr[dockapps_ptr->names_len++] = d;
++    }
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Clears @ref wlmaker_dockapps_t::names_ptr. */
++void _wlmaker_dockapps_clear_names(wlmaker_dockapps_t *dockapps_ptr)
++{
++    for (size_t i = 0; i < dockapps_ptr->names_len; ++i) {
++        free(dockapps_ptr->names_ptr[i]);
++    }
++    if (NULL != dockapps_ptr->names_ptr) free(dockapps_ptr->names_ptr);
++    dockapps_ptr->names_ptr = NULL;
++    dockapps_ptr->names_len = 0;
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * @return The rank of `name_ptr` in the order: Its position, or past all
++ *     listed names if it is not listed.
++ */
++size_t _wlmaker_dockapps_rank(
++    wlmaker_dockapps_t *dockapps_ptr,
++    const char *name_ptr)
++{
++    if (NULL == name_ptr) return dockapps_ptr->names_len;
++    for (size_t i = 0; i < dockapps_ptr->names_len; ++i) {
++        if (0 == strcmp(dockapps_ptr->names_ptr[i], name_ptr)) return i;
++    }
++    return dockapps_ptr->names_len;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Finds the dock-app holding `tile_ptr`, and its index from the anchor. */
++wlmaker_dockapp_t *_wlmaker_dockapps_find(
++    wlmaker_dockapps_t *dockapps_ptr,
++    wlmtk_tile_t *tile_ptr,
++    size_t *index_ptr)
++{
++    size_t index = 0;
++    for (bs_dllist_node_t *dlnode_ptr = dockapps_ptr->placed.head_ptr;
++         NULL != dlnode_ptr;
++         dlnode_ptr = dlnode_ptr->next_ptr, ++index) {
++        wlmaker_dockapp_t *d_ptr = BS_CONTAINER_OF(
++            dlnode_ptr, wlmaker_dockapp_t, dlnode);
++        if (d_ptr->tile_ptr != tile_ptr) continue;
++        if (NULL != index_ptr) *index_ptr = index;
++        return d_ptr;
++    }
++    return NULL;
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Updates the order of names from the placed dock-apps: Their names first,
++ * then any earlier-listed names of dock-apps that are not running.
++ */
++void _wlmaker_dockapps_update_names(wlmaker_dockapps_t *dockapps_ptr)
++{
++    size_t max_len = dockapps_ptr->names_len +
++        bs_dllist_size(&dockapps_ptr->placed);
++    if (0 == max_len) return;
++    char **names_ptr = logged_calloc(max_len, sizeof(char*));
++    if (NULL == names_ptr) return;
++    size_t len = 0;
++
++    for (bs_dllist_node_t *dlnode_ptr = dockapps_ptr->placed.head_ptr;
++         NULL != dlnode_ptr;
++         dlnode_ptr = dlnode_ptr->next_ptr) {
++        wlmaker_dockapp_t *d_ptr = BS_CONTAINER_OF(
++            dlnode_ptr, wlmaker_dockapp_t, dlnode);
++        if (NULL == d_ptr->name_ptr) continue;
++        bool listed = false;
++        for (size_t i = 0; i < len; ++i) {
++            listed |= (0 == strcmp(names_ptr[i], d_ptr->name_ptr));
++        }
++        if (listed) continue;
++        names_ptr[len] = logged_strdup(d_ptr->name_ptr);
++        if (NULL != names_ptr[len]) ++len;
++    }
++    for (size_t j = 0; j < dockapps_ptr->names_len; ++j) {
++        bool listed = false;
++        for (size_t i = 0; i < len; ++i) {
++            listed |= (0 == strcmp(names_ptr[i], dockapps_ptr->names_ptr[j]));
++        }
++        if (listed) continue;
++        names_ptr[len] = logged_strdup(dockapps_ptr->names_ptr[j]);
++        if (NULL != names_ptr[len]) ++len;
++    }
++
++    _wlmaker_dockapps_clear_names(dockapps_ptr);
++    dockapps_ptr->names_ptr = names_ptr;
++    dockapps_ptr->names_len = len;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Stores the order into @ref wlmaker_dockapps_t::state_fname_ptr. */
++bool _wlmaker_dockapps_save(wlmaker_dockapps_t *dockapps_ptr)
++{
++    bool rv = false;
++    bspl_dict_t *dict_ptr = bspl_dict_create();
++    bspl_array_t *array_ptr = bspl_array_create();
++    if (NULL == dict_ptr || NULL == array_ptr) goto done;
++
++    for (size_t i = 0; i < dockapps_ptr->names_len; ++i) {
++        bspl_string_t *s = bspl_string_create(dockapps_ptr->names_ptr[i]);
++        if (NULL == s) goto done;
++        bool added = bspl_array_push_back(
++            array_ptr, bspl_object_from_string(s));
++        bspl_string_unref(s);
++        if (!added) goto done;
++    }
++    if (!bspl_dict_add(dict_ptr, _wlmaker_dockapps_order_key,
++                       bspl_object_from_array(array_ptr))) goto done;
++
++    bs_dynbuf_t dynbuf = {};
++    if (!bs_dynbuf_init(&dynbuf, 4096, SIZE_MAX)) goto done;
++    rv = bspl_object_write(bspl_object_from_dict(dict_ptr), &dynbuf) &&
++        bs_dynbuf_write_file(
++            &dynbuf, dockapps_ptr->state_fname_ptr, S_IRUSR | S_IWUSR);
++    bs_dynbuf_fini(&dynbuf);
++
++done:
++    if (NULL != array_ptr) bspl_array_unref(array_ptr);
++    if (NULL != dict_ptr) bspl_dict_unref(dict_ptr);
++    return rv;
++}
++
++/* == Unit tests =========================================================== */
++
++static void test_order(bs_test_t *test_ptr);
++static void test_drag_delta(bs_test_t *test_ptr);
++
++/** Unit test cases. */
++static const bs_test_case_t _wlmaker_dockapps_test_cases[] = {
++    { true, "order", test_order },
++    { true, "drag_delta", test_drag_delta },
++    BS_TEST_CASE_SENTINEL()
++};
++
++const bs_test_set_t wlmaker_dockapps_test_set = BS_TEST_SET(
++    true, "dockapps", _wlmaker_dockapps_test_cases);
++
++/** Tile style for the tests. */
++static const struct wlmtk_tile_style _test_tile_style = { .size = 64 };
++
++/* ------------------------------------------------------------------------- */
++/** Tests placement from a configured order, moving, and the state file. */
++void test_order(bs_test_t *test_ptr)
++{
++    wlmtk_dock_positioning_t pos = {
++        .edge = WLR_EDGE_LEFT, .anchor = WLR_EDGE_TOP };
++    struct wlmtk_dock_style style = {};
++    wlmtk_dock_t *dock_ptr = wlmtk_dock_create(&pos, &style);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, dock_ptr);
++
++    // A tile that's not a dock-app, eg. the Clip itself.
++    wlmtk_tile_t clip, t[4];
++    BS_TEST_VERIFY_TRUE_OR_RETURN(
++        test_ptr, wlmtk_tile_init(&clip, &_test_tile_style));
++    wlmtk_dock_add_tile(dock_ptr, &clip);
++    for (int i = 0; i < 4; ++i) {
++        BS_TEST_VERIFY_TRUE_OR_RETURN(
++            test_ptr, wlmtk_tile_init(&t[i], &_test_tile_style));
++    }
++
++    bspl_object_t *o = bspl_create_object_from_plist_string("(\"b\", \"a\")");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, o);
++    const char *fname_ptr = bs_test_temp_path(test_ptr, "Dockapps.plist");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, fname_ptr);
++    wlmaker_dockapps_t *d = wlmaker_dockapps_create(
++        dock_ptr, bspl_array_from_object(o), fname_ptr);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++
++    // "a" first, then "b" goes before it. Unlisted and nameless after.
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapps_add(d, &t[0], "a"));
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlmtk_dock_tile_index(dock_ptr, &t[0]));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapps_add(d, &t[1], "b"));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapps_add(d, &t[2], NULL));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapps_add(d, &t[3], "c"));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlmtk_dock_tile_index(dock_ptr, &clip));
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlmtk_dock_tile_index(dock_ptr, &t[1]));
++    BS_TEST_VERIFY_EQ(test_ptr, 2, wlmtk_dock_tile_index(dock_ptr, &t[0]));
++    BS_TEST_VERIFY_EQ(test_ptr, 3, wlmtk_dock_tile_index(dock_ptr, &t[2]));
++    BS_TEST_VERIFY_EQ(test_ptr, 4, wlmtk_dock_tile_index(dock_ptr, &t[3]));
++
++    // Move "c" towards the anchor, beyond the first dock-app: Stops there.
++    wlmaker_dockapps_move(d, &t[3], -10);
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlmtk_dock_tile_index(dock_ptr, &clip));
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlmtk_dock_tile_index(dock_ptr, &t[3]));
++    BS_TEST_VERIFY_EQ(test_ptr, 2, wlmtk_dock_tile_index(dock_ptr, &t[1]));
++
++    // Removing works, and a new placement reads the stored order.
++    wlmaker_dockapps_remove(d, &t[0]);
++    wlmaker_dockapps_remove(d, &t[1]);
++    wlmaker_dockapps_remove(d, &t[2]);
++    wlmaker_dockapps_remove(d, &t[3]);
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlmtk_dock_tiles(dock_ptr));
++    wlmaker_dockapps_destroy(d);
++
++    d = wlmaker_dockapps_create(dock_ptr, bspl_array_from_object(o), fname_ptr);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapps_add(d, &t[0], "a"));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapps_add(d, &t[3], "c"));
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlmtk_dock_tile_index(dock_ptr, &t[3]));
++    BS_TEST_VERIFY_EQ(test_ptr, 2, wlmtk_dock_tile_index(dock_ptr, &t[0]));
++    wlmaker_dockapps_remove(d, &t[0]);
++    wlmaker_dockapps_remove(d, &t[3]);
++    wlmaker_dockapps_destroy(d);
++
++    unlink(fname_ptr);
++    char *old_ptr = bs_strdupf("%s.old", fname_ptr);
++    if (NULL != old_ptr) {
++        unlink(old_ptr);
++        free(old_ptr);
++    }
++    bspl_object_unref(o);
++    for (int i = 0; i < 4; ++i) wlmtk_tile_fini(&t[i]);
++    wlmtk_dock_remove_tile(dock_ptr, &clip);
++    wlmtk_tile_fini(&clip);
++    wlmtk_dock_destroy(dock_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Tests conversion of pointer drags into positions. */
++void test_drag_delta(bs_test_t *test_ptr)
++{
++    struct wlmtk_dock_style style = {};
++    wlmtk_dock_positioning_t pos = {
++        .edge = WLR_EDGE_LEFT, .anchor = WLR_EDGE_TOP };
++    wlmtk_dock_t *dock_ptr = wlmtk_dock_create(&pos, &style);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, dock_ptr);
++    wlmaker_dockapps_t *d = wlmaker_dockapps_create(dock_ptr, NULL, NULL);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlmaker_dockapps_drag_delta(d, 0, 20, 64));
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlmaker_dockapps_drag_delta(d, 0, 40, 64));
++    BS_TEST_VERIFY_EQ(test_ptr, -2, wlmaker_dockapps_drag_delta(d, 99, -130, 64));
++    wlmaker_dockapps_destroy(d);
++    wlmtk_dock_destroy(dock_ptr);
++
++    pos = (wlmtk_dock_positioning_t){
++        .edge = WLR_EDGE_BOTTOM, .anchor = WLR_EDGE_RIGHT };
++    dock_ptr = wlmtk_dock_create(&pos, &style);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, dock_ptr);
++    d = wlmaker_dockapps_create(dock_ptr, NULL, NULL);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++    // Anchored right: Moving left (negative x) goes away from the anchor.
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlmaker_dockapps_drag_delta(d, -64, 0, 64));
++    wlmaker_dockapps_destroy(d);
++    wlmtk_dock_destroy(dock_ptr);
++}
++
++/* == End of dockapps.c ==================================================== */
+diff --git a/src/dockapps.h b/src/dockapps.h
+new file mode 100644
+index 0000000..880876b
+--- /dev/null
++++ b/src/dockapps.h
+@@ -0,0 +1,129 @@
++/* ========================================================================= */
++/**
++ * @file dockapps.h
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#ifndef __DOCKAPPS_H__
++#define __DOCKAPPS_H__
++
++#include <libbase/libbase.h>
++#include <libbase/plist.h>
++#include <stdbool.h>
++
++#include "toolkit/toolkit.h"
++
++struct wl_client;
++
++/** Forward declaration: Placement of dock-apps in a dock (the Clip). */
++typedef struct _wlmaker_dockapps_t wlmaker_dockapps_t;
++
++#ifdef __cplusplus
++extern "C" {
++#endif  // __cplusplus
++
++/**
++ * Creates the dock-app placement for `dock_ptr`.
++ *
++ * Dock-apps are identified by a name, see @ref wlmaker_dockapps_client_name.
++ * Their order (from the dock's anchor) follows the order of names in the file
++ * at `state_fname_ptr`, if that exists; or `order_array_ptr` otherwise.
++ * Dock-apps with names not listed are placed after the listed ones.
++ *
++ * @param dock_ptr
++ * @param order_array_ptr     Array of strings, or NULL. Eg. `Clip.Dockapps`
++ *                            from the State file.
++ * @param state_fname_ptr     File to load and store the order, or NULL.
++ *
++ * @return A pointer to the dock-apps placement, or NULL on error. Must be
++ *     destroyed by calling @ref wlmaker_dockapps_destroy.
++ */
++wlmaker_dockapps_t *wlmaker_dockapps_create(
++    wlmtk_dock_t *dock_ptr,
++    bspl_array_t *order_array_ptr,
++    const char *state_fname_ptr);
++
++/** Destroys the placement. Does not remove the tiles from the dock. */
++void wlmaker_dockapps_destroy(wlmaker_dockapps_t *dockapps_ptr);
++
++/**
++ * Adds `tile_ptr` of dock-app `name_ptr` to the dock, at its place.
++ *
++ * @param dockapps_ptr
++ * @param tile_ptr
++ * @param name_ptr            May be NULL, then the tile is placed at the end.
++ *
++ * @return true on success.
++ */
++bool wlmaker_dockapps_add(
++    wlmaker_dockapps_t *dockapps_ptr,
++    wlmtk_tile_t *tile_ptr,
++    const char *name_ptr);
++
++/** Removes `tile_ptr` from the dock. */
++void wlmaker_dockapps_remove(
++    wlmaker_dockapps_t *dockapps_ptr,
++    wlmtk_tile_t *tile_ptr);
++
++/**
++ * Moves the dock-app's tile by `delta` positions, away from the anchor for
++ * positive values. Stores the resulting order in the state file, if given.
++ *
++ * @param dockapps_ptr
++ * @param tile_ptr
++ * @param delta
++ */
++void wlmaker_dockapps_move(
++    wlmaker_dockapps_t *dockapps_ptr,
++    wlmtk_tile_t *tile_ptr,
++    int delta);
++
++/**
++ * Converts a drag of the pointer (in pixels, along x and y) into a number of
++ * positions to move by in the dock: Positive moves away from the anchor.
++ *
++ * @param dockapps_ptr
++ * @param dx
++ * @param dy
++ * @param tile_pitch          Distance between two tiles, in pixels.
++ *
++ * @return The number of positions.
++ */
++int wlmaker_dockapps_drag_delta(
++    wlmaker_dockapps_t *dockapps_ptr,
++    double dx,
++    double dy,
++    int tile_pitch);
++
++/**
++ * Returns the name identifying the dock-app of `wl_client_ptr`: The name of
++ * the client's executable (process name), eg. "wlmclock".
++ *
++ * @param wl_client_ptr
++ *
++ * @return A string to be free()-ed by the caller, or NULL.
++ */
++char *wlmaker_dockapps_client_name(struct wl_client *wl_client_ptr);
++
++/** Unit test cases. */
++extern const bs_test_set_t wlmaker_dockapps_test_set;
++
++#ifdef __cplusplus
++}  // extern "C"
++#endif  // __cplusplus
++
++#endif /* __DOCKAPPS_H__ */
++/* == End of dockapps.h ==================================================== */
+diff --git a/src/icon_manager.c b/src/icon_manager.c
+index 34a4a6b..30c1d49 100644
+--- a/src/icon_manager.c
++++ b/src/icon_manager.c
+@@ -23,6 +23,7 @@
+ 
+ #include <inttypes.h>
+ #include <libbase/libbase.h>
++#include <linux/input-event-codes.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
+ #include <wayland-server-core.h>
+@@ -31,6 +32,9 @@
+ #include <wlr/types/wlr_xdg_shell.h>
+ #undef WLR_USE_UNSTABLE
+ 
++#include "dockapps.h"
++#include "input/cursor.h"
++#include "input/manager.h"
+ #include "toolkit/toolkit.h"
+ #include "wlmaker-icon-unstable-v1-server-protocol.h"
+ #include "server.h"
+@@ -82,6 +86,19 @@ struct _wlmaker_toplevel_icon_t {
+     struct wl_listener        surface_commit_listener;
+     /** Listener for the `destroy` event of `wlr_surface_ptr`. */
+     struct wl_listener        surface_destroy_listener;
++
++    /** The superclass' original element virtual method table. */
++    wlmtk_element_vmt_t       orig_element_vmt;
++    /** Whether the icon is being dragged to another place in the dock. */
++    bool                      dragging;
++    /** Pointer position where the drag started, in tile coordinates. */
++    double                    drag_start_x;
++    /** Pointer position where the drag started, in tile coordinates. */
++    double                    drag_start_y;
++    /** Latest pointer position during the drag, in tile coordinates. */
++    double                    drag_x;
++    /** Latest pointer position during the drag, in tile coordinates. */
++    double                    drag_y;
+ };
+ 
+ static wlmaker_icon_manager_t *icon_manager_from_resource(
+@@ -130,6 +147,16 @@ static void handle_surface_destroy(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
+ 
++static bool _wlmaker_toplevel_icon_element_pointer_button(
++    wlmtk_element_t *element_ptr,
++    const wlmtk_button_event_t *button_event_ptr);
++static bool _wlmaker_toplevel_icon_element_pointer_accepts_motion(
++    wlmtk_element_t *element_ptr,
++    wlmtk_pointer_motion_event_t *motion_event_ptr);
++static void _wlmaker_toplevel_icon_element_pointer_grab_cancel(
++    wlmtk_element_t *element_ptr);
++static void _wlmaker_toplevel_icon_remove_from_dock(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr);
+ static void _wlmaker_toplevel_icon_element_destroy(
+     wlmtk_element_t *element_ptr);
+ static bool _wlmaker_toplevel_icon_tile_set_content_size(
+@@ -155,6 +182,10 @@ toplevel_icon_v1_implementation = {
+ /** The icon's extension to @ref wlmtk_element_t virtual method table. */
+ static const wlmtk_element_vmt_t _wlmaker_toplevel_icon_element_vmt = {
+     .destroy = _wlmaker_toplevel_icon_element_destroy,
++    .pointer_button = _wlmaker_toplevel_icon_element_pointer_button,
++    .pointer_accepts_motion =
++    _wlmaker_toplevel_icon_element_pointer_accepts_motion,
++    .pointer_grab_cancel = _wlmaker_toplevel_icon_element_pointer_grab_cancel,
+ };
+ 
+ /** Icon's extension to @ref wlmtk_tile_t virtual method table. */
+@@ -382,7 +413,7 @@ wlmaker_toplevel_icon_t *wlmaker_toplevel_icon_create(
+         wlmaker_toplevel_icon_destroy(toplevel_icon_ptr);
+         return NULL;
+     }
+-    wlmtk_element_extend(
++    toplevel_icon_ptr->orig_element_vmt = wlmtk_element_extend(
+         wlmtk_tile_element(&toplevel_icon_ptr->super_tile),
+         &_wlmaker_toplevel_icon_element_vmt);
+     wlmtk_tile_extend(
+@@ -391,9 +422,27 @@ wlmaker_toplevel_icon_t *wlmaker_toplevel_icon_create(
+     wlmtk_element_set_visible(
+         wlmtk_tile_element(&toplevel_icon_ptr->super_tile),
+         true);
+-    wlmtk_dock_add_tile(
+-        icon_manager_ptr->server_ptr->clip_dock_ptr,
+-        &toplevel_icon_ptr->super_tile);
++    if (NULL != icon_manager_ptr->server_ptr->dockapps_ptr) {
++        char *name_ptr = wlmaker_dockapps_client_name(wl_client_ptr);
++        if (NULL == name_ptr) {
++            bs_log(BS_WARNING, "Toplevel icon %p: Failed to obtain the "
++                   "dock-app's name, it will be placed last.",
++                   toplevel_icon_ptr);
++        }
++        bool added = wlmaker_dockapps_add(
++            icon_manager_ptr->server_ptr->dockapps_ptr,
++            &toplevel_icon_ptr->super_tile,
++            name_ptr);
++        if (NULL != name_ptr) free(name_ptr);
++        if (!added) {
++            wlmaker_toplevel_icon_destroy(toplevel_icon_ptr);
++            return NULL;
++        }
++    } else if (NULL != icon_manager_ptr->server_ptr->clip_dock_ptr) {
++        wlmtk_dock_add_tile(
++            icon_manager_ptr->server_ptr->clip_dock_ptr,
++            &toplevel_icon_ptr->super_tile);
++    }
+ 
+     toplevel_icon_ptr->content_surface_ptr = wlmtk_surface_create(
+         wlr_surface_ptr,
+@@ -577,12 +626,129 @@ void _wlmaker_toplevel_icon_element_destroy(wlmtk_element_t *element_ptr)
+         toplevel_icon_ptr->content_surface_ptr = NULL;
+     }
+ 
+-    if (wlmtk_tile_element(&toplevel_icon_ptr->super_tile
+-            )->parent_container_ptr) {
++    _wlmaker_toplevel_icon_remove_from_dock(toplevel_icon_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Removes the icon's tile from the clip's dock, if it is in there. */
++void _wlmaker_toplevel_icon_remove_from_dock(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr)
++{
++    wlmtk_element_t *element_ptr = wlmtk_tile_element(
++        &toplevel_icon_ptr->super_tile);
++    // Not in the dock (anymore), eg. if the clip was destroyed earlier. Then,
++    // the icon manager and server may already be gone, too: Don't use them.
++    if (NULL == element_ptr->parent_container_ptr) return;
++    wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
++
++    if (toplevel_icon_ptr->dragging) {
++        wlmtk_container_pointer_grab_release(
++            element_ptr->parent_container_ptr, element_ptr);
++        toplevel_icon_ptr->dragging = false;
++    }
++    if (NULL != server_ptr->dockapps_ptr) {
++        wlmaker_dockapps_remove(
++            server_ptr->dockapps_ptr, &toplevel_icon_ptr->super_tile);
++    }
++    if (NULL != element_ptr->parent_container_ptr &&
++        NULL != server_ptr->clip_dock_ptr) {
+         wlmtk_dock_remove_tile(
+-            toplevel_icon_ptr->icon_manager_ptr->server_ptr->clip_dock_ptr,
+-            &toplevel_icon_ptr->super_tile);
++            server_ptr->clip_dock_ptr, &toplevel_icon_ptr->super_tile);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Implements @ref wlmtk_element_vmt_t::pointer_button.
++ *
++ * Dragging the icon with the left button and the window-move modifier held
++ * (the same as for moving windows) moves it to another place in the dock.
++ * Other button events go to the dock-app.
++ *
++ * @param element_ptr
++ * @param button_event_ptr
++ *
++ * @return true if the event was consumed.
++ */
++bool _wlmaker_toplevel_icon_element_pointer_button(
++    wlmtk_element_t *element_ptr,
++    const wlmtk_button_event_t *button_event_ptr)
++{
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr = BS_CONTAINER_OF(
++        element_ptr, wlmaker_toplevel_icon_t,
++        super_tile.super_container.super_element);
++    wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
++
++    if (toplevel_icon_ptr->dragging) {
++        if (BTN_LEFT == button_event_ptr->button &&
++            WLMTK_BUTTON_UP == button_event_ptr->type) {
++            toplevel_icon_ptr->dragging = false;
++            if (NULL != element_ptr->parent_container_ptr) {
++                wlmtk_container_pointer_grab_release(
++                    element_ptr->parent_container_ptr, element_ptr);
++            }
++            const wlmaker_config_style_t *style_ptr = server_ptr->style_ptr;
++            int delta = wlmaker_dockapps_drag_delta(
++                server_ptr->dockapps_ptr,
++                toplevel_icon_ptr->drag_x - toplevel_icon_ptr->drag_start_x,
++                toplevel_icon_ptr->drag_y - toplevel_icon_ptr->drag_start_y,
++                style_ptr->tile.size + style_ptr->dock.margin.width);
++            wlmaker_dockapps_move(
++                server_ptr->dockapps_ptr,
++                &toplevel_icon_ptr->super_tile,
++                delta);
++        }
++        return true;
++    }
++
++    uint32_t modifier = wlmim_cursor_options(
++        server_ptr->input_manager_ptr)->move_window_modifier;
++    if (NULL != server_ptr->dockapps_ptr &&
++        0 != modifier &&
++        BTN_LEFT == button_event_ptr->button &&
++        WLMTK_BUTTON_DOWN == button_event_ptr->type &&
++        modifier == button_event_ptr->keyboard_modifiers &&
++        NULL != element_ptr->parent_container_ptr) {
++        toplevel_icon_ptr->dragging = true;
++        toplevel_icon_ptr->drag_start_x = element_ptr->last_pointer_motion_event.x;
++        toplevel_icon_ptr->drag_start_y = element_ptr->last_pointer_motion_event.y;
++        toplevel_icon_ptr->drag_x = toplevel_icon_ptr->drag_start_x;
++        toplevel_icon_ptr->drag_y = toplevel_icon_ptr->drag_start_y;
++        wlmtk_container_pointer_grab(
++            element_ptr->parent_container_ptr, element_ptr);
++        return true;
++    }
++
++    return toplevel_icon_ptr->orig_element_vmt.pointer_button(
++        element_ptr, button_event_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Implements @ref wlmtk_element_vmt_t::pointer_accepts_motion. Tracks drag. */
++bool _wlmaker_toplevel_icon_element_pointer_accepts_motion(
++    wlmtk_element_t *element_ptr,
++    wlmtk_pointer_motion_event_t *motion_event_ptr)
++{
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr = BS_CONTAINER_OF(
++        element_ptr, wlmaker_toplevel_icon_t,
++        super_tile.super_container.super_element);
++    if (toplevel_icon_ptr->dragging) {
++        toplevel_icon_ptr->drag_x = motion_event_ptr->x;
++        toplevel_icon_ptr->drag_y = motion_event_ptr->y;
+     }
++    return toplevel_icon_ptr->orig_element_vmt.pointer_accepts_motion(
++        element_ptr, motion_event_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Implements @ref wlmtk_element_vmt_t::pointer_grab_cancel. Ends the drag. */
++void _wlmaker_toplevel_icon_element_pointer_grab_cancel(
++    wlmtk_element_t *element_ptr)
++{
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr = BS_CONTAINER_OF(
++        element_ptr, wlmaker_toplevel_icon_t,
++        super_tile.super_container.super_element);
++    toplevel_icon_ptr->dragging = false;
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/server.h b/src/server.h
+index b2f33f3..4956573 100644
+--- a/src/server.h
++++ b/src/server.h
+@@ -185,6 +185,8 @@ struct _wlmaker_server_t {
+ 
+     /** Temporary: Points to the @ref wlmtk_dock_t of the clip. */
+     wlmtk_dock_t              *clip_dock_ptr;
++    /** Placement of dock-apps in the clip. Set by the clip, may be NULL. */
++    struct _wlmaker_dockapps_t *dockapps_ptr;
+ 
+     /** Root menu, when active. NULL when not invoked. */
+     wlmaker_root_menu_t       *root_menu_ptr;
+diff --git a/src/toolkit/dock.c b/src/toolkit/dock.c
+index 79a5b3d..3c3a94d 100644
+--- a/src/toolkit/dock.c
++++ b/src/toolkit/dock.c
+@@ -26,6 +26,7 @@
+ #include <libbase/plist.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
++#include <string.h>
+ 
+ #include "box.h"
+ #include "container.h"
+@@ -194,6 +195,77 @@ void wlmtk_dock_add_tile(
+     _wlmtk_dock_panel_request_size(&dock_ptr->super_panel, 0, 0);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++const wlmtk_dock_positioning_t *wlmtk_dock_get_positioning(
++    wlmtk_dock_t *dock_ptr)
++{
++    return &dock_ptr->dock_positioning;
++}
++
++/* ------------------------------------------------------------------------- */
++size_t wlmtk_dock_tiles(wlmtk_dock_t *dock_ptr)
++{
++    return bs_dllist_size(&dock_ptr->tiles);
++}
++
++/* ------------------------------------------------------------------------- */
++int wlmtk_dock_tile_index(wlmtk_dock_t *dock_ptr, wlmtk_tile_t *tile_ptr)
++{
++    // @ref wlmtk_dock_t::tiles is in visual order (top/left first). Tiles are
++    // added at the end away from the anchor.
++    bool from_head = (WLR_EDGE_TOP == dock_ptr->dock_positioning.anchor ||
++                      WLR_EDGE_LEFT == dock_ptr->dock_positioning.anchor);
++    int index = 0;
++    for (bs_dllist_node_t *dlnode_ptr = from_head ?
++             dock_ptr->tiles.head_ptr : dock_ptr->tiles.tail_ptr;
++         NULL != dlnode_ptr;
++         dlnode_ptr = from_head ? dlnode_ptr->next_ptr : dlnode_ptr->prev_ptr) {
++        if (wlmtk_tile_from_dlnode(dlnode_ptr) == tile_ptr) return index;
++        ++index;
++    }
++    return -1;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmtk_dock_move_tile(
++    wlmtk_dock_t *dock_ptr,
++    wlmtk_tile_t *tile_ptr,
++    size_t index)
++{
++    int current = wlmtk_dock_tile_index(dock_ptr, tile_ptr);
++    size_t n = bs_dllist_size(&dock_ptr->tiles);
++    if (0 > current) return;
++    if (index >= n) index = n - 1;
++    if ((size_t)current == index) return;
++
++    // Collect tiles in order from the anchor, without `tile_ptr`.
++    wlmtk_tile_t **tiles_ptr = logged_calloc(n, sizeof(wlmtk_tile_t*));
++    if (NULL == tiles_ptr) return;
++    bool from_head = (WLR_EDGE_TOP == dock_ptr->dock_positioning.anchor ||
++                      WLR_EDGE_LEFT == dock_ptr->dock_positioning.anchor);
++    size_t pos = 0;
++    for (bs_dllist_node_t *dlnode_ptr = from_head ?
++             dock_ptr->tiles.head_ptr : dock_ptr->tiles.tail_ptr;
++         NULL != dlnode_ptr;
++         dlnode_ptr = from_head ? dlnode_ptr->next_ptr : dlnode_ptr->prev_ptr) {
++        wlmtk_tile_t *t_ptr = wlmtk_tile_from_dlnode(dlnode_ptr);
++        if (t_ptr != tile_ptr) tiles_ptr[pos++] = t_ptr;
++    }
++    // Insert `tile_ptr` at `index`.
++    memmove(&tiles_ptr[index + 1], &tiles_ptr[index],
++            (n - 1 - index) * sizeof(wlmtk_tile_t*));
++    tiles_ptr[index] = tile_ptr;
++
++    // Re-add all tiles in that order. Adding places a tile at the far end.
++    for (size_t i = 0; i < n; ++i) {
++        wlmtk_box_remove_element(
++            &dock_ptr->tile_box, wlmtk_tile_element(tiles_ptr[i]));
++        bs_dllist_remove(&dock_ptr->tiles, wlmtk_dlnode_from_tile(tiles_ptr[i]));
++    }
++    for (size_t i = 0; i < n; ++i) wlmtk_dock_add_tile(dock_ptr, tiles_ptr[i]);
++    free(tiles_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmtk_dock_remove_tile(
+     wlmtk_dock_t *dock_ptr,
+@@ -370,10 +442,12 @@ void _wlmtk_dock_tile_destroy(bs_dllist_node_t *dlnode_ptr, void *ud_ptr)
+ /* == Unit tests =========================================================== */
+ 
+ static void test_create_destroy(bs_test_t *test_ptr);
++static void test_move_tile(bs_test_t *test_ptr);
+ 
+ /** Test cases */
+ static const bs_test_case_t _wlmtk_dock_test_cases[] = {
+     { 1, "create_destroy", test_create_destroy },
++    { 1, "move_tile", test_move_tile },
+     BS_TEST_CASE_SENTINEL()
+ };
+ 
+@@ -411,4 +485,58 @@ const bs_test_set_t wlmtk_dock_test_set = BS_TEST_SET(
+     wlmtk_dock_destroy(dock_ptr);
+ }
+ 
++
++/* ------------------------------------------------------------------------- */
++/** Tests indexing and moving tiles, for both anchor directions. */
++void test_move_tile(bs_test_t *test_ptr)
++{
++    static const enum wlr_edges anchors[] = { WLR_EDGE_TOP, WLR_EDGE_BOTTOM };
++    for (size_t a = 0; a < 2; ++a) {
++        wlmtk_dock_positioning_t pos = {
++            .edge = WLR_EDGE_LEFT, .anchor = anchors[a] };
++        struct wlmtk_dock_style style = {};
++        wlmtk_dock_t *dock_ptr = wlmtk_dock_create(&pos, &style);
++        BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, dock_ptr);
++
++        struct wlmtk_tile_style ts = { .size = 64 };
++        wlmtk_tile_t t[3];
++        for (int i = 0; i < 3; ++i) {
++            BS_TEST_VERIFY_TRUE_OR_RETURN(test_ptr, wlmtk_tile_init(&t[i], &ts));
++            wlmtk_element_set_visible(wlmtk_tile_element(&t[i]), true);
++            wlmtk_dock_add_tile(dock_ptr, &t[i]);
++        }
++        BS_TEST_VERIFY_EQ(test_ptr, 3, wlmtk_dock_tiles(dock_ptr));
++        BS_TEST_VERIFY_EQ(test_ptr, 0, wlmtk_dock_tile_index(dock_ptr, &t[0]));
++        BS_TEST_VERIFY_EQ(test_ptr, 2, wlmtk_dock_tile_index(dock_ptr, &t[2]));
++
++        // Move last to the anchor: order 2, 0, 1.
++        wlmtk_dock_move_tile(dock_ptr, &t[2], 0);
++        BS_TEST_VERIFY_EQ(test_ptr, 0, wlmtk_dock_tile_index(dock_ptr, &t[2]));
++        BS_TEST_VERIFY_EQ(test_ptr, 1, wlmtk_dock_tile_index(dock_ptr, &t[0]));
++        BS_TEST_VERIFY_EQ(test_ptr, 2, wlmtk_dock_tile_index(dock_ptr, &t[1]));
++
++        // Move first far beyond the end: order 0, 1, 2.
++        wlmtk_dock_move_tile(dock_ptr, &t[2], 10);
++        BS_TEST_VERIFY_EQ(test_ptr, 0, wlmtk_dock_tile_index(dock_ptr, &t[0]));
++        BS_TEST_VERIFY_EQ(test_ptr, 1, wlmtk_dock_tile_index(dock_ptr, &t[1]));
++        BS_TEST_VERIFY_EQ(test_ptr, 2, wlmtk_dock_tile_index(dock_ptr, &t[2]));
++
++        // Visual position: Index 0 nearest the anchor.
++        int x0, y0, x2, y2;
++        wlmtk_element_get_position(wlmtk_tile_element(&t[0]), &x0, &y0);
++        wlmtk_element_get_position(wlmtk_tile_element(&t[2]), &x2, &y2);
++        if (WLR_EDGE_TOP == anchors[a]) {
++            BS_TEST_VERIFY_TRUE(test_ptr, y0 < y2);
++        } else {
++            BS_TEST_VERIFY_TRUE(test_ptr, y0 > y2);
++        }
++
++        for (int i = 0; i < 3; ++i) {
++            wlmtk_dock_remove_tile(dock_ptr, &t[i]);
++            wlmtk_tile_fini(&t[i]);
++        }
++        wlmtk_dock_destroy(dock_ptr);
++    }
++}
++
+ /* == End of dock.c ======================================================== */
+diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
+index c31e3d9..c938d5c 100644
+--- a/tests/wlmaker_test.c
++++ b/tests/wlmaker_test.c
+@@ -27,6 +27,7 @@
+ #include "clip.h"
+ #include "config.h"
+ #include "corner.h"
++#include "dockapps.h"
+ #include "layer_panel.h"
+ #include "lock_mgr.h"
+ #include "root_menu.h"
+@@ -55,6 +56,7 @@ int main(int argc, const char **argv)
+         &wlmaker_clip_test_set,
+         &wlmaker_config_test_set,
+         &wlmaker_corner_test_set,
++        &wlmaker_dockapps_test_set,
+         &wlmaker_layer_panel_test_set,
+         &wlmaker_lock_mgr_test_set,
+         &wlmaker_root_menu_test_set,
