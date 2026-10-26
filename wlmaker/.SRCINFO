@@ -1,0 +1,29 @@
+pkgbase = wlmaker
+	pkgdesc = Wayland compositor inspired by Window Maker
+	pkgver = 0.8.1
+	pkgrel = 1
+	url = https://github.com/phkaeser/wlmaker
+	arch = x86_64
+	license = Apache-2.0 AND BSD-3-Clause
+	checkdepends = desktop-file-utils
+	makedepends = cmake
+	makedepends = git
+	makedepends = wayland-protocols
+	depends = cairo
+	depends = glibc
+	depends = hicolor-icon-theme
+	depends = libinput
+	depends = libxcb
+	depends = libxdg-basedir
+	depends = libxkbcommon
+	depends = wayland
+	depends = wlroots0.20
+	depends = xorg-xwayland
+	source = git+https://github.com/phkaeser/wlmaker.git#tag=v0.8.1
+	source = git+https://github.com/phkaeser/libbase.git#commit=54e60555cae53ad99314c7579dce1ad38373ecaa
+	source = git+https://github.com/benhoyt/inih.git#commit=26254ee9de7681f8825433415443e7116ff24b98
+	sha256sums = 51c1961a85829d403871abcd0fce96cb73cec2946d11c30511fd498c9e6dff39
+	sha256sums = 95aa664c7609e0a9d2212a09b9caedb00bc96dbf510bfae369d9c5507e0b3a62
+	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
+
+pkgname = wlmaker

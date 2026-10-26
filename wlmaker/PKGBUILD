@@ -1,0 +1,91 @@
+# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+# Baseado no PKGBUILD do AUR (wlmaker), de Adrian Perez de Castro.
+
+# Release v0.8.1 (branch-0.8 do upstream). A tag é leve (lightweight), então
+# o commit é conferido explicitamente em prepare(). Os submódulos usados no
+# build (libbase e inih) entram como fontes separadas, fixadas nos commits
+# registrados na árvore da v0.8.1, e são ligados via `git config` (padrão Arch).
+pkgname=wlmaker
+pkgver=0.8.1
+pkgrel=1
+_commit=d08e0c08c7a14690c770a576be341f227e5ac2d8
+_libbase_commit=54e60555cae53ad99314c7579dce1ad38373ecaa
+_inih_commit=26254ee9de7681f8825433415443e7116ff24b98
+pkgdesc='Wayland compositor inspired by Window Maker'
+arch=(x86_64)
+url='https://github.com/phkaeser/wlmaker'
+license=('Apache-2.0 AND BSD-3-Clause')
+depends=(
+  cairo
+  glibc
+  hicolor-icon-theme
+  libinput
+  libxcb
+  libxdg-basedir
+  libxkbcommon
+  wayland
+  wlroots0.20
+  xorg-xwayland  # suporte a XWayland (habilitado quando xwayland.pc existe)
+)
+makedepends=(
+  cmake
+  git
+  wayland-protocols
+)
+checkdepends=(desktop-file-utils)
+source=(
+  "git+https://github.com/phkaeser/wlmaker.git#tag=v${pkgver}"
+  "git+https://github.com/phkaeser/libbase.git#commit=${_libbase_commit}"
+  "git+https://github.com/benhoyt/inih.git#commit=${_inih_commit}"
+)
+sha256sums=('51c1961a85829d403871abcd0fce96cb73cec2946d11c30511fd498c9e6dff39'
+            '95aa664c7609e0a9d2212a09b9caedb00bc96dbf510bfae369d9c5507e0b3a62'
+            '2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582')
+
+prepare() {
+  cd wlmaker
+
+  # A tag é mutável no upstream; confere o commit esperado.
+  local _head
+  _head="$(git rev-parse HEAD)"
+  if [[ ${_head} != "${_commit}" ]]; then
+    echo "v${pkgver} aponta para ${_head}, esperado ${_commit}" >&2
+    return 1
+  fi
+
+  # Só os submódulos necessários ao build; "dependencies" e
+  # "examples/gtk-layer-shell" não são usados no pacote.
+  git submodule init submodules/libbase submodules/inih
+  git config submodule.submodules/libbase.url "${srcdir}/libbase"
+  git config submodule.submodules/inih.url "${srcdir}/inih"
+  git -c protocol.file.allow=always submodule update submodules/libbase submodules/inih
+}
+
+build() {
+  # config_OPTIM=ON troca o -O0 padrão do upstream por -O2; config_DEBUG=OFF
+  # remove -ggdb -DDEBUG (o makepkg cuida dos símbolos de depuração).
+  cmake -S wlmaker -B build \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=None \
+    -Dconfig_DEBUG=OFF \
+    -Dconfig_OPTIM=ON \
+    -Wno-dev
+  cmake --build build
+}
+
+check() {
+  # O harness de testes da libbase aborta se tgetent() falhar para o $TERM
+  # atual (em contêiner/sudo costuma ser "unknown"); "dumb" sempre existe.
+  TERM=dumb ctest --test-dir build --output-on-failure
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" wlmaker/etc/*.plist
+  install -Dm644 wlmaker/submodules/inih/LICENSE.txt \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE.inih"
+
+  # Script de exemplo do upstream, com caminhos específicos do Debian.
+  rm -f "$pkgdir/usr/bin/wrap-wlmaker.sh"
+}
