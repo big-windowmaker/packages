@@ -1,0 +1,1168 @@
+From 8c7871746015459005ad21e8c5dd9ab558f28cdc Mon Sep 17 00:00:00 2001
+From: ruscher <teste@hemofilia.org.br>
+Date: Mon, 26 Oct 2026 19:37:40 -0300
+Subject: [PATCH 36/41] clip: Adds right-click menus for the Clip and dock-app
+ tiles.
+
+Like on Window Maker: Right-clicking the Clip opens a menu to switch to
+the next or previous workspace, add one, or destroy the last one. A
+dock-app's tile opens its menu on a right-click with the window-move
+modifier held, or on its border (the dock-app may use the right button
+itself): Move it up or down (left or right, on a horizontal Clip), with
+the order stored as when dragging it; or terminate the dock-app.
+
+Items that would do nothing are left out. The menus look like the root
+menu, open at the pointer, and are kept within the usable area: Not
+under the Clip or Dock.
+---
+ src/CMakeLists.txt   |   2 +
+ src/clip.c           |  91 ++++++++
+ src/context_menu.c   | 491 +++++++++++++++++++++++++++++++++++++++++++
+ src/context_menu.h   | 128 +++++++++++
+ src/dockapps.c       |  44 ++++
+ src/dockapps.h       |  16 ++
+ src/icon_manager.c   | 149 +++++++++++++
+ src/server.c         |   1 +
+ src/server.h         |   3 +
+ tests/wlmaker_test.c |   2 +
+ 10 files changed, 927 insertions(+)
+ create mode 100644 src/context_menu.c
+ create mode 100644 src/context_menu.h
+
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 2e8e9ae..c8cef35 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -31,6 +31,7 @@ set(public_header_files
+   action_item.h
+   clip.h
+   config.h
++  context_menu.h
+   corner.h
+   dockapps.h
+   icon_manager.h
+@@ -56,6 +57,7 @@ target_sources(wlmaker_lib PRIVATE
+   action_item.c
+   clip.c
+   config.c
++  context_menu.c
+   corner.c
+   dockapps.c
+   icon_manager.c
+diff --git a/src/clip.c b/src/clip.c
+index f0f4846..d55f766 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -38,7 +38,9 @@
+ #undef WLR_USE_UNSTABLE
+ 
+ #include "backend/backend.h"
++#include "action.h"
+ #include "backend/output_config.h"
++#include "context_menu.h"
+ #include "dockapps.h"
+ #include "toolkit/toolkit.h"
+ #include "util/files.h"
+@@ -119,6 +121,7 @@ static bool _wlmaker_clip_update_tiles(
+     wlmaker_clip_t *clip_ptr,
+     const struct wlmtk_tile_style *tile_style_ptr);
+ static void _wlmaker_clip_apply_button_state(wlmaker_clip_t *clip_ptr);
++static void _wlmaker_clip_open_menu(wlmaker_clip_t *clip_ptr);
+ static bool _wlmaker_clip_update_spacers(
+     wlmaker_clip_t *clip_ptr,
+     const struct wlmtk_tile_style *tile_style_ptr);
+@@ -375,6 +378,7 @@ wlmaker_clip_t *wlmaker_clip_create(
+ void wlmaker_clip_destroy(wlmaker_clip_t *clip_ptr)
+ {
+     if (NULL != clip_ptr->server_ptr) {
++        wlmaker_context_menu_cancel(clip_ptr->server_ptr, clip_ptr);
+         clip_ptr->server_ptr->clip_dock_ptr = NULL;
+         clip_ptr->server_ptr->dockapps_ptr = NULL;
+     }
+@@ -500,6 +504,13 @@ bool _wlmaker_clip_pointer_button(
+         element_ptr, wlmaker_clip_t,
+         super_tile.super_container.super_element);
+ 
++    // Right button: Opens the Clip's menu, like on Window Maker.
++    if (BTN_RIGHT == button_event_ptr->button &&
++        WLMTK_BUTTON_DOWN == button_event_ptr->type) {
++        _wlmaker_clip_open_menu(clip_ptr);
++        return true;
++    }
++
+     if (BTN_LEFT != button_event_ptr->button) return true;
+ 
+     switch (button_event_ptr->type) {
+@@ -543,6 +554,86 @@ bool _wlmaker_clip_pointer_button(
+     return true;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Counts workspaces, for @ref wlmtk_desktop_for_each_workspace. */
++static void _wlmaker_clip_count_workspace(
++    __UNUSED__ bs_dllist_node_t *dlnode_ptr,
++    void *ud_ptr)
++{
++    ++*(size_t*)ud_ptr;
++}
++
++/** Context menu callback: Switches to the next workspace. */
++static void _wlmaker_clip_menu_next(void *ud_ptr)
++{
++    wlmaker_server_t *server_ptr = ud_ptr;
++    wlmtk_desktop_switch_to_next_workspace(server_ptr->desktop_ptr);
++}
++
++/** Context menu callback: Switches to the previous workspace. */
++static void _wlmaker_clip_menu_previous(void *ud_ptr)
++{
++    wlmaker_server_t *server_ptr = ud_ptr;
++    wlmtk_desktop_switch_to_previous_workspace(server_ptr->desktop_ptr);
++}
++
++/** Context menu callback: Adds a workspace. */
++static void _wlmaker_clip_menu_add(void *ud_ptr)
++{
++    wlmaker_action_execute(ud_ptr, WLMAKER_ACTION_WORKSPACE_ADD, NULL);
++}
++
++/** Context menu callback: Destroys the last workspace. */
++static void _wlmaker_clip_menu_destroy_last(void *ud_ptr)
++{
++    wlmaker_action_execute(
++        ud_ptr, WLMAKER_ACTION_WORKSPACE_DESTROY_LAST, NULL);
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Opens the Clip's right-click menu: Workspace navigation and management.
++ * Items that would do nothing (eg. switching with just one workspace) are
++ * left out.
++ *
++ * @param clip_ptr
++ */
++void _wlmaker_clip_open_menu(wlmaker_clip_t *clip_ptr)
++{
++    wlmaker_server_t *server_ptr = clip_ptr->server_ptr;
++    if (NULL == server_ptr->style_ptr ||
++        NULL == server_ptr->style_ptr->menu_style_ptr ||
++        NULL == server_ptr->input_manager_ptr) return;
++
++    size_t workspaces = 0;
++    wlmtk_desktop_for_each_workspace(
++        server_ptr->desktop_ptr, _wlmaker_clip_count_workspace, &workspaces);
++
++    wlmaker_context_menu_t *cm_ptr = wlmaker_context_menu_create(
++        server_ptr, clip_ptr, "Clip");
++    if (NULL == cm_ptr) return;
++    bool rv = true;
++    if (1 < workspaces) {
++        rv = rv && wlmaker_context_menu_add_item(
++            cm_ptr, "Next Workspace", _wlmaker_clip_menu_next, server_ptr);
++        rv = rv && wlmaker_context_menu_add_item(
++            cm_ptr, "Previous Workspace", _wlmaker_clip_menu_previous,
++            server_ptr);
++    }
++    rv = rv && wlmaker_context_menu_add_item(
++        cm_ptr, "New Workspace", _wlmaker_clip_menu_add, server_ptr);
++    if (1 < workspaces) {
++        rv = rv && wlmaker_context_menu_add_item(
++            cm_ptr, "Destroy Last Workspace", _wlmaker_clip_menu_destroy_last,
++            server_ptr);
++    }
++    if (!rv) {
++        wlmaker_context_menu_destroy(cm_ptr);
++        return;
++    }
++    wlmaker_context_menu_open(cm_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Updates the button textures, based on current state what's pressed. */
+ static void _wlmaker_clip_apply_button_state(wlmaker_clip_t *clip_ptr)
+diff --git a/src/context_menu.c b/src/context_menu.c
+new file mode 100644
+index 0000000..481d31c
+--- /dev/null
++++ b/src/context_menu.c
+@@ -0,0 +1,491 @@
++/* ========================================================================= */
++/**
++ * @file context_menu.c
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "context_menu.h"
++
++#include <stdlib.h>
++#include <wayland-server-core.h>
++#define WLR_USE_UNSTABLE
++#include <wlr/types/wlr_cursor.h>
++#include <wlr/util/box.h>
++#undef WLR_USE_UNSTABLE
++
++#include "input/manager.h"
++
++/* == Declarations ========================================================= */
++
++/** State of a context menu. */
++struct _wlmaker_context_menu_t {
++    /** Back-link to server. */
++    wlmaker_server_t          *server_ptr;
++    /** The element the menu is for. */
++    void                      *owner_ptr;
++
++    /** The menu. */
++    wlmtk_menu_t              *menu_ptr;
++    /** The window holding the menu, as for the root menu. */
++    wlmtk_window_t            *window_ptr;
++
++    /** Whether the menu was opened, and is owned by the server. */
++    bool                      opened;
++    /** Deferred destruction, once closed. */
++    struct wl_event_source    *idle_destroy_event_source_ptr;
++
++    /** Listener for @ref wlmtk_menu_events_t::open_changed. */
++    struct wl_listener        menu_open_changed_listener;
++    /** Listener for @ref wlmtk_menu_events_t::request_close. */
++    struct wl_listener        menu_request_close_listener;
++    /** Listener for @ref wlmtk_window_events_t::request_close. */
++    struct wl_listener        window_request_close_listener;
++};
++
++/** An item of the context menu. */
++typedef struct {
++    /** The menu item. */
++    wlmtk_menu_item_t         *menu_item_ptr;
++    /** Back-link to the context menu. */
++    wlmaker_context_menu_t    *context_menu_ptr;
++    /** Callback, when triggered. */
++    wlmaker_context_menu_callback_t callback;
++    /** Argument to @ref wlmaker_context_menu_item_t::callback. */
++    void                      *ud_ptr;
++
++    /** Listener for @ref wlmtk_menu_item_events_t::triggered. */
++    struct wl_listener        triggered_listener;
++    /** Listener for @ref wlmtk_menu_item_events_t::destroy. */
++    struct wl_listener        destroy_listener;
++} wlmaker_context_menu_item_t;
++
++static void _wlmaker_context_menu_close(
++    wlmaker_context_menu_t *context_menu_ptr);
++static void _wlmaker_context_menu_handle_open_changed(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
++static void _wlmaker_context_menu_handle_request_close(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
++static void _wlmaker_context_menu_handle_window_request_close(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
++static void _wlmaker_context_menu_idle_destroy(void *data_ptr);
++
++static void _wlmaker_context_menu_item_handle_triggered(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
++static void _wlmaker_context_menu_item_handle_destroy(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
++
++/* == Exported methods ===================================================== */
++
++/* ------------------------------------------------------------------------- */
++wlmaker_context_menu_t *wlmaker_context_menu_create(
++    wlmaker_server_t *server_ptr,
++    void *owner_ptr,
++    const char *title_ptr)
++{
++    wlmaker_context_menu_t *context_menu_ptr = logged_calloc(
++        1, sizeof(*context_menu_ptr));
++    if (NULL == context_menu_ptr) return NULL;
++    context_menu_ptr->server_ptr = server_ptr;
++    context_menu_ptr->owner_ptr = owner_ptr;
++
++    context_menu_ptr->menu_ptr = wlmtk_menu_create(
++        wlmtk_menu_style_to_ref(server_ptr->style_ptr->menu_style_ptr));
++    if (NULL == context_menu_ptr->menu_ptr) {
++        wlmaker_context_menu_destroy(context_menu_ptr);
++        return NULL;
++    }
++    wlmtk_util_connect_listener_signal(
++        &wlmtk_menu_events(context_menu_ptr->menu_ptr)->open_changed,
++        &context_menu_ptr->menu_open_changed_listener,
++        _wlmaker_context_menu_handle_open_changed);
++    wlmtk_util_connect_listener_signal(
++        &wlmtk_menu_events(context_menu_ptr->menu_ptr)->request_close,
++        &context_menu_ptr->menu_request_close_listener,
++        _wlmaker_context_menu_handle_request_close);
++
++    context_menu_ptr->window_ptr = wlmtk_window_create(
++        wlmtk_menu_element(context_menu_ptr->menu_ptr),
++        wlmtk_window_style_to_ref(server_ptr->style_ptr->window_style_ptr),
++        wlmtk_menu_style_to_ref(server_ptr->style_ptr->menu_style_ptr));
++    if (NULL == context_menu_ptr->window_ptr) {
++        wlmaker_context_menu_destroy(context_menu_ptr);
++        return NULL;
++    }
++    wlmtk_util_connect_listener_signal(
++        &wlmtk_window_events(context_menu_ptr->window_ptr)->request_close,
++        &context_menu_ptr->window_request_close_listener,
++        _wlmaker_context_menu_handle_window_request_close);
++    wlmtk_window_set_title(context_menu_ptr->window_ptr, title_ptr);
++    // The window shows its content: Closed, until opened as right-click menu.
++    wlmtk_menu_set_open(context_menu_ptr->menu_ptr, false);
++    wlmtk_window_set_server_side_decorated(context_menu_ptr->window_ptr, true);
++    return context_menu_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_context_menu_destroy(wlmaker_context_menu_t *context_menu_ptr)
++{
++    if (context_menu_ptr->opened &&
++        context_menu_ptr->server_ptr->context_menu_ptr == context_menu_ptr) {
++        context_menu_ptr->server_ptr->context_menu_ptr = NULL;
++    }
++
++    if (NULL != context_menu_ptr->idle_destroy_event_source_ptr) {
++        wl_event_source_remove(context_menu_ptr->idle_destroy_event_source_ptr);
++        context_menu_ptr->idle_destroy_event_source_ptr = NULL;
++    }
++
++    if (NULL != context_menu_ptr->window_ptr) {
++        wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(
++            context_menu_ptr->window_ptr);
++        if (NULL != workspace_ptr) {
++            wlmtk_workspace_unmap_window(workspace_ptr,
++                                         context_menu_ptr->window_ptr);
++        }
++        wlmtk_util_disconnect_listener(
++            &context_menu_ptr->window_request_close_listener);
++        wlmtk_window_destroy(context_menu_ptr->window_ptr);
++        context_menu_ptr->window_ptr = NULL;
++    }
++
++    if (NULL != context_menu_ptr->menu_ptr) {
++        wlmtk_util_disconnect_listener(
++            &context_menu_ptr->menu_request_close_listener);
++        wlmtk_util_disconnect_listener(
++            &context_menu_ptr->menu_open_changed_listener);
++        wlmtk_menu_destroy(context_menu_ptr->menu_ptr);
++        context_menu_ptr->menu_ptr = NULL;
++    }
++    free(context_menu_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_context_menu_add_item(
++    wlmaker_context_menu_t *context_menu_ptr,
++    const char *text_ptr,
++    wlmaker_context_menu_callback_t callback,
++    void *ud_ptr)
++{
++    wlmaker_context_menu_item_t *item_ptr = logged_calloc(
++        1, sizeof(*item_ptr));
++    if (NULL == item_ptr) return false;
++    item_ptr->context_menu_ptr = context_menu_ptr;
++    item_ptr->callback = callback;
++    item_ptr->ud_ptr = ud_ptr;
++
++    item_ptr->menu_item_ptr = wlmtk_menu_item_create(
++        wlmtk_menu_style_to_ref(
++            context_menu_ptr->server_ptr->style_ptr->menu_style_ptr));
++    if (NULL == item_ptr->menu_item_ptr) {
++        free(item_ptr);
++        return false;
++    }
++    if (!wlmtk_menu_item_set_text(item_ptr->menu_item_ptr, text_ptr)) {
++        wlmtk_menu_item_destroy(item_ptr->menu_item_ptr);
++        free(item_ptr);
++        return false;
++    }
++    wlmtk_util_connect_listener_signal(
++        &wlmtk_menu_item_events(item_ptr->menu_item_ptr)->triggered,
++        &item_ptr->triggered_listener,
++        _wlmaker_context_menu_item_handle_triggered);
++    wlmtk_util_connect_listener_signal(
++        &wlmtk_menu_item_events(item_ptr->menu_item_ptr)->destroy,
++        &item_ptr->destroy_listener,
++        _wlmaker_context_menu_item_handle_destroy);
++
++    wlmtk_menu_add_item(context_menu_ptr->menu_ptr, item_ptr->menu_item_ptr);
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_context_menu_open(wlmaker_context_menu_t *context_menu_ptr)
++{
++    wlmaker_server_t *server_ptr = context_menu_ptr->server_ptr;
++
++    // There is only one open context menu at a time.
++    wlmaker_context_menu_cancel(server_ptr, NULL);
++    server_ptr->context_menu_ptr = context_menu_ptr;
++    context_menu_ptr->opened = true;
++
++    wlmtk_workspace_t *workspace_ptr = wlmtk_desktop_get_current_workspace(
++        server_ptr->desktop_ptr);
++    struct wlr_cursor *wlr_cursor_ptr = wlmim_wlr_cursor(
++        server_ptr->input_manager_ptr);
++    int x = wlr_cursor_ptr->x, y = wlr_cursor_ptr->y;
++
++    wlmtk_workspace_map_window(workspace_ptr, context_menu_ptr->window_ptr);
++    wlmtk_window_set_properties(context_menu_ptr->window_ptr,
++                                WLMTK_WINDOW_PROPERTY_RIGHTCLICK);
++    wlmtk_workspace_set_window_position(
++        workspace_ptr, context_menu_ptr->window_ptr, x, y);
++
++    // Keep it off the docks and panels: Within the usable area.
++    struct wlr_box bbox = wlmtk_window_get_bounding_box(
++        context_menu_ptr->window_ptr);
++    struct wlr_box area = wlmtk_desktop_get_usable_area(
++        server_ptr->desktop_ptr,
++        wlmaker_server_get_output_at_cursor(server_ptr));
++    // The bounding box is in workspace coordinates.
++    struct wlr_box pos = wlmaker_context_menu_confine(
++        &area, bbox.x, bbox.y, bbox.width, bbox.height);
++    wlmtk_workspace_set_window_position(
++        workspace_ptr, context_menu_ptr->window_ptr,
++        x + pos.x - bbox.x, y + pos.y - bbox.y);
++
++    wlmtk_menu_set_mode(context_menu_ptr->menu_ptr,
++                        WLMTK_MENU_MODE_RIGHTCLICK);
++    wlmtk_menu_set_open(context_menu_ptr->menu_ptr, true);
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_context_menu_cancel(wlmaker_server_t *server_ptr,
++                                 void *owner_ptr)
++{
++    wlmaker_context_menu_t *context_menu_ptr = server_ptr->context_menu_ptr;
++    if (NULL == context_menu_ptr) return;
++    if (NULL != owner_ptr && context_menu_ptr->owner_ptr != owner_ptr) return;
++    wlmaker_context_menu_destroy(context_menu_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++wlmtk_menu_t *wlmaker_context_menu_menu(
++    wlmaker_context_menu_t *context_menu_ptr)
++{
++    return context_menu_ptr->menu_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++struct wlr_box wlmaker_context_menu_confine(
++    const struct wlr_box *area_ptr,
++    int x, int y, int width, int height)
++{
++    struct wlr_box box = { .x = x, .y = y, .width = width, .height = height };
++    if (wlr_box_empty(area_ptr)) return box;
++
++    if (box.x + box.width > area_ptr->x + area_ptr->width) {
++        box.x = area_ptr->x + area_ptr->width - box.width;
++    }
++    if (box.x < area_ptr->x) box.x = area_ptr->x;
++    if (box.y + box.height > area_ptr->y + area_ptr->height) {
++        box.y = area_ptr->y + area_ptr->height - box.height;
++    }
++    if (box.y < area_ptr->y) box.y = area_ptr->y;
++    return box;
++}
++
++/* == Local (static) methods =============================================== */
++
++/* ------------------------------------------------------------------------- */
++/** Closes the menu. If it was opened: Destroys it, once back in the loop. */
++void _wlmaker_context_menu_close(wlmaker_context_menu_t *context_menu_ptr)
++{
++    wlmtk_menu_set_open(context_menu_ptr->menu_ptr, false);
++
++    if (!context_menu_ptr->opened ||
++        NULL != context_menu_ptr->idle_destroy_event_source_ptr ||
++        NULL == context_menu_ptr->server_ptr->wl_display_ptr) return;
++    // Not right away: We may be called from the menu's own event handlers.
++    context_menu_ptr->idle_destroy_event_source_ptr = wl_event_loop_add_idle(
++        wl_display_get_event_loop(context_menu_ptr->server_ptr->wl_display_ptr),
++        _wlmaker_context_menu_idle_destroy,
++        context_menu_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles @ref wlmtk_menu_events_t::open_changed: Grabs or unmaps. */
++void _wlmaker_context_menu_handle_open_changed(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmaker_context_menu_t *context_menu_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_context_menu_t, menu_open_changed_listener);
++    wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(
++        context_menu_ptr->window_ptr);
++
++    if (!wlmtk_menu_is_open(context_menu_ptr->menu_ptr)) {
++        if (NULL != workspace_ptr) {
++            wlmtk_workspace_unmap_window(workspace_ptr,
++                                         context_menu_ptr->window_ptr);
++        }
++        _wlmaker_context_menu_close(context_menu_ptr);
++        return;
++    }
++
++    // Like the root menu: Grab the pointer, to see the right button released.
++    wlmtk_element_t *element_ptr = wlmtk_menu_element(
++        context_menu_ptr->menu_ptr);
++    if (NULL != workspace_ptr && NULL != element_ptr->parent_container_ptr) {
++        wlmtk_container_pointer_grab(
++            element_ptr->parent_container_ptr, element_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles @ref wlmtk_menu_events_t::request_close. Closes the menu. */
++void _wlmaker_context_menu_handle_request_close(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmaker_context_menu_t *context_menu_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_context_menu_t, menu_request_close_listener);
++    _wlmaker_context_menu_close(context_menu_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles @ref wlmtk_window_events_t::request_close. Closes the menu. */
++void _wlmaker_context_menu_handle_window_request_close(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmaker_context_menu_t *context_menu_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_context_menu_t, window_request_close_listener);
++    _wlmaker_context_menu_close(context_menu_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Destroys the closed menu, from the event loop. */
++void _wlmaker_context_menu_idle_destroy(void *data_ptr)
++{
++    wlmaker_context_menu_t *context_menu_ptr = data_ptr;
++    // Already dispatched: Must not be removed again.
++    context_menu_ptr->idle_destroy_event_source_ptr = NULL;
++    wlmaker_context_menu_destroy(context_menu_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles @ref wlmtk_menu_item_events_t::triggered: Callback, and close. */
++void _wlmaker_context_menu_item_handle_triggered(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmaker_context_menu_item_t *item_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_context_menu_item_t, triggered_listener);
++    wlmaker_context_menu_t *context_menu_ptr = item_ptr->context_menu_ptr;
++
++    if (NULL != item_ptr->callback) item_ptr->callback(item_ptr->ud_ptr);
++    _wlmaker_context_menu_close(context_menu_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles @ref wlmtk_menu_item_events_t::destroy: Frees the item. */
++void _wlmaker_context_menu_item_handle_destroy(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmaker_context_menu_item_t *item_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_context_menu_item_t, destroy_listener);
++    wlmtk_util_disconnect_listener(&item_ptr->triggered_listener);
++    wlmtk_util_disconnect_listener(&item_ptr->destroy_listener);
++    free(item_ptr);
++}
++
++/* == Unit tests =========================================================== */
++
++static void test_items(bs_test_t *test_ptr);
++static void test_confine(bs_test_t *test_ptr);
++
++/** Test cases. */
++static const bs_test_case_t _wlmaker_context_menu_test_cases[] = {
++    { true, "items", test_items },
++    { true, "confine", test_confine },
++    BS_TEST_CASE_SENTINEL()
++};
++
++const bs_test_set_t wlmaker_context_menu_test_set = BS_TEST_SET(
++    true, "context_menu", _wlmaker_context_menu_test_cases);
++
++/** Test callback: Increments the counter. */
++static void _test_callback(void *ud_ptr) { ++*(int*)ud_ptr; }
++
++/* ------------------------------------------------------------------------- */
++/** Adds and triggers items; cancelling only applies to the owner's menu. */
++void test_items(bs_test_t *test_ptr)
++{
++    wlmaker_config_style_t style = {
++        .window_style_ptr = wlmtk_window_style_create(),
++        .menu_style_ptr = wlmtk_menu_style_create()
++    };
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, style.window_style_ptr);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, style.menu_style_ptr);
++    wlmaker_server_t server = { .style_ptr = &style };
++    int owner, a = 0, b = 0;
++
++    wlmaker_context_menu_t *cm_ptr = wlmaker_context_menu_create(
++        &server, &owner, "Test");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, cm_ptr);
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_context_menu_add_item(
++                            cm_ptr, "A", _test_callback, &a));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_context_menu_add_item(
++                            cm_ptr, "B", _test_callback, &b));
++    wlmtk_menu_t *menu_ptr = wlmaker_context_menu_menu(cm_ptr);
++    BS_TEST_VERIFY_EQ(test_ptr, 2, wlmtk_menu_items_size(menu_ptr));
++
++    wlmtk_menu_set_open(menu_ptr, true);
++    wlmtk_menu_item_trigger(wlmtk_menu_item_at(menu_ptr, 1));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, a);
++    BS_TEST_VERIFY_EQ(test_ptr, 1, b);
++    // Triggering closes the menu.
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_menu_is_open(menu_ptr));
++
++    // As if it were opened: The server holds it. Other owners don't close it.
++    server.context_menu_ptr = cm_ptr;
++    cm_ptr->opened = true;
++    wlmaker_context_menu_cancel(&server, &a);
++    BS_TEST_VERIFY_EQ(test_ptr, cm_ptr, server.context_menu_ptr);
++    wlmaker_context_menu_cancel(&server, &owner);
++    BS_TEST_VERIFY_EQ(test_ptr, NULL, server.context_menu_ptr);
++
++    wlmtk_window_style_ref_release(
++        wlmtk_window_style_to_ref(style.window_style_ptr));
++    wlmtk_menu_style_ref_release(wlmtk_menu_style_to_ref(style.menu_style_ptr));
++}
++
++/* ------------------------------------------------------------------------- */
++/** Verifies the menu is kept within the usable area. */
++void test_confine(bs_test_t *test_ptr)
++{
++    struct wlr_box area = { .x = 64, .y = 0, .width = 1152, .height = 720 };
++    struct wlr_box b;
++
++    // Opened over a dock on the left: Moved right of it.
++    b = wlmaker_context_menu_confine(&area, 30, 100, 150, 200);
++    BS_TEST_VERIFY_EQ(test_ptr, 64, b.x);
++    BS_TEST_VERIFY_EQ(test_ptr, 100, b.y);
++
++    // Opened over a dock on the right, near the bottom: Left of it, up.
++    b = wlmaker_context_menu_confine(&area, 1250, 650, 150, 200);
++    BS_TEST_VERIFY_EQ(test_ptr, 1216 - 150, b.x);
++    BS_TEST_VERIFY_EQ(test_ptr, 520, b.y);
++
++    // Inside: Unchanged.
++    b = wlmaker_context_menu_confine(&area, 300, 300, 150, 200);
++    BS_TEST_VERIFY_EQ(test_ptr, 300, b.x);
++    BS_TEST_VERIFY_EQ(test_ptr, 300, b.y);
++
++    // Larger than the area: At the top-left.
++    b = wlmaker_context_menu_confine(&area, 300, 300, 2000, 2000);
++    BS_TEST_VERIFY_EQ(test_ptr, 64, b.x);
++    BS_TEST_VERIFY_EQ(test_ptr, 0, b.y);
++}
++
++/* == End of context_menu.c ================================================ */
+diff --git a/src/context_menu.h b/src/context_menu.h
+new file mode 100644
+index 0000000..e3d5916
+--- /dev/null
++++ b/src/context_menu.h
+@@ -0,0 +1,128 @@
++/* ========================================================================= */
++/**
++ * @file context_menu.h
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#ifndef __WLMAKER_CONTEXT_MENU_H__
++#define __WLMAKER_CONTEXT_MENU_H__
++
++#include <stdbool.h>
++
++#include <libbase/libbase.h>
++
++#include "toolkit/toolkit.h"
++
++/** Forward declaration: A context (right-click) menu. */
++typedef struct _wlmaker_context_menu_t wlmaker_context_menu_t;
++
++#include "server.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif  // __cplusplus
++
++/** Callback for a triggered item of a context menu. */
++typedef void (*wlmaker_context_menu_callback_t)(void *ud_ptr);
++
++/**
++ * Creates a context menu: A right-click menu, drawn like the root menu, for
++ * an element like the Clip or a dock-app's tile. It is opened by @ref
++ * wlmaker_context_menu_open and destroys itself once closed.
++ *
++ * @param server_ptr
++ * @param owner_ptr           Identifies the element the menu is for. See
++ *                            @ref wlmaker_context_menu_cancel.
++ * @param title_ptr           Title of the menu's window.
++ *
++ * @return The context menu, or NULL on error.
++ */
++wlmaker_context_menu_t *wlmaker_context_menu_create(
++    wlmaker_server_t *server_ptr,
++    void *owner_ptr,
++    const char *title_ptr);
++
++/** Destroys the context menu. */
++void wlmaker_context_menu_destroy(wlmaker_context_menu_t *context_menu_ptr);
++
++/**
++ * Adds an item to the context menu.
++ *
++ * @param context_menu_ptr
++ * @param text_ptr
++ * @param callback            Called with `ud_ptr` when the item is triggered.
++ *                            The menu is closed afterwards.
++ * @param ud_ptr
++ *
++ * @return true on success.
++ */
++bool wlmaker_context_menu_add_item(
++    wlmaker_context_menu_t *context_menu_ptr,
++    const char *text_ptr,
++    wlmaker_context_menu_callback_t callback,
++    void *ud_ptr);
++
++/**
++ * Opens the context menu in right-click mode, at the pointer's position and
++ * within the usable area of the output: Not covering docks and panels.
++ *
++ * The server takes ownership: An already open context menu is closed. The
++ * menu is destroyed once it gets closed.
++ *
++ * @param context_menu_ptr
++ */
++void wlmaker_context_menu_open(wlmaker_context_menu_t *context_menu_ptr);
++
++/**
++ * Closes the server's open context menu, if it was opened for `owner_ptr`.
++ * To call when the owner goes away, since the items refer to it.
++ *
++ * @param server_ptr
++ * @param owner_ptr           Or NULL, to close any open context menu.
++ */
++void wlmaker_context_menu_cancel(wlmaker_server_t *server_ptr,
++                                 void *owner_ptr);
++
++/** Returns the toolkit menu of the context menu. */
++wlmtk_menu_t *wlmaker_context_menu_menu(
++    wlmaker_context_menu_t *context_menu_ptr);
++
++/**
++ * Computes the position for a box of `width` x `height` at (x, y), moved
++ * such that it stays within `area_ptr` (or at its top-left corner, if it is
++ * larger).
++ *
++ * @param area_ptr
++ * @param x
++ * @param y
++ * @param width
++ * @param height
++ *
++ * @return The box at its position.
++ */
++struct wlr_box wlmaker_context_menu_confine(
++    const struct wlr_box *area_ptr,
++    int x, int y, int width, int height);
++
++/** Unit test cases. */
++extern const bs_test_set_t wlmaker_context_menu_test_set;
++
++#ifdef __cplusplus
++}  // extern "C"
++#endif  // __cplusplus
++
++#endif /* __WLMAKER_CONTEXT_MENU_H__ */
++/* == End of context_menu.h ================================================ */
+diff --git a/src/dockapps.c b/src/dockapps.c
+index 9d13444..9839354 100644
+--- a/src/dockapps.c
++++ b/src/dockapps.c
+@@ -239,6 +239,36 @@ void wlmaker_dockapps_move(
+     }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++int wlmaker_dockapps_delta_towards(
++    wlmaker_dockapps_t *dockapps_ptr,
++    wlmtk_tile_t *tile_ptr,
++    uint32_t direction)
++{
++    size_t index;
++    if (NULL == _wlmaker_dockapps_find(dockapps_ptr, tile_ptr, &index)) {
++        return 0;
++    }
++    const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
++        dockapps_ptr->dock_ptr);
++    bool vertical = (WLR_EDGE_LEFT == pos_ptr->edge ||
++                     WLR_EDGE_RIGHT == pos_ptr->edge);
++
++    int delta = 0;
++    if (vertical && WLR_EDGE_TOP == direction) delta = -1;
++    if (vertical && WLR_EDGE_BOTTOM == direction) delta = 1;
++    if (!vertical && WLR_EDGE_LEFT == direction) delta = -1;
++    if (!vertical && WLR_EDGE_RIGHT == direction) delta = 1;
++    // Positions count away from the anchor.
++    if (WLR_EDGE_BOTTOM == pos_ptr->anchor ||
++        WLR_EDGE_RIGHT == pos_ptr->anchor) delta = -delta;
++
++    int new_index = (int)index + delta;
++    if (0 > new_index ||
++        (int)bs_dllist_size(&dockapps_ptr->placed) <= new_index) return 0;
++    return delta;
++}
++
+ /* ------------------------------------------------------------------------- */
+ int wlmaker_dockapps_drag_delta(
+     wlmaker_dockapps_t *dockapps_ptr,
+@@ -491,6 +521,20 @@ void test_order(bs_test_t *test_ptr)
+     BS_TEST_VERIFY_EQ(test_ptr, 3, wlmtk_dock_tile_index(dock_ptr, &t[2]));
+     BS_TEST_VERIFY_EQ(test_ptr, 4, wlmtk_dock_tile_index(dock_ptr, &t[3]));
+ 
++    // The menu's moves: Order is b, a, (none), c from the top.
++    BS_TEST_VERIFY_EQ(test_ptr, 0,
++                      wlmaker_dockapps_delta_towards(d, &t[1], WLR_EDGE_TOP));
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlmaker_dockapps_delta_towards(
++                          d, &t[1], WLR_EDGE_BOTTOM));
++    BS_TEST_VERIFY_EQ(test_ptr, -1,
++                      wlmaker_dockapps_delta_towards(d, &t[3], WLR_EDGE_TOP));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlmaker_dockapps_delta_towards(
++                          d, &t[3], WLR_EDGE_BOTTOM));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlmaker_dockapps_delta_towards(
++                          d, &t[0], WLR_EDGE_LEFT));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlmaker_dockapps_delta_towards(
++                          d, &clip, WLR_EDGE_BOTTOM));
++
+     // Move "c" towards the anchor, beyond the first dock-app: Stops there.
+     wlmaker_dockapps_move(d, &t[3], -10);
+     BS_TEST_VERIFY_EQ(test_ptr, 0, wlmtk_dock_tile_index(dock_ptr, &clip));
+diff --git a/src/dockapps.h b/src/dockapps.h
+index 880876b..115a1ce 100644
+--- a/src/dockapps.h
++++ b/src/dockapps.h
+@@ -108,6 +108,22 @@ int wlmaker_dockapps_drag_delta(
+     double dy,
+     int tile_pitch);
+ 
++/**
++ * Returns the move needed to shift the dock-app's tile by one place on the
++ * screen, towards `direction`. For a right-click menu's "Move Up" etc.
++ *
++ * @param dockapps_ptr
++ * @param tile_ptr
++ * @param direction           One of WLR_EDGE_TOP, _BOTTOM, _LEFT, _RIGHT.
++ *
++ * @return The `delta` for @ref wlmaker_dockapps_move: +1 or -1. 0 if the
++ *     direction is across the dock, or the tile is already at that end.
++ */
++int wlmaker_dockapps_delta_towards(
++    wlmaker_dockapps_t *dockapps_ptr,
++    wlmtk_tile_t *tile_ptr,
++    uint32_t direction);
++
+ /**
+  * Returns the name identifying the dock-app of `wl_client_ptr`: The name of
+  * the client's executable (process name), eg. "wlmclock".
+diff --git a/src/icon_manager.c b/src/icon_manager.c
+index 30c1d49..e81ad00 100644
+--- a/src/icon_manager.c
++++ b/src/icon_manager.c
+@@ -24,14 +24,19 @@
+ #include <inttypes.h>
+ #include <libbase/libbase.h>
+ #include <linux/input-event-codes.h>
++#include <signal.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
++#include <sys/types.h>
++#include <unistd.h>
+ #include <wayland-server-core.h>
+ #define WLR_USE_UNSTABLE
+ #include <wlr/types/wlr_compositor.h>
++#include <wlr/util/edges.h>
+ #include <wlr/types/wlr_xdg_shell.h>
+ #undef WLR_USE_UNSTABLE
+ 
++#include "context_menu.h"
+ #include "dockapps.h"
+ #include "input/cursor.h"
+ #include "input/manager.h"
+@@ -67,6 +72,11 @@ struct _wlmaker_toplevel_icon_t {
+     struct wl_client          *wl_client_ptr;
+     /** Back-link to the icon manager. */
+     wlmaker_icon_manager_t    *icon_manager_ptr;
++    /**
++     * Back-link to the server. The icon manager may be gone when the icon
++     * is destroyed, eg. when clients get destroyed at exit.
++     */
++    wlmaker_server_t          *server_ptr;
+     /** The provided ID. */
+     uint32_t                  id;
+     /** The XDG toplevel for which the icon is specified. */
+@@ -147,6 +157,8 @@ static void handle_surface_destroy(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
+ 
++static void _wlmaker_toplevel_icon_open_menu(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr);
+ static bool _wlmaker_toplevel_icon_element_pointer_button(
+     wlmtk_element_t *element_ptr,
+     const wlmtk_button_event_t *button_event_ptr);
+@@ -385,6 +397,7 @@ wlmaker_toplevel_icon_t *wlmaker_toplevel_icon_create(
+ 
+     toplevel_icon_ptr->wl_client_ptr = wl_client_ptr;
+     toplevel_icon_ptr->icon_manager_ptr = icon_manager_ptr;
++    toplevel_icon_ptr->server_ptr = icon_manager_ptr->server_ptr;
+     toplevel_icon_ptr->id = id;
+     toplevel_icon_ptr->wlr_xdg_toplevel_ptr = wlr_xdg_toplevel_ptr;
+     toplevel_icon_ptr->wlr_surface_ptr = wlr_surface_ptr;
+@@ -485,6 +498,11 @@ void wlmaker_toplevel_icon_destroy(
+     wlmaker_toplevel_icon_t *toplevel_icon_ptr)
+ {
+     bs_log(BS_INFO, "Destroying toplevel icon %p", toplevel_icon_ptr);
++    // The menu's items refer to the icon.
++    if (NULL != toplevel_icon_ptr->server_ptr) {
++        wlmaker_context_menu_cancel(
++            toplevel_icon_ptr->server_ptr, toplevel_icon_ptr);
++    }
+ 
+     _wlmaker_toplevel_icon_element_destroy(
+         wlmtk_tile_element(&toplevel_icon_ptr->super_tile));
+@@ -657,6 +675,123 @@ void _wlmaker_toplevel_icon_remove_from_dock(
+     }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Moves the icon by one place in the dock, towards `direction`. */
++static void _wlmaker_toplevel_icon_move(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr, uint32_t direction)
++{
++    wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
++    if (NULL == server_ptr->dockapps_ptr) return;
++    wlmaker_dockapps_move(
++        server_ptr->dockapps_ptr,
++        &toplevel_icon_ptr->super_tile,
++        wlmaker_dockapps_delta_towards(
++            server_ptr->dockapps_ptr,
++            &toplevel_icon_ptr->super_tile,
++            direction));
++}
++
++/** Menu callback: Moves the icon up. */
++static void _wlmaker_toplevel_icon_menu_up(void *ud_ptr) {
++    _wlmaker_toplevel_icon_move(ud_ptr, WLR_EDGE_TOP);
++}
++/** Menu callback: Moves the icon down. */
++static void _wlmaker_toplevel_icon_menu_down(void *ud_ptr) {
++    _wlmaker_toplevel_icon_move(ud_ptr, WLR_EDGE_BOTTOM);
++}
++/** Menu callback: Moves the icon left. */
++static void _wlmaker_toplevel_icon_menu_left(void *ud_ptr) {
++    _wlmaker_toplevel_icon_move(ud_ptr, WLR_EDGE_LEFT);
++}
++/** Menu callback: Moves the icon right. */
++static void _wlmaker_toplevel_icon_menu_right(void *ud_ptr) {
++    _wlmaker_toplevel_icon_move(ud_ptr, WLR_EDGE_RIGHT);
++}
++
++/** Returns the process ID of the dock-app, or 0 if unknown. */
++static pid_t _wlmaker_toplevel_icon_pid(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr)
++{
++    if (NULL == toplevel_icon_ptr->wl_client_ptr) return 0;
++    pid_t pid = 0;
++    wl_client_get_credentials(toplevel_icon_ptr->wl_client_ptr,
++                              &pid, NULL, NULL);
++    // Never ourselves, or a process group.
++    if (pid <= 1 || pid == getpid()) return 0;
++    return pid;
++}
++
++/** Menu callback: Terminates the dock-app. */
++static void _wlmaker_toplevel_icon_menu_kill(void *ud_ptr)
++{
++    pid_t pid = _wlmaker_toplevel_icon_pid(ud_ptr);
++    if (0 == pid) return;
++    bs_log(BS_INFO, "Terminating dock-app with PID %"PRIdMAX, (intmax_t)pid);
++    if (0 != kill(pid, SIGTERM)) {
++        bs_log(BS_WARNING | BS_ERRNO, "Failed kill(%"PRIdMAX", SIGTERM)",
++               (intmax_t)pid);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Opens the dock-app tile's right-click menu: Moving it within the dock (the
++ * order is stored, as when dragging it), and terminating the dock-app.
++ *
++ * @param toplevel_icon_ptr
++ */
++void _wlmaker_toplevel_icon_open_menu(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr)
++{
++    wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
++    wlmtk_tile_t *tile_ptr = &toplevel_icon_ptr->super_tile;
++    if (NULL == server_ptr->style_ptr ||
++        NULL == server_ptr->style_ptr->menu_style_ptr) return;
++
++    static const struct {
++        uint32_t direction;
++        const char *text_ptr;
++        wlmaker_context_menu_callback_t callback;
++    } moves[] = {
++        { WLR_EDGE_TOP, "Move Up", _wlmaker_toplevel_icon_menu_up },
++        { WLR_EDGE_BOTTOM, "Move Down", _wlmaker_toplevel_icon_menu_down },
++        { WLR_EDGE_LEFT, "Move Left", _wlmaker_toplevel_icon_menu_left },
++        { WLR_EDGE_RIGHT, "Move Right", _wlmaker_toplevel_icon_menu_right },
++    };
++
++    char *name_ptr = NULL;
++    if (NULL != toplevel_icon_ptr->wl_client_ptr) {
++        name_ptr = wlmaker_dockapps_client_name(toplevel_icon_ptr->wl_client_ptr);
++    }
++    wlmaker_context_menu_t *cm_ptr = wlmaker_context_menu_create(
++        server_ptr, toplevel_icon_ptr,
++        NULL != name_ptr ? name_ptr : "Dock-app");
++    if (NULL != name_ptr) free(name_ptr);
++    if (NULL == cm_ptr) return;
++    bool rv = true;
++    size_t items = 0;
++    for (size_t i = 0; i < sizeof(moves) / sizeof(moves[0]); ++i) {
++        if (0 == wlmaker_dockapps_delta_towards(
++                server_ptr->dockapps_ptr, tile_ptr, moves[i].direction)) {
++            continue;
++        }
++        rv = rv && wlmaker_context_menu_add_item(
++            cm_ptr, moves[i].text_ptr, moves[i].callback, toplevel_icon_ptr);
++        ++items;
++    }
++    if (0 != _wlmaker_toplevel_icon_pid(toplevel_icon_ptr)) {
++        rv = rv && wlmaker_context_menu_add_item(
++            cm_ptr, "Kill", _wlmaker_toplevel_icon_menu_kill,
++            toplevel_icon_ptr);
++        ++items;
++    }
++    if (!rv || 0 == items) {
++        wlmaker_context_menu_destroy(cm_ptr);
++        return;
++    }
++    wlmaker_context_menu_open(cm_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Implements @ref wlmtk_element_vmt_t::pointer_button.
+@@ -703,6 +838,20 @@ bool _wlmaker_toplevel_icon_element_pointer_button(
+ 
+     uint32_t modifier = wlmim_cursor_options(
+         server_ptr->input_manager_ptr)->move_window_modifier;
++    // Right button with the move modifier, or on the tile's border (not on
++    // the dock-app, which may use the button itself): The tile's menu.
++    if (NULL != server_ptr->dockapps_ptr &&
++        BTN_RIGHT == button_event_ptr->button &&
++        WLMTK_BUTTON_DOWN == button_event_ptr->type &&
++        ((0 != modifier &&
++          modifier == button_event_ptr->keyboard_modifiers) ||
++         NULL == toplevel_icon_ptr->content_surface_ptr ||
++         !wlmtk_surface_element(
++             toplevel_icon_ptr->content_surface_ptr)->pointer_inside)) {
++        _wlmaker_toplevel_icon_open_menu(toplevel_icon_ptr);
++        return true;
++    }
++
+     if (NULL != server_ptr->dockapps_ptr &&
+         0 != modifier &&
+         BTN_LEFT == button_event_ptr->button &&
+diff --git a/src/server.c b/src/server.c
+index a61dcad..e73eb76 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -390,6 +390,7 @@ wlmaker_server_t *wlmaker_server_create(
+ /* ------------------------------------------------------------------------- */
+ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
+ {
++    wlmaker_context_menu_cancel(server_ptr, NULL);
+     if (NULL != server_ptr->root_menu_ptr) {
+         wlmaker_root_menu_destroy(server_ptr->root_menu_ptr);
+         server_ptr->root_menu_ptr = NULL;
+diff --git a/src/server.h b/src/server.h
+index 4956573..246d6ed 100644
+--- a/src/server.h
++++ b/src/server.h
+@@ -50,6 +50,7 @@ typedef struct _wlmaker_server_t wlmaker_server_t;
+ #include "layer_shell.h"  // IWYU pragma: keep
+ #include "lock_mgr.h"  // IWYU pragma: keep
+ #include "root_menu.h"  // IWYU pragma: keep
++#include "context_menu.h"  // IWYU pragma: keep
+ #include "toolkit/toolkit.h"
+ #include "util/files.h"
+ #include "util/subprocess_monitor.h"  // IWYU pragma: keep
+@@ -190,6 +191,8 @@ struct _wlmaker_server_t {
+ 
+     /** Root menu, when active. NULL when not invoked. */
+     wlmaker_root_menu_t       *root_menu_ptr;
++    /** The open context menu (eg. of the Clip), or NULL. */
++    wlmaker_context_menu_t    *context_menu_ptr;
+     /** Parsed contents of the root menu definition, from plist. */
+     bspl_array_t            *root_menu_array_ptr;
+     /** Listener for `unclaimed_button_event` signal raised by `wlmtk_root`. */
+diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
+index c938d5c..5f96120 100644
+--- a/tests/wlmaker_test.c
++++ b/tests/wlmaker_test.c
+@@ -26,6 +26,7 @@
+ #include "action_item.h"
+ #include "clip.h"
+ #include "config.h"
++#include "context_menu.h"
+ #include "corner.h"
+ #include "dockapps.h"
+ #include "layer_panel.h"
+@@ -55,6 +56,7 @@ int main(int argc, const char **argv)
+         &wlmaker_action_test_set,
+         &wlmaker_clip_test_set,
+         &wlmaker_config_test_set,
++        &wlmaker_context_menu_test_set,
+         &wlmaker_corner_test_set,
+         &wlmaker_dockapps_test_set,
+         &wlmaker_layer_panel_test_set,
+-- 
+2.55.0
+
