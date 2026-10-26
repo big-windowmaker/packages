@@ -1,0 +1,242 @@
+From dc7a2f34f6e866435b51848c3a22418db05775cf Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 17:20:54 -0300
+Subject: [PATCH 01/17] server: Adds support for xdg-activation-v1 protocol.
+
+Creates the wlr_xdg_activation_v1 global and handles `request_activate`
+by raising and activating the requested XDG toplevel, if it is mapped on
+the current workspace. Any valid token is accepted, so there is no focus
+stealing prevention yet.
+
+This is what GTK4 and Qt use to raise an already-running application,
+and what launchers use to hand over focus to a newly started client.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ doc/FEATURES.md    |  4 +++-
+ doc/protocols.md   | 10 ++++++++
+ src/server.c       | 60 ++++++++++++++++++++++++++++++++++++++++++++++
+ src/server.h       |  5 ++++
+ src/xdg_toplevel.c | 14 +++++++++++
+ src/xdg_toplevel.h | 13 ++++++++++
+ 6 files changed, 105 insertions(+), 1 deletion(-)
+
+diff --git a/doc/FEATURES.md b/doc/FEATURES.md
+index b7a7a45..d108660 100644
+--- a/doc/FEATURES.md
++++ b/doc/FEATURES.md
+@@ -259,7 +259,9 @@ TBD: Raise/Lower.
+ 
+ ### `xdg-activation-v1`
+ 
+-* [ ] Implement.
++* [x] :white_check_mark: Implemented: Activates and raises the window on the current workspace.
++* [ ] Switch to the window's workspace, when on a different workspace.
++* [ ] Consider focus stealing prevention (validate token seat and serial).
+ 
+ ### `xdg-decoration`
+ 
+diff --git a/doc/protocols.md b/doc/protocols.md
+index 45b67a7..21cfceb 100644
+--- a/doc/protocols.md
++++ b/doc/protocols.md
+@@ -49,6 +49,16 @@ of available outputs, and set their propertis.
+ * Status: Supported.
+ * Reference: https://wayland.app/protocols/wlr-output-management-unstable-v1
+ 
++# XDG activation
++
++Permits clients to pass focus to another surface, for example to raise an
++existing window when an application is launched a second time, or when a
++launcher hands over an activation token.
++
++* Status: Supported. Any valid token is accepted. Windows on a workspace
++  other than the current one are not activated.
++* Reference: https://wayland.app/protocols/xdg-activation-v1
++
+ # XDG decoration
+ 
+ This interface allows a compositor to announce support for server-side
+diff --git a/src/server.c b/src/server.c
+index 153b4f2..2f7df0d 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -38,12 +38,14 @@
+ #include <wlr/types/wlr_primary_selection_v1.h>
+ #include <wlr/types/wlr_seat.h>
+ #include <wlr/types/wlr_scene.h>
++#include <wlr/types/wlr_xdg_activation_v1.h>
+ #undef WLR_USE_UNSTABLE
+ 
+ #include "input/manager.h"
+ #include "task_list.h"
+ #include "toolkit/toolkit.h"
+ #include "toplevel_tracker.h"
++#include "xdg_toplevel.h"
+ 
+ /* == Declarations ========================================================= */
+ 
+@@ -65,6 +67,9 @@ static void handle_request_set_selection(
+ static void handle_request_set_primary_selection(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
++static void _wlmaker_server_handle_xdg_activation_request_activate(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
+ 
+ /* == Exported methods ===================================================== */
+ 
+@@ -286,6 +291,18 @@ wlmaker_server_t *wlmaker_server_create(
+         return NULL;
+     }
+ 
++    server_ptr->wlr_xdg_activation_v1_ptr = wlr_xdg_activation_v1_create(
++        server_ptr->wl_display_ptr);
++    if (NULL == server_ptr->wlr_xdg_activation_v1_ptr) {
++        bs_log(BS_ERROR, "Failed wlr_xdg_activation_v1_create()");
++        wlmaker_server_destroy(server_ptr);
++        return NULL;
++    }
++    wlmtk_util_connect_listener_signal(
++        &server_ptr->wlr_xdg_activation_v1_ptr->events.request_activate,
++        &server_ptr->xdg_activation_request_activate_listener,
++        _wlmaker_server_handle_xdg_activation_request_activate);
++
+     server_ptr->layer_shell_ptr = wlmaker_layer_shell_create(server_ptr);
+     if (NULL == server_ptr->layer_shell_ptr) {
+         bs_log(BS_ERROR, "Failed wlmaker_layer_shell_create()");
+@@ -400,6 +417,10 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
+         server_ptr->layer_shell_ptr = NULL;
+     }
+ 
++    // The activation manager is destroyed along with the display.
++    wlmtk_util_disconnect_listener(
++        &server_ptr->xdg_activation_request_activate_listener);
++
+     if (NULL != server_ptr->xdg_decoration_manager_ptr) {
+         wlmaker_xdg_decoration_manager_destroy(
+             server_ptr->xdg_decoration_manager_ptr);
+@@ -597,4 +618,43 @@ void handle_request_set_primary_selection(
+         server_ptr->wlr_seat_ptr, event_ptr->source, event_ptr->serial);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Handles `request_activate` of `wlr_xdg_activation_v1`: Activates & raises.
++ *
++ * Any valid token is accepted, ie. there is no focus stealing prevention.
++ * Windows that are not on the current workspace are left untouched.
++ *
++ * @param listener_ptr
++ * @param data_ptr            Points to a struct
++ *                            wlr_xdg_activation_v1_request_activate_event.
++ */
++void _wlmaker_server_handle_xdg_activation_request_activate(
++    struct wl_listener *listener_ptr,
++    void *data_ptr)
++{
++    wlmaker_server_t *server_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_server_t,
++        xdg_activation_request_activate_listener);
++    struct wlr_xdg_activation_v1_request_activate_event *event_ptr = data_ptr;
++
++    if (wlmtk_desktop_locked(server_ptr->desktop_ptr)) return;
++
++    wlmtk_window_t *window_ptr = wlmaker_xdg_toplevel_window_from_wlr_surface(
++        event_ptr->surface);
++    if (NULL == window_ptr) return;
++
++    wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(window_ptr);
++    if (NULL == workspace_ptr) return;
++    if (workspace_ptr != wlmtk_desktop_get_current_workspace(
++            server_ptr->desktop_ptr)) {
++        bs_log(BS_INFO, "Activation request for window %p on another "
++               "workspace, ignored.", window_ptr);
++        return;
++    }
++
++    wlmtk_workspace_raise_window(workspace_ptr, window_ptr);
++    wlmtk_workspace_activate_window(workspace_ptr, window_ptr);
++}
++
+ /* == End of server.c ====================================================== */
+diff --git a/src/server.h b/src/server.h
+index 38f1240..94eb63a 100644
+--- a/src/server.h
++++ b/src/server.h
+@@ -32,6 +32,7 @@
+ #include <wlr/types/wlr_data_device.h>
+ #include <wlr/types/wlr_primary_selection_v1.h>
+ #include <wlr/types/wlr_seat.h>
++#include <wlr/types/wlr_xdg_activation_v1.h>
+ #undef WLR_USE_UNSTABLE
+ 
+ #include "input/manager.h"
+@@ -119,6 +120,10 @@ struct _wlmaker_server_t {
+     wlmaker_xdg_shell_t       *xdg_shell_ptr;
+     /** The XDG decoration manager. */
+     wlmaker_xdg_decoration_manager_t *xdg_decoration_manager_ptr;
++    /** The XDG activation manager. Permits clients to raise their windows. */
++    struct wlr_xdg_activation_v1 *wlr_xdg_activation_v1_ptr;
++    /** Listener for `request_activate` of `wlr_xdg_activation_v1::events`. */
++    struct wl_listener        xdg_activation_request_activate_listener;
+     /** Layer shell handler. */
+     wlmaker_layer_shell_t     *layer_shell_ptr;
+     /** Backend handler. */
+diff --git a/src/xdg_toplevel.c b/src/xdg_toplevel.c
+index 4f51ca5..464b59e 100644
+--- a/src/xdg_toplevel.c
++++ b/src/xdg_toplevel.c
+@@ -310,6 +310,20 @@ void wlmaker_xdg_toplevel_set_server_side_decorated(
+         wlmaker_xdg_toplevel_ptr->server_side_decorated);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++wlmtk_window_t *wlmaker_xdg_toplevel_window_from_wlr_surface(
++    struct wlr_surface *wlr_surface_ptr)
++{
++    if (NULL == wlr_surface_ptr) return NULL;
++    struct wlr_xdg_toplevel *wlr_xdg_toplevel_ptr =
++        wlr_xdg_toplevel_try_from_wlr_surface(wlr_surface_ptr);
++    if (NULL == wlr_xdg_toplevel_ptr) return NULL;
++
++    struct wlmaker_xdg_toplevel *wxt_ptr = wlr_xdg_toplevel_ptr->base->data;
++    if (NULL == wxt_ptr) return NULL;
++    return wxt_ptr->window_ptr;
++}
++
+ /* == Local (static) methods =============================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/xdg_toplevel.h b/src/xdg_toplevel.h
+index 31b8a41..18be837 100644
+--- a/src/xdg_toplevel.h
++++ b/src/xdg_toplevel.h
+@@ -25,7 +25,9 @@
+ #include <stdbool.h>
+ 
+ #include "task_list.h"
++#include "toolkit/toolkit.h"
+ 
++struct wlr_surface;
+ struct wlr_xdg_toplevel;
+ struct wlmaker_xdg_toplevel;
+ 
+@@ -54,6 +56,17 @@ void wlmaker_xdg_toplevel_set_server_side_decorated(
+     struct wlmaker_xdg_toplevel *wlmaker_xdg_toplevel_ptr,
+     bool server_side_decorated);
+ 
++/**
++ * Looks up the window of the XDG toplevel that `wlr_surface_ptr` belongs to.
++ *
++ * @param wlr_surface_ptr
++ *
++ * @return Pointer to the @ref wlmtk_window_t, or NULL if `wlr_surface_ptr` is
++ *     not the surface of a wlmaker XDG toplevel.
++ */
++wlmtk_window_t *wlmaker_xdg_toplevel_window_from_wlr_surface(
++    struct wlr_surface *wlr_surface_ptr);
++
+ /** Unit test set. */
+ extern const bs_test_set_t wlmaker_xdg_toplevel_test_set;
+ 

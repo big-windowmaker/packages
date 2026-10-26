@@ -1,0 +1,120 @@
+From 2978222cf817b845c3beff71621c15abcd1047dd Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 18:11:56 -0300
+Subject: [PATCH 17/17] xwl: Adds --lazy_xwayland, to start XWayland on the
+ first X11 client.
+
+With --start_xwayland, the XWayland server is started right away, which
+costs about 30-40 MB of memory also in sessions that never run an X11
+client.
+
+Adds the --lazy_xwayland option (default: false, keeping the current
+behaviour). With it, wlr_xwayland_create() is called with lazy=true:
+wlroots reserves the X11 display socket at startup (so DISPLAY is set as
+before), and starts the XWayland server when the first X11 client
+connects.
+
+Documents the option in doc/commandline.md.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ doc/commandline.md |  9 +++++++++
+ src/server.h       |  5 +++++
+ src/wlmaker.c      |  7 +++++++
+ src/xwl.c          | 10 +++++++---
+ 4 files changed, 28 insertions(+), 3 deletions(-)
+
+diff --git a/doc/commandline.md b/doc/commandline.md
+index 1f0c462..119defb 100644
+--- a/doc/commandline.md
++++ b/doc/commandline.md
+@@ -4,6 +4,7 @@
+ 
+ ```
+ --start_xwayland : Optional: Whether to start XWayland. Disabled by default.
++--lazy_xwayland : Optional: With --start_xwayland, starts the XWayland server only when the first X11 client connects. Disabled by default.
+ --config_file : Optional: Path to a configuration file. If not provided, wlmaker will scan default paths for a configuration file, or fall back to a built-in configuration.
+ --state_file : Optional: Path to a state file, with state of workspaces, dock and clips configured. If not provided, wlmaker will scan default paths for a state file, or fall back to a built-in default.
+ --theme_file : Optional: Path to a "theme" file, configuring the visual style for elements. If not provided, wlmaker will use a built-in default theme.
+@@ -23,6 +24,14 @@
+ 
+   `--nostart_xwayland`, `--start_xwayland=false`: Do not start *XWayland*.
+ 
++* `--lazy_xwayland`, `--lazy_xwayland=true`: Together with `--start_xwayland`,
++  starts the *XWayland* server only when the first X11 client connects. The X11
++  display socket is reserved at startup, so `DISPLAY` is set as usual. Saves
++  the memory of an idle *XWayland* server in sessions without X11 clients.
++
++  `--nolazy_xwayland`, `--lazy_xwayland=false`: Starts *XWayland* right away
++  (default).
++
+ * `--config_file=<FILE>`: Loads the @ref config_file from `<FILE>`. Optional.
+   If not provided, wlmaker will attempt to load the file from default
+   locations, or fall back to use a compiled-in default.
+diff --git a/src/server.h b/src/server.h
+index 94eb63a..b2f33f3 100644
+--- a/src/server.h
++++ b/src/server.h
+@@ -65,6 +65,11 @@ extern "C" {
+ typedef struct {
+     /** Whether to start XWayland. */
+     bool                      start_xwayland;
++    /**
++     * Whether to start the XWayland server only once the first X11 client
++     * connects. Applies only with @ref wlmaker_server_options_t::start_xwayland.
++     */
++    bool                      lazy_xwayland;
+     /** Desired output width, for windowed mode. 0 for no preference. */
+     uint32_t                  width;
+     /** Desired output height, for windowed mode. 0 for no preference. */
+diff --git a/src/wlmaker.c b/src/wlmaker.c
+index 548d3ee..45ff829 100644
+--- a/src/wlmaker.c
++++ b/src/wlmaker.c
+@@ -62,6 +62,7 @@ static char *wlmaker_arg_root_menu_file_ptr = NULL;
+ /** Startup options for the server. */
+ static wlmaker_server_options_t wlmaker_server_options = {
+     .start_xwayland = false,
++    .lazy_xwayland = false,
+     .width = 0,
+     .height = 0,
+     .bind_with_logo = false,
+@@ -75,6 +76,12 @@ static const bs_arg_t wlmaker_args[] = {
+         "Optional: Whether to start XWayland. Disabled by default.",
+         false,
+         &wlmaker_server_options.start_xwayland),
++    BS_ARG_BOOL(
++        "lazy_xwayland",
++        "Optional: With --start_xwayland, starts the XWayland server only "
++        "when the first X11 client connects. Disabled by default.",
++        false,
++        &wlmaker_server_options.lazy_xwayland),
+ #endif  // defined(WLMAKER_HAVE_XWAYLAND)
+     BS_ARG_STRING(
+         "config_file",
+diff --git a/src/xwl.c b/src/xwl.c
+index d2b502a..26a67b4 100644
+--- a/src/xwl.c
++++ b/src/xwl.c
+@@ -140,14 +140,18 @@ wlmaker_xwl_t *wlmaker_xwl_create(wlmaker_server_t *server_ptr)
+     xwl_ptr->server_ptr = server_ptr;
+ 
+ #if defined(WLMAKER_HAVE_XWAYLAND)
++    // In lazy mode, wlroots reserves the X11 display socket right away (so
++    // DISPLAY can be set), but starts the server only on first connection.
++    bool lazy = server_ptr->options_ptr->lazy_xwayland;
+     xwl_ptr->wlr_xwayland_ptr = wlr_xwayland_create(
+         server_ptr->wl_display_ptr,
+         wlmbe_backend_compositor(server_ptr->backend_ptr),
+-        false);
++        lazy);
+     if (NULL == xwl_ptr->wlr_xwayland_ptr) {
+-        bs_log(BS_ERROR, "Failed wlr_xwayland_create(%p, %p, false).",
++        bs_log(BS_ERROR, "Failed wlr_xwayland_create(%p, %p, %d).",
+                server_ptr->wl_display_ptr,
+-               wlmbe_backend_compositor(server_ptr->backend_ptr));
++               wlmbe_backend_compositor(server_ptr->backend_ptr),
++               lazy);
+         wlmaker_xwl_destroy(xwl_ptr);
+         return NULL;
+     }

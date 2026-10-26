@@ -1,0 +1,125 @@
+From 1a43a549f17bbd0adada8c617a5f0793a35d2ea4 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 18:04:07 -0300
+Subject: [PATCH 05/17] toolkit: Sets keyboard focus on activation, also if
+ there is no keyboard.
+
+wlmtk_surface_set_activated() sent wlr_seat_keyboard_notify_enter() only
+if the seat currently had a keyboard. Without a keyboard, the seat did
+not track the focused surface at all, and keys from a keyboard added
+later (hotplug, a virtual keyboard, or a new keyboard device appearing
+while the session is locked) went to no surface.
+
+Observed with session locks: After a lock client took over an abandoned
+lock while the seat's keyboard was gone, the new lock surface never got
+keyboard focus, and the user could not type the password.
+
+The enter is now always notified; keycodes and modifiers are passed only
+if there is a keyboard. wlroots tracks the focus, and sends the enter to
+the client's wl_keyboard when created.
+
+Extends the lock_ends_grabs test to verify the lock surface is focused
+while the seat has no keyboard.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ src/lock_mgr.c        | 26 ++++++++++++++++++++++++--
+ src/toolkit/surface.c | 17 +++++++++--------
+ 2 files changed, 33 insertions(+), 10 deletions(-)
+
+diff --git a/src/lock_mgr.c b/src/lock_mgr.c
+index 7b542f6..36caae5 100644
+--- a/src/lock_mgr.c
++++ b/src/lock_mgr.c
+@@ -27,6 +27,9 @@
+ #include <stdlib.h>
+ #include <wayland-server-core.h>
+ #include <wayland-server-protocol.h>
++#include <sys/socket.h>
++#include <unistd.h>
++#include <wayland-server-protocol.h>
+ #include <wayland-util.h>
+ #define WLR_USE_UNSTABLE
+ #include <wlr/types/wlr_compositor.h>
+@@ -1370,7 +1373,8 @@ static void _test_ptr_grab_cancel(
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Tests that locking ends seat grabs (eg. held by an xdg_popup of a panel),
+- * so that the lock surface can obtain keyboard focus.
++ * so that the lock surface obtains keyboard focus. Also when the seat does
++ * not currently have a keyboard.
+  */
+ void test_lock_ends_grabs(bs_test_t *test_ptr)
+ {
+@@ -1408,13 +1412,29 @@ void test_lock_ends_grabs(bs_test_t *test_ptr)
+     wlr_seat_pointer_start_grab(server.wlr_seat_ptr, &ptr_grab);
+     _test_grab_cancels = 0;
+ 
++    // The seat's keyboard focus needs a surface with a client resource.
++    int fds[2];
++    BS_TEST_VERIFY_EQ_OR_RETURN(
++        test_ptr, 0, socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
++    struct wl_client *wl_client_ptr = wl_client_create(
++        server.wl_display_ptr, fds[0]);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, wl_client_ptr);
+     struct wlr_session_lock_v1 lock = {};
+-    struct wlr_surface surface = {};
++    struct wlr_surface surface = {
++        .resource = wl_resource_create(
++            wl_client_ptr, &wl_surface_interface, 4, 0) };
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, surface.resource);
+     struct wlr_session_lock_surface_v1 lock_surface;
+     wlmaker_lock_t *lock_ptr = _test_lock_and_commit(
+         test_ptr, &server, &output, &lock, &surface, &lock_surface);
+     BS_TEST_VERIFY_EQ(test_ptr, &lock, _mock_send_locked_lock);
+ 
++    // The lock surface has keyboard focus, even though there's no keyboard.
++    BS_TEST_VERIFY_EQ(
++        test_ptr,
++        &surface,
++        server.wlr_seat_ptr->keyboard_state.focused_surface);
++
+     // Both grabs got cancelled, the seat is back to its default grabs.
+     BS_TEST_VERIFY_EQ(test_ptr, 2, _test_grab_cancels);
+     BS_TEST_VERIFY_EQ(
+@@ -1428,10 +1448,12 @@ void test_lock_ends_grabs(bs_test_t *test_ptr)
+ 
+     wl_signal_emit(&lock.events.unlock, NULL);
+     _wlmaker_lock_destroy(lock_ptr);
++    wlr_seat_keyboard_clear_focus(server.wlr_seat_ptr);
+     wlmtk_desktop_remove_workspace(server.desktop_ptr, workspace_ptr);
+     wlmtk_workspace_destroy(workspace_ptr);
+     wlmtk_desktop_destroy(server.desktop_ptr);
+     wl_display_destroy(server.wl_display_ptr);
++    close(fds[1]);
+ }
+ 
+ /* == End of lock_mgr.c ==================================================== */
+diff --git a/src/toolkit/surface.c b/src/toolkit/surface.c
+index d6a837b..80a26bd 100644
+--- a/src/toolkit/surface.c
++++ b/src/toolkit/surface.c
+@@ -220,14 +220,15 @@ void wlmtk_surface_set_activated(
+         struct wlr_keyboard *wlr_keyboard_ptr = wlr_seat_get_keyboard(
+             surface_ptr->wlr_seat_ptr);
+         if (activated) {
+-            if (NULL != wlr_keyboard_ptr) {
+-                wlr_seat_keyboard_notify_enter(
+-                    surface_ptr->wlr_seat_ptr,
+-                    surface_ptr->wlr_surface_ptr,
+-                    wlr_keyboard_ptr->keycodes,
+-                    wlr_keyboard_ptr->num_keycodes,
+-                    &wlr_keyboard_ptr->modifiers);
+-            }
++            // Sets keyboard focus also without a keyboard: The seat tracks
++            // the focus, so that keys of a keyboard added later (hotplug,
++            // virtual keyboard) go to this surface.
++            wlr_seat_keyboard_notify_enter(
++                surface_ptr->wlr_seat_ptr,
++                surface_ptr->wlr_surface_ptr,
++                NULL != wlr_keyboard_ptr ? wlr_keyboard_ptr->keycodes : NULL,
++                NULL != wlr_keyboard_ptr ? wlr_keyboard_ptr->num_keycodes : 0,
++                NULL != wlr_keyboard_ptr ? &wlr_keyboard_ptr->modifiers : NULL);
+         } else if (surface_ptr->wlr_seat_ptr->keyboard_state.focused_surface ==
+                    surface_ptr->wlr_surface_ptr) {
+             wlr_seat_keyboard_clear_focus(surface_ptr->wlr_seat_ptr);

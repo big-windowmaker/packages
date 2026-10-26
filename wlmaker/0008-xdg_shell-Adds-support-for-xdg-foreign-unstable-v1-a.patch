@@ -1,0 +1,119 @@
+From 9230dc332f378081ec4aeb0f6c9bc4f6597baf61 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 17:22:50 -0300
+Subject: [PATCH 08/17] xdg_shell: Adds support for xdg-foreign-unstable-v1 and
+ -v2 protocols.
+
+Creates a wlr_xdg_foreign_registry and the v1 and v2 exporter/importer
+globals on it. xdg-desktop-portal uses these to parent file chooser and
+other dialogs to the requesting application's window. The parent relation
+arrives as `set_parent` on the XDG toplevel, which is not acted upon yet.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ doc/FEATURES.md  |  5 +++++
+ doc/protocols.md | 10 ++++++++++
+ src/xdg_shell.c  | 24 ++++++++++++++++++++++++
+ src/xdg_shell.h  | 10 ++++++++++
+ 4 files changed, 49 insertions(+)
+
+diff --git a/doc/FEATURES.md b/doc/FEATURES.md
+index 8e4e3ba..d5e4266 100644
+--- a/doc/FEATURES.md
++++ b/doc/FEATURES.md
+@@ -280,6 +280,11 @@ TBD: Raise/Lower.
+ 
+ * [x] :white_check_mark: Implemented.
+ 
++### `xdg-foreign-unstable-v1`, `xdg-foreign-unstable-v2`
++
++* [x] :white_check_mark: Implemented.
++* [ ] Act upon the parent relation (depends on `set_parent` in `xdg-shell`).
++
+ ### `xdg-shell`
+ 
+ * [x] :white_check_mark: Support toplevel shell and popups.
+diff --git a/doc/protocols.md b/doc/protocols.md
+index 7722630..bbe83ec 100644
+--- a/doc/protocols.md
++++ b/doc/protocols.md
+@@ -98,6 +98,16 @@ wlmaker.
+ * Status: Supported.
+ * Reference: https://wayland.app/protocols/xdg-decoration-unstable-v1
+ 
++# XDG foreign
++
++Permits a client to export a handle for one of its toplevels, and another
++client to import it and set it as parent of its own toplevel. Used by
++`xdg-desktop-portal` to attach file chooser dialogs to the application window.
++
++* Status: Supported (unstable v1 and v2). The parent relation is passed on as
++  `set_parent`, which wlmaker does not act upon yet.
++* Reference: https://wayland.app/protocols/xdg-foreign-unstable-v2
++
+ # XDG shell
+ 
+ Interface for creating desktop-style surfaces.
+diff --git a/src/xdg_shell.c b/src/xdg_shell.c
+index c53c615..2c3a7bf 100644
+--- a/src/xdg_shell.c
++++ b/src/xdg_shell.c
+@@ -60,6 +60,30 @@ wlmaker_xdg_shell_t *wlmaker_xdg_shell_create(wlmaker_server_t *server_ptr)
+         return NULL;
+     }
+ 
++    // XDG foreign lets a client parent its toplevel to a toplevel of another
++    // client, eg. a portal's file dialog to the application window.
++    xdg_shell_ptr->wlr_xdg_foreign_registry_ptr =
++        wlr_xdg_foreign_registry_create(server_ptr->wl_display_ptr);
++    if (NULL == xdg_shell_ptr->wlr_xdg_foreign_registry_ptr) {
++        bs_log(BS_ERROR, "Failed wlr_xdg_foreign_registry_create(%p)",
++               server_ptr->wl_display_ptr);
++        wlmaker_xdg_shell_destroy(xdg_shell_ptr);
++        return NULL;
++    }
++    xdg_shell_ptr->wlr_xdg_foreign_v1_ptr = wlr_xdg_foreign_v1_create(
++        server_ptr->wl_display_ptr,
++        xdg_shell_ptr->wlr_xdg_foreign_registry_ptr);
++    xdg_shell_ptr->wlr_xdg_foreign_v2_ptr = wlr_xdg_foreign_v2_create(
++        server_ptr->wl_display_ptr,
++        xdg_shell_ptr->wlr_xdg_foreign_registry_ptr);
++    if (NULL == xdg_shell_ptr->wlr_xdg_foreign_v1_ptr ||
++        NULL == xdg_shell_ptr->wlr_xdg_foreign_v2_ptr) {
++        bs_log(BS_ERROR, "Failed wlr_xdg_foreign_v1_create() or "
++               "wlr_xdg_foreign_v2_create()");
++        wlmaker_xdg_shell_destroy(xdg_shell_ptr);
++        return NULL;
++    }
++
+     wlmtk_util_connect_listener_signal(
+         &xdg_shell_ptr->wlr_xdg_shell_ptr->events.new_toplevel,
+         &xdg_shell_ptr->new_toplevel_listener,
+diff --git a/src/xdg_shell.h b/src/xdg_shell.h
+index cb709d0..46cc273 100644
+--- a/src/xdg_shell.h
++++ b/src/xdg_shell.h
+@@ -23,6 +23,9 @@
+ 
+ #include <wayland-server-core.h>
+ #define WLR_USE_UNSTABLE
++#include <wlr/types/wlr_xdg_foreign_registry.h>
++#include <wlr/types/wlr_xdg_foreign_v1.h>
++#include <wlr/types/wlr_xdg_foreign_v2.h>
+ #include <wlr/types/wlr_xdg_shell.h>
+ #undef WLR_USE_UNSTABLE
+ 
+@@ -43,6 +46,13 @@ struct _wlmaker_xdg_shell_t {
+     /** XDG Shell handler. */
+     struct wlr_xdg_shell      *wlr_xdg_shell_ptr;
+ 
++    /** Registry of exported toplevels for XDG foreign. Owned by wl_display. */
++    struct wlr_xdg_foreign_registry *wlr_xdg_foreign_registry_ptr;
++    /** XDG foreign, unstable v1. Owned by wl_display. */
++    struct wlr_xdg_foreign_v1 *wlr_xdg_foreign_v1_ptr;
++    /** XDG foreign, unstable v2. Owned by wl_display. */
++    struct wlr_xdg_foreign_v2 *wlr_xdg_foreign_v2_ptr;
++
+     /** Listener for the `new_surface` signal raised by `wlr_xdg_shell`. */
+     struct wl_listener        new_surface_listener;
+ 

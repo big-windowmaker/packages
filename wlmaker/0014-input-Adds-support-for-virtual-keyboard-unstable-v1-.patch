@@ -1,0 +1,218 @@
+From 2d3009dc4bb8bd480d15ee86abd770118cf9834c Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 17:36:41 -0300
+Subject: [PATCH 14/17] input: Adds support for virtual-keyboard-unstable-v1
+ protocol.
+
+Creates the virtual keyboard manager in the input manager, and adds new
+virtual keyboards through the same path as other keyboards. To have them
+work with their own keymap:
+
+* wlmim_keyboard_configure() does not replace the keymap of a virtual
+  keyboard with the configured one.
+* A keyboard without keymap is not made the seat's keyboard on creation,
+  as that would send an empty keymap to the focused client.
+* handle_key() sets the event's keyboard as the seat's keyboard before
+  forwarding the key, so that the event is interpreted with the matching
+  keymap when multiple keyboards are present. This is a no-op for a single
+  keyboard.
+
+Used by on-screen keyboards, wtype and remote desktop servers.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ doc/FEATURES.md      |  4 ++++
+ doc/protocols.md     |  8 ++++++++
+ src/input/keyboard.c | 17 ++++++++++++++--
+ src/input/keyboard.h |  2 ++
+ src/input/manager.c  | 46 ++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 75 insertions(+), 2 deletions(-)
+
+diff --git a/doc/FEATURES.md b/doc/FEATURES.md
+index ccd047b..54a02d3 100644
+--- a/doc/FEATURES.md
++++ b/doc/FEATURES.md
+@@ -248,6 +248,10 @@ TBD: Raise/Lower.
+ 
+ * [x] :white_check_mark: Implemented.
+ 
++### `virtual-keyboard-unstable-v1`
++
++* [x] :white_check_mark: Implemented, keeps the keymap provided by the client.
++
+ ### `wlr-foreign-toplevel-management-unstable-v1`
+ 
+ * [ ] Implement.
+diff --git a/doc/protocols.md b/doc/protocols.md
+index 96fbc90..519d654 100644
+--- a/doc/protocols.md
++++ b/doc/protocols.md
+@@ -59,6 +59,14 @@ draw backgrounds and solid areas, eg. by GTK4 and video players.
+ * Status: Supported.
+ * Reference: https://wayland.app/protocols/single-pixel-buffer-v1
+ 
++# Virtual keyboard
++
++Permits clients to emulate a keyboard, with a keymap of their choice. Used by
++on-screen keyboards, `wtype` and remote desktop servers (`wayvnc`).
++
++* Status: Supported.
++* Reference: https://wayland.app/protocols/virtual-keyboard-unstable-v1
++
+ # wlr gamma control
+ 
+ Permits clients to set the gamma tables of an output. Used by "night light"
+diff --git a/src/input/keyboard.c b/src/input/keyboard.c
+index a825f52..f6b7257 100644
+--- a/src/input/keyboard.c
++++ b/src/input/keyboard.c
+@@ -34,6 +34,7 @@
+ #define WLR_USE_UNSTABLE
+ #include <wlr/types/wlr_keyboard.h>
+ #include <wlr/types/wlr_seat.h>
++#include <wlr/types/wlr_virtual_keyboard_v1.h>
+ #undef WLR_USE_UNSTABLE
+ #include <xkbcommon/xkbcommon.h>
+ 
+@@ -166,7 +167,11 @@ wlmim_keyboard_t *wlmim_keyboard_create(
+         }
+     }
+ 
+-    wlr_seat_set_keyboard(wlr_seat_ptr, keyboard_ptr->wlr_keyboard_ptr);
++    // A virtual keyboard has no keymap until the client sends one. Don't
++    // make it the seat's keyboard before, that would clear clients' keymap.
++    if (NULL != keyboard_ptr->wlr_keyboard_ptr->keymap) {
++        wlr_seat_set_keyboard(wlr_seat_ptr, keyboard_ptr->wlr_keyboard_ptr);
++    }
+     return keyboard_ptr;
+ }
+ 
+@@ -251,7 +256,10 @@ void wlmim_keyboard_configure(
+     struct xkb_keymap *xkb_keymap_ptr,
+     const struct wlmim_keyboard_options *options_ptr)
+ {
+-    if (keyboard_ptr->xkb_keymap_ptr != xkb_keymap_ptr) {
++    // Virtual keyboards come with the keymap provided by their client.
++    bool is_virtual = NULL != wlr_input_device_get_virtual_keyboard(
++        &keyboard_ptr->wlr_keyboard_ptr->base);
++    if (!is_virtual && keyboard_ptr->xkb_keymap_ptr != xkb_keymap_ptr) {
+         if (NULL != keyboard_ptr->xkb_keymap_ptr) {
+             xkb_keymap_unref(keyboard_ptr->xkb_keymap_ptr);
+         }
+@@ -420,6 +428,11 @@ void handle_key(struct wl_listener *listener_ptr, void *data_ptr)
+ 
+     if (processed) return;
+ 
++    // Events are interpreted by the seat's keyboard keymap: With multiple
++    // keyboards (eg. virtual keyboards), use the keyboard of this event.
++    wlr_seat_set_keyboard(
++        keyboard_ptr->wlr_seat_ptr,
++        keyboard_ptr->wlr_keyboard_ptr);
+     wlmtk_element_keyboard_event(
+         keyboard_ptr->root_element_ptr,
+         wlr_keyboard_key_event_ptr);
+diff --git a/src/input/keyboard.h b/src/input/keyboard.h
+index 15413a7..67872e4 100644
+--- a/src/input/keyboard.h
++++ b/src/input/keyboard.h
+@@ -78,6 +78,8 @@ void wlmim_keyboard_destroy(wlmim_keyboard_t *keyboard_ptr);
+ /**
+  * Configures the active xkb_keymap and repeat settings.
+  *
++ * Virtual keyboards keep the keymap that was provided by their client.
++ *
+  * @param keyboard_ptr
+  * @param xkb_keymap_ptr
+  * @param options_ptr
+diff --git a/src/input/manager.c b/src/input/manager.c
+index 48c8c63..b28574e 100644
+--- a/src/input/manager.c
++++ b/src/input/manager.c
+@@ -33,6 +33,7 @@
+ #include <wlr/types/wlr_keyboard.h>
+ #include <wlr/types/wlr_cursor.h>
+ #include <wlr/types/wlr_seat.h>
++#include <wlr/types/wlr_virtual_keyboard_v1.h>
+ #include <wlr/types/wlr_virtual_pointer_v1.h>
+ #undef WLR_USE_UNSTABLE
+ #include <xkbcommon/xkbcommon-keysyms.h>
+@@ -56,6 +57,10 @@ struct _wlmim_t {
+     /** Listener for `new_input` signals raised by `wlr_backend`. */
+     struct wl_listener        backend_new_input_device_listener;
+ 
++    /** Virtual keyboard manager. Owned by wl_display. */
++    struct wlr_virtual_keyboard_manager_v1 *wlr_virtual_keyboard_manager_v1_ptr;
++    /** Listener for `new_virtual_keyboard` of the virtual keyboard manager. */
++    struct wl_listener        new_virtual_keyboard_listener;
+     /** Virtual pointer manager. Owned by wl_display. */
+     struct wlr_virtual_pointer_manager_v1 *wlr_virtual_pointer_manager_v1_ptr;
+     /** Listener for `new_virtual_pointer` of the virtual pointer manager. */
+@@ -124,6 +129,9 @@ static void _wlmim_add_input_device(
+ static void _wlmim_handle_new_input_device(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
++static void _wlmim_handle_new_virtual_keyboard(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
+ static void _wlmim_handle_new_virtual_pointer(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
+@@ -235,6 +243,19 @@ wlmim_t *wlmim_input_manager_create(
+     }
+ 
+     if (NULL != wl_display_ptr && NULL != wlr_seat_ptr) {
++        input_manager_ptr->wlr_virtual_keyboard_manager_v1_ptr =
++            wlr_virtual_keyboard_manager_v1_create(wl_display_ptr);
++        if (NULL == input_manager_ptr->wlr_virtual_keyboard_manager_v1_ptr) {
++            bs_log(BS_ERROR, "Failed wlr_virtual_keyboard_manager_v1_create(%p)",
++                   wl_display_ptr);
++            wlmim_input_manager_destroy(input_manager_ptr);
++            return NULL;
++        }
++        wlmtk_util_connect_listener_signal(
++            &input_manager_ptr->wlr_virtual_keyboard_manager_v1_ptr->events.new_virtual_keyboard,
++            &input_manager_ptr->new_virtual_keyboard_listener,
++            _wlmim_handle_new_virtual_keyboard);
++
+         input_manager_ptr->wlr_virtual_pointer_manager_v1_ptr =
+             wlr_virtual_pointer_manager_v1_create(wl_display_ptr);
+         if (NULL == input_manager_ptr->wlr_virtual_pointer_manager_v1_ptr) {
+@@ -257,6 +278,8 @@ void wlmim_input_manager_destroy(wlmim_t *input_manager_ptr)
+ {
+     wlmtk_util_disconnect_listener(
+         &input_manager_ptr->new_virtual_pointer_listener);
++    wlmtk_util_disconnect_listener(
++        &input_manager_ptr->new_virtual_keyboard_listener);
+     wlmtk_util_disconnect_listener(
+         &input_manager_ptr->backend_new_input_device_listener);
+ 
+@@ -517,6 +540,29 @@ void _wlmim_handle_new_input_device(
+     _wlmim_add_input_device(input_manager_ptr, data_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Handler for `new_virtual_keyboard` of `wlr_virtual_keyboard_manager_v1`.
++ *
++ * Adds the virtual keyboard like any other keyboard device. It keeps the
++ * keymap provided by the client, see @ref wlmim_keyboard_configure.
++ *
++ * @param listener_ptr
++ * @param data_ptr            Points to struct wlr_virtual_keyboard_v1.
++ */
++void _wlmim_handle_new_virtual_keyboard(
++    struct wl_listener *listener_ptr,
++    void *data_ptr)
++{
++    wlmim_t *input_manager_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmim_t, new_virtual_keyboard_listener);
++    struct wlr_virtual_keyboard_v1 *wlr_virtual_keyboard_v1_ptr = data_ptr;
++
++    _wlmim_add_input_device(
++        input_manager_ptr,
++        &wlr_virtual_keyboard_v1_ptr->keyboard.base);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Handler for `new_virtual_pointer` of `wlr_virtual_pointer_manager_v1`.

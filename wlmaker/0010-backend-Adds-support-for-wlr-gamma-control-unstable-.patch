@@ -1,0 +1,101 @@
+From ee4718808d27ae4acde9904fb03fea8fb42ae39f Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 17:25:55 -0300
+Subject: [PATCH 10/17] backend: Adds support for wlr-gamma-control-unstable-v1
+ protocol.
+
+Creates the gamma control manager and hands it to the scene, which
+applies the gamma tables when committing the output. If the output has
+no gamma LUT (eg. nested or headless) and the renderer supports output
+color transforms (Vulkan), a fallback size of 256 is announced and the
+scene applies the tables when rendering.
+
+Permits "night light" tools such as wlsunset or gammastep.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ doc/FEATURES.md       |  4 ++++
+ doc/protocols.md      |  9 +++++++++
+ src/backend/backend.c | 20 ++++++++++++++++++++
+ 3 files changed, 33 insertions(+)
+
+diff --git a/doc/FEATURES.md b/doc/FEATURES.md
+index d2909b2..d49bf05 100644
+--- a/doc/FEATURES.md
++++ b/doc/FEATURES.md
+@@ -247,6 +247,10 @@ TBD: Raise/Lower.
+ 
+ * [ ] Implement.
+ 
++### `wlr-gamma-control-unstable-v1`
++
++* [x] :white_check_mark: Implemented, applied by the wlroots scene graph.
++
+ ### `wlr-layer-shell-unstable-v1`
+ 
+ * [x] :white_check_mark: Support layer panels.
+diff --git a/doc/protocols.md b/doc/protocols.md
+index 8234c00..bbcc3fc 100644
+--- a/doc/protocols.md
++++ b/doc/protocols.md
+@@ -50,6 +50,15 @@ draw backgrounds and solid areas, eg. by GTK4 and video players.
+ * Status: Supported.
+ * Reference: https://wayland.app/protocols/single-pixel-buffer-v1
+ 
++# wlr gamma control
++
++Permits clients to set the gamma tables of an output. Used by "night light"
++tools such as `wlsunset` or `gammastep`.
++
++* Status: Supported. Applied through the wlroots scene graph, either via the
++  output's gamma LUT or, if the output has none, when rendering.
++* Reference: https://wayland.app/protocols/wlr-gamma-control-unstable-v1
++
+ # wlr layer shell {#protocols_wlr_layer_shell}
+ 
+ Clients can use this interface to associate `wl_surface` with a *layer* of the
+diff --git a/src/backend/backend.c b/src/backend/backend.c
+index 4eadeae..5aede32 100644
+--- a/src/backend/backend.c
++++ b/src/backend/backend.c
+@@ -40,6 +40,7 @@
+ #include <wlr/types/wlr_compositor.h>
+ #include <wlr/types/wlr_ext_image_capture_source_v1.h>
+ #include <wlr/types/wlr_ext_image_copy_capture_v1.h>
++#include <wlr/types/wlr_gamma_control_v1.h>
+ #include <wlr/types/wlr_output.h>
+ #include <wlr/types/wlr_output_layout.h>
+ #include <wlr/types/wlr_presentation_time.h>
+@@ -84,6 +85,8 @@ struct _wlmbe_backend_t {
+     struct wlr_presentation   *wlr_presentation_ptr;
+     /** Single-pixel buffer manager. wl_display will take ownership. */
+     struct wlr_single_pixel_buffer_manager_v1 *wlr_single_pixel_buffer_manager_ptr;
++    /** Gamma control manager. wl_display will take ownership. */
++    struct wlr_gamma_control_manager_v1 *wlr_gamma_control_manager_ptr;
+     /** The output manager(s). */
+     wlmbe_output_manager_t    *output_manager_ptr;
+ 
+@@ -340,6 +343,23 @@ wlmbe_backend_t *wlmbe_backend_create(
+         return NULL;
+     }
+ 
++    // Gamma tables are applied by the scene, when committing the output. If
++    // the output has no gamma LUT, the scene can apply it when rendering.
++    backend_ptr->wlr_gamma_control_manager_ptr =
++        wlr_gamma_control_manager_v1_create(wl_display_ptr);
++    if (NULL == backend_ptr->wlr_gamma_control_manager_ptr) {
++        bs_log(BS_ERROR, "Failed wlr_gamma_control_manager_v1_create(%p)",
++               wl_display_ptr);
++        wlmbe_backend_destroy(backend_ptr);
++        return NULL;
++    }
++    if (backend_ptr->wlr_renderer_ptr->features.output_color_transform) {
++        backend_ptr->wlr_gamma_control_manager_ptr->fallback_gamma_size = 256;
++    }
++    wlr_scene_set_gamma_control_manager_v1(
++        wlr_scene_ptr,
++        backend_ptr->wlr_gamma_control_manager_ptr);
++
+     backend_ptr->output_manager_ptr = wlmbe_output_manager_create(
+         wl_display_ptr,
+         wlr_scene_ptr,

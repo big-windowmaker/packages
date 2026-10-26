@@ -1,15 +1,42 @@
 # Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
 # Baseado no PKGBUILD do AUR (wlmaker), de Adrian Perez de Castro.
 
-# Release v0.8.1 (branch-0.8 do upstream). A tag é leve (lightweight), então
-# o commit é conferido explicitamente em prepare(). Os submódulos usados no
-# build (libbase e inih) entram como fontes separadas, fixadas nos commits
-# registrados na árvore da v0.8.1, e são ligados via `git config` (padrão Arch).
+# Snapshot do `main` do upstream (desenvolvimento da 0.9), fixado no commit
+# 7481afe, 80 commits depois da tag v0.8. O `pkgver` segue o estilo VCS do
+# Arch (`git describe`, conferido em prepare()); como 0.8.r80 < 0.8.1 para o
+# `vercmp`, o `epoch=1` evita que o pacote seja tratado como downgrade da
+# 0.8.1.
+#
+# Os submódulos usados no build (libbase e inih) entram como fontes
+# separadas, fixadas nos commits registrados na árvore do 7481afe, e são
+# ligados via `git config` (padrão Arch).
+#
+# Patches: `git format-patch` da branch big-wm/protocols do fork
+# big-windowmaker/wlmaker, um commit por mudança, a enviar ao upstream.
+#   0001  xdg-activation-v1 (ativa e levanta a janela pedida)
+#   0002  org_kde_kwin_server_decoration (decoração do wlmaker no GTK3)
+#   0003  bloqueio de tela: um novo swaylock assume um bloqueio abandonado
+#   0004  bloqueio de tela: encerra os grabs (menus/popups) ao bloquear
+#   0005  foco de teclado também sem teclado no seat (hotplug, teclado virtual)
+#   0006  presentation-time
+#   0007  single-pixel-buffer-v1
+#   0008  xdg-foreign v1 e v2 (diálogos do xdg-desktop-portal)
+#   0009  ext-idle-notify-v1 (swayidle), respeitando idle-inhibit
+#   0010  wlr-gamma-control-unstable-v1 (wlsunset, gammastep)
+#   0011  wlr-output-power-management-unstable-v1 (DPMS, wlopm)
+#   0012  relative-pointer-unstable-v1
+#   0013  wlr-virtual-pointer-unstable-v1
+#   0014  virtual-keyboard-unstable-v1
+#   0015  menu de clique direito: um clique rápido não dispara mais o item
+#         sob o ponteiro; o menu fica aberto, como no Window Maker
+#   0016  dockapps não fecham mais quando o seat não tem ponteiro
+#   0017  opção --lazy_xwayland (XWayland só sobe no primeiro cliente X11)
 pkgname=wlmaker
-pkgver=0.8.1
-pkgrel=2
-_commit=d08e0c08c7a14690c770a576be341f227e5ac2d8
-_libbase_commit=54e60555cae53ad99314c7579dce1ad38373ecaa
+pkgver=0.8.r80.g7481afe
+pkgrel=1
+epoch=1
+_commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
+_libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
 _inih_commit=26254ee9de7681f8825433415443e7116ff24b98
 pkgdesc='Wayland compositor inspired by Window Maker'
 arch=(x86_64)
@@ -30,26 +57,64 @@ depends=(
 makedepends=(
   cmake
   git
+  librsvg  # exigido pelo CMake da 0.9; só os exemplos (não instalados) usam
   wayland-protocols
 )
 checkdepends=(desktop-file-utils)
+_patches=(
+  0001-server-Adds-support-for-xdg-activation-v1-protocol.patch
+  0002-xdg_decoration-Adds-support-for-the-KDE-server-decor.patch
+  0003-lock_mgr-Permits-a-new-session-lock-to-take-over-an-.patch
+  0004-lock_mgr-Ends-seat-grabs-and-pointer-focus-when-lock.patch
+  0005-toolkit-Sets-keyboard-focus-on-activation-also-if-th.patch
+  0006-backend-Adds-support-for-presentation-time-protocol.patch
+  0007-backend-Adds-support-for-single-pixel-buffer-v1-prot.patch
+  0008-xdg_shell-Adds-support-for-xdg-foreign-unstable-v1-a.patch
+  0009-idle-Adds-support-for-ext-idle-notify-v1-protocol.patch
+  0010-backend-Adds-support-for-wlr-gamma-control-unstable-.patch
+  0011-backend-Adds-support-for-wlr-output-power-management.patch
+  0012-input-Adds-support-for-relative-pointer-unstable-v1-.patch
+  0013-input-Adds-support-for-wlr-virtual-pointer-unstable-.patch
+  0014-input-Adds-support-for-virtual-keyboard-unstable-v1-.patch
+  0015-toolkit-Keeps-a-right-click-menu-open-when-it-was-op.patch
+  0016-wlclient-Creates-the-pointer-observer-only-when-the-.patch
+  0017-xwl-Adds-lazy_xwayland-to-start-XWayland-on-the-firs.patch
+)
 source=(
-  "git+https://github.com/phkaeser/wlmaker.git#tag=v${pkgver}"
+  "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
   "git+https://github.com/phkaeser/libbase.git#commit=${_libbase_commit}"
   "git+https://github.com/benhoyt/inih.git#commit=${_inih_commit}"
+  "${_patches[@]}"
 )
-sha256sums=('51c1961a85829d403871abcd0fce96cb73cec2946d11c30511fd498c9e6dff39'
-            '95aa664c7609e0a9d2212a09b9caedb00bc96dbf510bfae369d9c5507e0b3a62'
-            '2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582')
+sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
+            '6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91'
+            '2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582'
+            '4f7efbaa6b3130829e83e6a7aabb7b317bd11740395345fe0e64b528b35277ed'
+            '66585d98a13497110c8bd0b4dd579ca3247169b0f0f0a9a2f0aef33b6a4bdd72'
+            '9f854010f1abcc0a1ce2b9590637ccef3278113cd2e3918a8199ab2f06833dd9'
+            '10074c1e794717824902c03c0e387492ed640c47863a5f6499a0d2ea0960be41'
+            '354845e63f8b50fd4ceadb1e0e8ce4db6ffef87ba6c31dbab933484153c2da51'
+            '5ed47e1b943eb11fd1af88ed8a0d0f0ef2fd8f89c453691cfd871069280c621a'
+            '456bd6dadab1283b79f742a48804323765fb1d7ee628aa8a2e674ce8df4c2326'
+            'af0d40254192a691d4c80dc9a6cba55fa0e3eb40c4638b8cb04ddf4bb432d181'
+            'd27a095c646459485e2c82293f02fc2033c4bf7137f196acf9e9aef97f7b6675'
+            '092016c67f2e810f6e92cd5c6b01851e85dd1a1df0399805375636b8ab7b5c63'
+            'cfe24b736e59744f0bb32b4b6266750d36ced30ae095aa9243299198623e0157'
+            '25a6cfc564deb1f2feae997e4ee35f2b8613307e9cfe8385a5e61ed96d0edafa'
+            '7474ed8dcfb809eb50a9d4ca1331e4618847b5cb3ef431c9f1b0ac0e79e5e7c5'
+            '889db7b68debef884e6262153d0fce2b546c373aaa518e8d70bcc746edd3da4d'
+            'a5d0becefe715b42c5314fd356daddd1a12c7a8ebab917385a7981c8caac85ee'
+            '0491033e48ff1502ba0dca762ad6ee9aecba0a226ce0de6ca56617242e45ca93'
+            '4b152a0ed66264267982af1b2016e08b5daa7ac0164be2fd3661026a43447048')
 
 prepare() {
   cd wlmaker
 
-  # A tag é mutável no upstream; confere o commit esperado.
-  local _head
-  _head="$(git rev-parse HEAD)"
-  if [[ ${_head} != "${_commit}" ]]; then
-    echo "v${pkgver} aponta para ${_head}, esperado ${_commit}" >&2
+  # O pkgver tem que bater com o `git describe` do commit fixado.
+  local _ver
+  _ver="$(git describe --long --tags --abbrev=7 | sed 's/^v//;s/-\([0-9]*\)-/.r\1./;s/-/./g')"
+  if [[ ${_ver} != "${pkgver}" ]]; then
+    echo "git describe dá ${_ver}, mas pkgver=${pkgver}" >&2
     return 1
   fi
 
@@ -59,6 +124,12 @@ prepare() {
   git config submodule.submodules/libbase.url "${srcdir}/libbase"
   git config submodule.submodules/inih.url "${srcdir}/inih"
   git -c protocol.file.allow=always submodule update submodules/libbase submodules/inih
+
+  local _patch
+  for _patch in "${_patches[@]}"; do
+    echo "Aplicando ${_patch}"
+    git apply "${srcdir}/${_patch}"
+  done
 }
 
 build() {
@@ -86,14 +157,11 @@ package() {
   install -Dm644 wlmaker/submodules/inih/LICENSE.txt \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSE.inih"
 
-  # Script de exemplo do upstream, com caminhos específicos do Debian.
-  rm -f "$pkgdir/usr/bin/wrap-wlmaker.sh"
-
-  # Os dockapps do wlmaker (wlmclock, wlmbattery...) são clientes Wayland do
-  # protocolo de dock do wlmaker: na sessão X11 e nos outros ambientes eles
-  # não abrem, então só aparecem nos menus da sessão wlmaker.
+  # Os dockapps do wlmaker (wlmclock, wlmbattery...) e o wlmdock são
+  # clientes Wayland dos protocolos do wlmaker: na sessão X11 e nos outros
+  # ambientes eles não abrem, então só aparecem nos menus da sessão wlmaker.
   local _desktop
-  for _desktop in "$pkgdir"/usr/share/applications/wlmaker.*.desktop; do
+  for _desktop in "$pkgdir"/usr/share/applications/{wlmaker.*,wlmdock}.desktop; do
     [[ -e $_desktop ]] || continue
     grep -q '^OnlyShowIn=' "$_desktop" ||
       sed -i '0,/^\[Desktop Entry\]$/s//[Desktop Entry]\nOnlyShowIn=wlmaker;/' "$_desktop"

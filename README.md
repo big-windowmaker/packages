@@ -21,7 +21,7 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
 | Diretório | Pacotes gerados | Versão | Origem |
 |---|---|---|---|
 | [`windowmaker/`](windowmaker/PKGBUILD) | `windowmaker` | `0.96.0.r130.g558e67f` | `master` do [window-maker/wmaker](https://github.com/window-maker/wmaker) fixado no commit `558e67f`. Substitui o `extra/windowmaker 0.96.0`. |
-| [`wlmaker/`](wlmaker/PKGBUILD) | `wlmaker` | `0.8.1` | Tag `v0.8.1` (branch-0.8) do [phkaeser/wlmaker](https://github.com/phkaeser/wlmaker), com XWayland, contra `wlroots0.20`. |
+| [`wlmaker/`](wlmaker/PKGBUILD) | `wlmaker` | `1:0.8.r80.g7481afe` | `main` (desenvolvimento da 0.9) do [phkaeser/wlmaker](https://github.com/phkaeser/wlmaker) fixado no commit `7481afe`, com 17 patches da branch `big-wm/protocols` do [fork](https://github.com/big-windowmaker/wlmaker), XWayland, contra `wlroots0.20`. |
 | [`big-dockapps/`](big-dockapps/PKGBUILD) | `libdockapp`, `wmcpuload`, `wmbattery`, `wmusic`, `wmshutdown`, `wmmoonclock`, `wmcube`, `wmudmount`, `wmnet`, `wmclock`, `wmmemload`, `wmsystemtray`, `pclock`, `wmwifi`, `minidock`, `minicontrol`, `wmapmload`, `mountapp` | `20260412` | [window-maker/dockapps](https://github.com/window-maker/dockapps) fixado no commit `251e851`; `wmudmount` (3.0), `wmsystemtray` (1.4) e `mountapp` (3.0) vêm dos tarballs do SourceForge; `minidock` (1.9) e `minicontrol` (0.2) da Zenwalk; `wmapmload` (0.3.4) do site do autor. |
 | [`biglinux-livecd/`](biglinux-livecd/PKGBUILD) | `biglinux-livecd` | `26.10.26` | **Temporário**, só para as ISOs de teste: branch `window-maker` de [big-windowmaker/biglinux-livecd](https://github.com/big-windowmaker/biglinux-livecd), com o suporte à sessão live do Window Maker proposto ao upstream. Sai daqui quando a mudança estiver no `biglinux-stable`. |
 | [`gtk-nocsd/`](gtk-nocsd/PKGBUILD) | `gtk-nocsd` | `4.8` | Release 4.8 do [MorsMortium/gtk-nocsd](https://codeberg.org/MorsMortium/gtk-nocsd) (Codeberg). Tira a CSD das janelas GTK 3/4 e libadwaita; carregado pela sessão X11 do big-wm. |
@@ -36,11 +36,28 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
   Um patch próprio faz o `setstyle` manter os caminhos absolutos das
   texturas dos temas (antes ele prefixava o diretório do tema e o papel de
   parede não carregava); a enviar ao upstream.
-- **wlmaker**: os submódulos `libbase` e `inih` entram como fontes separadas,
-  fixadas nos commits registrados na v0.8.1, e são ligados em `prepare()` com
-  `git config submodule.<nome>.url` (padrão do Arch). O `prepare()` confere o
-  commit da tag. O `check()` roda os 12 testes do CTest.
-  Os `.desktop` dos dockapps do wlmaker ganham `OnlyShowIn=wlmaker;`: na
+- **wlmaker**: snapshot do `main` (0.9 em desenvolvimento: `wlmdock` como
+  binário separado, `ext-foreign-toplevel-list-v1`, `ext-image-copy-capture-v1`,
+  `cursor-shape-v1`, correções de vazamentos e travamentos). O `pkgver` segue o
+  `git describe` (conferido em `prepare()`) e leva `epoch=1`, porque
+  `0.8.r80` < `0.8.1` para o `vercmp`. Os submódulos `libbase` e `inih` entram
+  como fontes separadas, fixadas nos commits registrados no `7481afe`, e são
+  ligados em `prepare()` com `git config submodule.<nome>.url` (padrão do
+  Arch). Nova dependência de build: `librsvg` (exigida pelo CMake, usada só
+  pelos exemplos). O `check()` roda os 16 testes do CTest.
+  Os patches (`git format-patch` da branch `big-wm/protocols`, um commit por
+  mudança, a enviar ao upstream) adicionam os protocolos `xdg-activation-v1`,
+  `org_kde_kwin_server_decoration` (decoração do wlmaker nas janelas GTK3),
+  `presentation-time`, `single-pixel-buffer-v1`, `xdg-foreign` v1/v2,
+  `ext-idle-notify-v1`, `wlr-gamma-control`, `wlr-output-power-management`,
+  `relative-pointer`, `wlr-virtual-pointer` e `virtual-keyboard`; corrigem o
+  bloqueio de tela (sem foco de teclado quando um menu de bandeja estava
+  aberto; bloqueio abandonado sem recuperação), o menu de clique direito que
+  disparava o item sob o ponteiro num clique rápido e os dockapps que fechavam
+  sem ponteiro no seat; e acrescentam a opção `--lazy_xwayland`.
+  Na 0.9 não há mais dock embutido e o `Config.plist` padrão não inicia o
+  `wlmdock`: a configuração da sessão precisa colocá-lo no `Autostart`.
+  Os `.desktop` dos dockapps e do `wlmdock` ganham `OnlyShowIn=wlmaker;`: na
   sessão X11 eles não abrem e apareciam no menu e no rofi.
 - **big-dockapps**: num pacote split o `makepkg` não permite `pkgver` diferente
   por pacote. Por isso todos usam a data do commit fixado, que é maior que as

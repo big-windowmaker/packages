@@ -1,13 +1,15 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
-	pkgver = 0.8.1
-	pkgrel = 2
+	pkgver = 0.8.r80.g7481afe
+	pkgrel = 1
+	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
 	license = Apache-2.0 AND BSD-3-Clause
 	checkdepends = desktop-file-utils
 	makedepends = cmake
 	makedepends = git
+	makedepends = librsvg
 	makedepends = wayland-protocols
 	depends = cairo
 	depends = glibc
@@ -19,11 +21,45 @@ pkgbase = wlmaker
 	depends = wayland
 	depends = wlroots0.20
 	depends = xorg-xwayland
-	source = git+https://github.com/phkaeser/wlmaker.git#tag=v0.8.1
-	source = git+https://github.com/phkaeser/libbase.git#commit=54e60555cae53ad99314c7579dce1ad38373ecaa
+	source = git+https://github.com/phkaeser/wlmaker.git#commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
+	source = git+https://github.com/phkaeser/libbase.git#commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
 	source = git+https://github.com/benhoyt/inih.git#commit=26254ee9de7681f8825433415443e7116ff24b98
-	sha256sums = 51c1961a85829d403871abcd0fce96cb73cec2946d11c30511fd498c9e6dff39
-	sha256sums = 95aa664c7609e0a9d2212a09b9caedb00bc96dbf510bfae369d9c5507e0b3a62
+	source = 0001-server-Adds-support-for-xdg-activation-v1-protocol.patch
+	source = 0002-xdg_decoration-Adds-support-for-the-KDE-server-decor.patch
+	source = 0003-lock_mgr-Permits-a-new-session-lock-to-take-over-an-.patch
+	source = 0004-lock_mgr-Ends-seat-grabs-and-pointer-focus-when-lock.patch
+	source = 0005-toolkit-Sets-keyboard-focus-on-activation-also-if-th.patch
+	source = 0006-backend-Adds-support-for-presentation-time-protocol.patch
+	source = 0007-backend-Adds-support-for-single-pixel-buffer-v1-prot.patch
+	source = 0008-xdg_shell-Adds-support-for-xdg-foreign-unstable-v1-a.patch
+	source = 0009-idle-Adds-support-for-ext-idle-notify-v1-protocol.patch
+	source = 0010-backend-Adds-support-for-wlr-gamma-control-unstable-.patch
+	source = 0011-backend-Adds-support-for-wlr-output-power-management.patch
+	source = 0012-input-Adds-support-for-relative-pointer-unstable-v1-.patch
+	source = 0013-input-Adds-support-for-wlr-virtual-pointer-unstable-.patch
+	source = 0014-input-Adds-support-for-virtual-keyboard-unstable-v1-.patch
+	source = 0015-toolkit-Keeps-a-right-click-menu-open-when-it-was-op.patch
+	source = 0016-wlclient-Creates-the-pointer-observer-only-when-the-.patch
+	source = 0017-xwl-Adds-lazy_xwayland-to-start-XWayland-on-the-firs.patch
+	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
+	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
 	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
+	sha256sums = 4f7efbaa6b3130829e83e6a7aabb7b317bd11740395345fe0e64b528b35277ed
+	sha256sums = 66585d98a13497110c8bd0b4dd579ca3247169b0f0f0a9a2f0aef33b6a4bdd72
+	sha256sums = 9f854010f1abcc0a1ce2b9590637ccef3278113cd2e3918a8199ab2f06833dd9
+	sha256sums = 10074c1e794717824902c03c0e387492ed640c47863a5f6499a0d2ea0960be41
+	sha256sums = 354845e63f8b50fd4ceadb1e0e8ce4db6ffef87ba6c31dbab933484153c2da51
+	sha256sums = 5ed47e1b943eb11fd1af88ed8a0d0f0ef2fd8f89c453691cfd871069280c621a
+	sha256sums = 456bd6dadab1283b79f742a48804323765fb1d7ee628aa8a2e674ce8df4c2326
+	sha256sums = af0d40254192a691d4c80dc9a6cba55fa0e3eb40c4638b8cb04ddf4bb432d181
+	sha256sums = d27a095c646459485e2c82293f02fc2033c4bf7137f196acf9e9aef97f7b6675
+	sha256sums = 092016c67f2e810f6e92cd5c6b01851e85dd1a1df0399805375636b8ab7b5c63
+	sha256sums = cfe24b736e59744f0bb32b4b6266750d36ced30ae095aa9243299198623e0157
+	sha256sums = 25a6cfc564deb1f2feae997e4ee35f2b8613307e9cfe8385a5e61ed96d0edafa
+	sha256sums = 7474ed8dcfb809eb50a9d4ca1331e4618847b5cb3ef431c9f1b0ac0e79e5e7c5
+	sha256sums = 889db7b68debef884e6262153d0fce2b546c373aaa518e8d70bcc746edd3da4d
+	sha256sums = a5d0becefe715b42c5314fd356daddd1a12c7a8ebab917385a7981c8caac85ee
+	sha256sums = 0491033e48ff1502ba0dca762ad6ee9aecba0a226ce0de6ca56617242e45ca93
+	sha256sums = 4b152a0ed66264267982af1b2016e08b5daa7ac0164be2fd3661026a43447048
 
 pkgname = wlmaker

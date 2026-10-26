@@ -1,0 +1,355 @@
+From 63b7115e964e4bd317a92b29b422237a842bd76d Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 17:27:27 -0300
+Subject: [PATCH 11/17] backend: Adds support for
+ wlr-output-power-management-unstable-v1 protocol.
+
+Creates the output power manager and handles `set_mode` by disabling,
+resp. enabling the output through wlr_output_state. The output remains
+in the output layout while powered off, so windows stay where they are.
+Outputs that are not in the layout (eg. disabled through configuration)
+are left untouched.
+
+wlroots' wlr_output_power_management_v1.h includes the protocol's server
+header, so the protocol XML from wlr-protocols is added to third_party/
+and the header generated along with the other protocol headers.
+
+Permits DPMS from clients, eg. `wlopm` run from `swayidle`.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ doc/FEATURES.md                               |   4 +
+ doc/protocols.md                              |   9 ++
+ src/backend/CMakeLists.txt                    |   2 +
+ src/backend/backend.c                         |  65 +++++++++
+ third_party/protocols/CMakeLists.txt          |   8 ++
+ ...lr-output-power-management-unstable-v1.xml | 128 ++++++++++++++++++
+ 6 files changed, 216 insertions(+)
+ create mode 100644 third_party/protocols/wlr-output-power-management-unstable-v1.xml
+
+diff --git a/doc/FEATURES.md b/doc/FEATURES.md
+index d49bf05..a76b487 100644
+--- a/doc/FEATURES.md
++++ b/doc/FEATURES.md
+@@ -262,6 +262,10 @@ TBD: Raise/Lower.
+ * [x] :white_check_mark: Scale, transformation and mode of output is configurable
+   in *config* file, by matching output attributes.
+ 
++### `wlr-output-power-management-unstable-v1`
++
++* [x] :white_check_mark: Implemented: Powers outputs off and on by disabling, resp. enabling them.
++
+ ### `wlr-screencopy-unstable-v1`
+ 
+ * [x] :white_check_mark: Implemented, works for `wdisplays`.
+diff --git a/doc/protocols.md b/doc/protocols.md
+index bbcc3fc..8a61b65 100644
+--- a/doc/protocols.md
++++ b/doc/protocols.md
+@@ -69,6 +69,15 @@ as configured.
+ * Status: Supported, except popups and input semantics.
+ * Reference: https://wayland.app/protocols/wlr-layer-shell-unstable-v1
+ 
++# wlr output power management
++
++Permits clients to power outputs off and on (DPMS), for example
++`wlopm --off '*'` triggered from `swayidle`.
++
++* Status: Supported. Powering off disables the output, but keeps it in the
++  output layout. Outputs disabled through configuration are not affected.
++* Reference: https://wayland.app/protocols/wlr-output-power-management-unstable-v1
++
+ # wlr screencopy
+ 
+ This protocol allows clients to ask the compositor to copy part of the screen
+diff --git a/src/backend/CMakeLists.txt b/src/backend/CMakeLists.txt
+index 6c91980..ea4c759 100644
+--- a/src/backend/CMakeLists.txt
++++ b/src/backend/CMakeLists.txt
+@@ -31,6 +31,7 @@ target_include_directories(
+   "${WAYLAND_SERVER_INCLUDE_DIRS}"
+   "${WLROOTS_INCLUDE_DIRS}"
+   "${PROJECT_SOURCE_DIR}/include"
++  "${PROJECT_BINARY_DIR}/third_party/protocols"
+ )
+ target_include_directories(
+   wlmbackend_lib
+@@ -56,6 +57,7 @@ target_link_libraries(
+   PRIVATE
+   wlmtoolkit_lib
+   PkgConfig::WLROOTS)
++add_dependencies(wlmbackend_lib protocol_headers)
+ if(iwyu_path_and_options)
+   set_target_properties(
+     wlmbackend_lib PROPERTIES
+diff --git a/src/backend/backend.c b/src/backend/backend.c
+index 5aede32..cf57471 100644
+--- a/src/backend/backend.c
++++ b/src/backend/backend.c
+@@ -43,6 +43,7 @@
+ #include <wlr/types/wlr_gamma_control_v1.h>
+ #include <wlr/types/wlr_output.h>
+ #include <wlr/types/wlr_output_layout.h>
++#include <wlr/types/wlr_output_power_management_v1.h>
+ #include <wlr/types/wlr_presentation_time.h>
+ #include <wlr/types/wlr_scene.h>
+ #include <wlr/types/wlr_screencopy_v1.h>
+@@ -87,6 +88,10 @@ struct _wlmbe_backend_t {
+     struct wlr_single_pixel_buffer_manager_v1 *wlr_single_pixel_buffer_manager_ptr;
+     /** Gamma control manager. wl_display will take ownership. */
+     struct wlr_gamma_control_manager_v1 *wlr_gamma_control_manager_ptr;
++    /** Output power manager. wl_display will take ownership. */
++    struct wlr_output_power_manager_v1 *wlr_output_power_manager_ptr;
++    /** Listener for `set_mode` of `wlr_output_power_manager_v1::events`. */
++    struct wl_listener        output_power_set_mode_listener;
+     /** The output manager(s). */
+     wlmbe_output_manager_t    *output_manager_ptr;
+ 
+@@ -138,6 +143,9 @@ struct _wlmbe_backend_t {
+ static void _wlmbe_backend_handle_new_output(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
++static void _wlmbe_backend_handle_output_power_set_mode(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
+ 
+ static bool _wlmbe_backend_decode_item(
+     bspl_object_t *obj_ptr,
+@@ -360,6 +368,19 @@ wlmbe_backend_t *wlmbe_backend_create(
+         wlr_scene_ptr,
+         backend_ptr->wlr_gamma_control_manager_ptr);
+ 
++    backend_ptr->wlr_output_power_manager_ptr =
++        wlr_output_power_manager_v1_create(wl_display_ptr);
++    if (NULL == backend_ptr->wlr_output_power_manager_ptr) {
++        bs_log(BS_ERROR, "Failed wlr_output_power_manager_v1_create(%p)",
++               wl_display_ptr);
++        wlmbe_backend_destroy(backend_ptr);
++        return NULL;
++    }
++    wlmtk_util_connect_listener_signal(
++        &backend_ptr->wlr_output_power_manager_ptr->events.set_mode,
++        &backend_ptr->output_power_set_mode_listener,
++        _wlmbe_backend_handle_output_power_set_mode);
++
+     backend_ptr->output_manager_ptr = wlmbe_output_manager_create(
+         wl_display_ptr,
+         wlr_scene_ptr,
+@@ -381,6 +402,7 @@ wlmbe_backend_t *wlmbe_backend_create(
+ /* ------------------------------------------------------------------------- */
+ void wlmbe_backend_destroy(wlmbe_backend_t *backend_ptr)
+ {
++    wlmtk_util_disconnect_listener(&backend_ptr->output_power_set_mode_listener);
+     wlmtk_util_disconnect_listener(&backend_ptr->new_output_listener);
+ 
+     if (NULL != backend_ptr->output_manager_ptr) {
+@@ -626,6 +648,49 @@ void _wlmbe_backend_handle_new_output(
+     wlr_output_destroy(wlr_output_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Handles `set_mode` of `wlr_output_power_manager_v1`: Powers the output
++ * off or on, by disabling or enabling it.
++ *
++ * Only applies to outputs that are part of the output layout: Outputs that
++ * were disabled through configuration are not powered on. The output remains
++ * in the layout while powered off, so that windows remain where they are.
++ *
++ * @param listener_ptr
++ * @param data_ptr            Points to struct wlr_output_power_v1_set_mode_event.
++ */
++void _wlmbe_backend_handle_output_power_set_mode(
++    struct wl_listener *listener_ptr,
++    void *data_ptr)
++{
++    wlmbe_backend_t *backend_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmbe_backend_t, output_power_set_mode_listener);
++    struct wlr_output_power_v1_set_mode_event *event_ptr = data_ptr;
++    struct wlr_output *wlr_output_ptr = event_ptr->output;
++    bool enable = ZWLR_OUTPUT_POWER_V1_MODE_ON == event_ptr->mode;
++
++    if (NULL == wlr_output_layout_get(backend_ptr->wlr_output_layout_ptr,
++                                      wlr_output_ptr)) {
++        bs_log(BS_INFO, "Output power: \"%s\" not in layout, ignored.",
++               wlr_output_ptr->name);
++        return;
++    }
++    if (enable == wlr_output_ptr->enabled) return;
++
++    struct wlr_output_state state;
++    wlr_output_state_init(&state);
++    wlr_output_state_set_enabled(&state, enable);
++    if (!wlr_output_commit_state(wlr_output_ptr, &state)) {
++        bs_log(BS_WARNING, "Output power: Failed to power %s \"%s\"",
++               enable ? "on" : "off", wlr_output_ptr->name);
++    } else {
++        bs_log(BS_INFO, "Output power: Powered %s \"%s\"",
++               enable ? "on" : "off", wlr_output_ptr->name);
++    }
++    wlr_output_state_finish(&state);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Decodes an item of `Outputs`. */
+ bool _wlmbe_backend_decode_item(
+diff --git a/third_party/protocols/CMakeLists.txt b/third_party/protocols/CMakeLists.txt
+index 3009acf..974cd9a 100644
+--- a/third_party/protocols/CMakeLists.txt
++++ b/third_party/protocols/CMakeLists.txt
+@@ -37,6 +37,13 @@ add_custom_command(
+   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../protocols/wlr-layer-shell-unstable-v1.xml"
+   VERBATIM)
+ 
++# Server header, as included by wlroots' wlr_output_power_management_v1.h.
++add_custom_command(
++  OUTPUT wlr-output-power-management-unstable-v1-protocol.h
++  COMMAND "${WAYLAND_SCANNER_EXECUTABLE}" server-header "${CMAKE_CURRENT_SOURCE_DIR}/wlr-output-power-management-unstable-v1.xml" "wlr-output-power-management-unstable-v1-protocol.h"
++  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/wlr-output-power-management-unstable-v1.xml"
++  VERBATIM)
++
+ add_custom_command(
+   OUTPUT xdg-shell-protocol.h
+   COMMAND "${WAYLAND_SCANNER_EXECUTABLE}" client-header "${protocol_dir}/stable/xdg-shell/xdg-shell.xml" "xdg-shell-protocol.h"
+@@ -48,6 +55,7 @@ add_library(
+   OBJECT
+   cursor-shape-v1-protocol.h
+   wlr-layer-shell-unstable-v1-protocol.h
++  wlr-output-power-management-unstable-v1-protocol.h
+   xdg-shell-protocol.h)
+ set_target_properties(
+   protocol_headers PROPERTIES
+diff --git a/third_party/protocols/wlr-output-power-management-unstable-v1.xml b/third_party/protocols/wlr-output-power-management-unstable-v1.xml
+new file mode 100644
+index 0000000..20dbb77
+--- /dev/null
++++ b/third_party/protocols/wlr-output-power-management-unstable-v1.xml
+@@ -0,0 +1,128 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<protocol name="wlr_output_power_management_unstable_v1">
++  <copyright>
++    Copyright © 2019 Purism SPC
++
++    Permission is hereby granted, free of charge, to any person obtaining a
++    copy of this software and associated documentation files (the "Software"),
++    to deal in the Software without restriction, including without limitation
++    the rights to use, copy, modify, merge, publish, distribute, sublicense,
++    and/or sell copies of the Software, and to permit persons to whom the
++    Software is furnished to do so, subject to the following conditions:
++
++    The above copyright notice and this permission notice (including the next
++    paragraph) shall be included in all copies or substantial portions of the
++    Software.
++
++    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++    DEALINGS IN THE SOFTWARE.
++  </copyright>
++
++  <description summary="Control power management modes of outputs">
++    This protocol allows clients to control power management modes
++    of outputs that are currently part of the compositor space. The
++    intent is to allow special clients like desktop shells to power
++    down outputs when the system is idle.
++
++    To modify outputs not currently part of the compositor space see
++    wlr-output-management.
++
++    Warning! The protocol described in this file is experimental and
++    backward incompatible changes may be made. Backward compatible changes
++    may be added together with the corresponding interface version bump.
++    Backward incompatible changes are done by bumping the version number in
++    the protocol and interface names and resetting the interface version.
++    Once the protocol is to be declared stable, the 'z' prefix and the
++    version number in the protocol and interface names are removed and the
++    interface version number is reset.
++  </description>
++
++  <interface name="zwlr_output_power_manager_v1" version="1">
++    <description summary="manager to create per-output power management">
++      This interface is a manager that allows creating per-output power
++      management mode controls.
++    </description>
++
++    <request name="get_output_power">
++      <description summary="get a power management for an output">
++        Create an output power management mode control that can be used to
++        adjust the power management mode for a given output.
++      </description>
++      <arg name="id" type="new_id" interface="zwlr_output_power_v1"/>
++      <arg name="output" type="object" interface="wl_output"/>
++    </request>
++
++    <request name="destroy" type="destructor">
++      <description summary="destroy the manager">
++        All objects created by the manager will still remain valid, until their
++        appropriate destroy request has been called.
++      </description>
++    </request>
++  </interface>
++
++  <interface name="zwlr_output_power_v1" version="1">
++    <description summary="adjust power management mode for an output">
++      This object offers requests to set the power management mode of
++      an output.
++    </description>
++
++    <enum name="mode">
++      <entry name="off" value="0"
++             summary="Output is turned off."/>
++      <entry name="on" value="1"
++             summary="Output is turned on, no power saving"/>
++    </enum>
++
++    <enum name="error">
++      <entry name="invalid_mode" value="1" summary="nonexistent power save mode"/>
++    </enum>
++
++    <request name="set_mode">
++      <description summary="Set an outputs power save mode">
++        Set an output's power save mode to the given mode. The mode change
++        is effective immediately. If the output does not support the given
++        mode a failed event is sent.
++      </description>
++      <arg name="mode" type="uint" enum="mode" summary="the power save mode to set"/>
++    </request>
++
++    <event name="mode">
++      <description summary="Report a power management mode change">
++        Report the power management mode change of an output.
++
++        The mode event is sent after an output changed its power
++        management mode. The reason can be a client using set_mode or the
++        compositor deciding to change an output's mode.
++        This event is also sent immediately when the object is created
++        so the client is informed about the current power management mode.
++      </description>
++      <arg name="mode" type="uint" enum="mode"
++           summary="the output's new power management mode"/>
++    </event>
++
++    <event name="failed">
++      <description summary="object no longer valid">
++        This event indicates that the output power management mode control
++        is no longer valid. This can happen for a number of reasons,
++        including:
++        - The output doesn't support power management
++        - Another client already has exclusive power management mode control
++          for this output
++        - The output disappeared
++
++        Upon receiving this event, the client should destroy this object.
++      </description>
++    </event>
++
++    <request name="destroy" type="destructor">
++      <description summary="destroy this power management">
++        Destroys the output power management mode control object.
++      </description>
++    </request>
++  </interface>
++</protocol>

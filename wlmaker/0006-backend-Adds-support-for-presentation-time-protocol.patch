@@ -1,0 +1,88 @@
+From 4a20b1ed854e31e896b151c58652efa87c95f176 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 17:21:18 -0300
+Subject: [PATCH 06/17] backend: Adds support for presentation-time protocol.
+
+Creates the wp_presentation global (version 2). Feedback for surfaces is
+sent by the wlroots scene graph when it renders them, so no further
+wiring is needed.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ doc/FEATURES.md       |  4 ++++
+ doc/protocols.md      |  8 ++++++++
+ src/backend/backend.c | 13 +++++++++++++
+ 3 files changed, 25 insertions(+)
+
+diff --git a/doc/FEATURES.md b/doc/FEATURES.md
+index 045cdd8..a7cc351 100644
+--- a/doc/FEATURES.md
++++ b/doc/FEATURES.md
+@@ -235,6 +235,10 @@ TBD: Raise/Lower.
+ * [x] :white_check_mark: Implement.
+ * [ ] Test it. Didn't have a tool when adding it.
+ 
++### `presentation-time`
++
++* [x] :white_check_mark: Implemented, feedback provided by the wlroots scene graph.
++
+ ### `wlr-foreign-toplevel-management-unstable-v1`
+ 
+ * [ ] Implement.
+diff --git a/doc/protocols.md b/doc/protocols.md
+index a2ae87a..9769f9a 100644
+--- a/doc/protocols.md
++++ b/doc/protocols.md
+@@ -13,6 +13,14 @@ Permits inhibiting the idle behaviour, such as locking the screen.
+ * Status: Implemented, untested.
+ * Reference: https://wayland.app/protocols/idle-inhibit-unstable-v1
+ 
++# Presentation time
++
++Provides feedback to clients about when their content was shown on an output.
++Used by video players and toolkits for smooth animation and A/V sync.
++
++* Status: Supported. Feedback is sent by the wlroots scene graph.
++* Reference: https://wayland.app/protocols/presentation-time
++
+ # Session lock
+ 
+ Allows privileged Wayland clients to lock the session and display arbitrary
+diff --git a/src/backend/backend.c b/src/backend/backend.c
+index 532d1a5..e06eede 100644
+--- a/src/backend/backend.c
++++ b/src/backend/backend.c
+@@ -42,6 +42,7 @@
+ #include <wlr/types/wlr_ext_image_copy_capture_v1.h>
+ #include <wlr/types/wlr_output.h>
+ #include <wlr/types/wlr_output_layout.h>
++#include <wlr/types/wlr_presentation_time.h>
+ #include <wlr/types/wlr_scene.h>
+ #include <wlr/types/wlr_screencopy_v1.h>
+ #include <wlr/types/wlr_subcompositor.h>
+@@ -78,6 +79,8 @@ struct _wlmbe_backend_t {
+     struct wlr_ext_output_image_capture_source_manager_v1 *wlr_ext_output_source_manager_ptr;
+     /** Capture manager for sessions and frames. wl_display owns it */
+     struct wlr_ext_image_copy_capture_manager_v1 *wlr_ext_image_copy_capture_manager_ptr;
++    /** Presentation time feedback. wl_display will take ownership. */
++    struct wlr_presentation   *wlr_presentation_ptr;
+     /** The output manager(s). */
+     wlmbe_output_manager_t    *output_manager_ptr;
+ 
+@@ -314,6 +317,16 @@ wlmbe_backend_t *wlmbe_backend_create(
+         return NULL;
+     }
+ 
++    // Feedback is sent by the scene, for surfaces it renders. See wlr_scene.h.
++    backend_ptr->wlr_presentation_ptr = wlr_presentation_create(
++        wl_display_ptr, backend_ptr->wlr_backend_ptr, 2);
++    if (NULL == backend_ptr->wlr_presentation_ptr) {
++        bs_log(BS_ERROR, "Failed wlr_presentation_create(%p, %p, 2)",
++               wl_display_ptr, backend_ptr->wlr_backend_ptr);
++        wlmbe_backend_destroy(backend_ptr);
++        return NULL;
++    }
++
+     backend_ptr->output_manager_ptr = wlmbe_output_manager_create(
+         wl_display_ptr,
+         wlr_scene_ptr,

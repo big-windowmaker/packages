@@ -1,0 +1,89 @@
+From 6e53101941de91236ea8980218a0e8acaa6f8165 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 17:22:02 -0300
+Subject: [PATCH 07/17] backend: Adds support for single-pixel-buffer-v1
+ protocol.
+
+Creates the wp_single_pixel_buffer_manager_v1 global. Clients such as
+GTK4 and video players use it to draw solid color areas cheaply, usually
+together with wp_viewporter, which is already supported.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ doc/FEATURES.md       |  4 ++++
+ doc/protocols.md      |  8 ++++++++
+ src/backend/backend.c | 13 +++++++++++++
+ 3 files changed, 25 insertions(+)
+
+diff --git a/doc/FEATURES.md b/doc/FEATURES.md
+index a7cc351..8e4e3ba 100644
+--- a/doc/FEATURES.md
++++ b/doc/FEATURES.md
+@@ -239,6 +239,10 @@ TBD: Raise/Lower.
+ 
+ * [x] :white_check_mark: Implemented, feedback provided by the wlroots scene graph.
+ 
++### `single-pixel-buffer-v1`
++
++* [x] :white_check_mark: Implemented.
++
+ ### `wlr-foreign-toplevel-management-unstable-v1`
+ 
+ * [ ] Implement.
+diff --git a/doc/protocols.md b/doc/protocols.md
+index 9769f9a..7722630 100644
+--- a/doc/protocols.md
++++ b/doc/protocols.md
+@@ -32,6 +32,14 @@ graphics while the session is locked. An example of such a client is
+   (`finished`) while a lock is held.
+ * Reference: https://wayland.app/protocols/ext-session-lock-v1
+ 
++# Single-pixel buffer
++
++Lets clients create a buffer for a single, solid color pixel. Cheap way to
++draw backgrounds and solid areas, eg. by GTK4 and video players.
++
++* Status: Supported.
++* Reference: https://wayland.app/protocols/single-pixel-buffer-v1
++
+ # wlr layer shell {#protocols_wlr_layer_shell}
+ 
+ Clients can use this interface to associate `wl_surface` with a *layer* of the
+diff --git a/src/backend/backend.c b/src/backend/backend.c
+index e06eede..4eadeae 100644
+--- a/src/backend/backend.c
++++ b/src/backend/backend.c
+@@ -45,6 +45,7 @@
+ #include <wlr/types/wlr_presentation_time.h>
+ #include <wlr/types/wlr_scene.h>
+ #include <wlr/types/wlr_screencopy_v1.h>
++#include <wlr/types/wlr_single_pixel_buffer_v1.h>
+ #include <wlr/types/wlr_subcompositor.h>
+ #undef WLR_USE_UNSTABLE
+ 
+@@ -81,6 +82,8 @@ struct _wlmbe_backend_t {
+     struct wlr_ext_image_copy_capture_manager_v1 *wlr_ext_image_copy_capture_manager_ptr;
+     /** Presentation time feedback. wl_display will take ownership. */
+     struct wlr_presentation   *wlr_presentation_ptr;
++    /** Single-pixel buffer manager. wl_display will take ownership. */
++    struct wlr_single_pixel_buffer_manager_v1 *wlr_single_pixel_buffer_manager_ptr;
+     /** The output manager(s). */
+     wlmbe_output_manager_t    *output_manager_ptr;
+ 
+@@ -327,6 +330,16 @@ wlmbe_backend_t *wlmbe_backend_create(
+         return NULL;
+     }
+ 
++    backend_ptr->wlr_single_pixel_buffer_manager_ptr =
++        wlr_single_pixel_buffer_manager_v1_create(wl_display_ptr);
++    if (NULL == backend_ptr->wlr_single_pixel_buffer_manager_ptr) {
++        bs_log(BS_ERROR,
++               "Failed wlr_single_pixel_buffer_manager_v1_create(%p)",
++               wl_display_ptr);
++        wlmbe_backend_destroy(backend_ptr);
++        return NULL;
++    }
++
+     backend_ptr->output_manager_ptr = wlmbe_output_manager_create(
+         wl_display_ptr,
+         wlr_scene_ptr,
