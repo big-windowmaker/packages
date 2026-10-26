@@ -22,8 +22,9 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
 |---|---|---|---|
 | [`windowmaker/`](windowmaker/PKGBUILD) | `windowmaker` | `0.96.0.r130.g558e67f` | `master` do [window-maker/wmaker](https://github.com/window-maker/wmaker) fixado no commit `558e67f`. Substitui o `extra/windowmaker 0.96.0`. |
 | [`wlmaker/`](wlmaker/PKGBUILD) | `wlmaker` | `0.8.1` | Tag `v0.8.1` (branch-0.8) do [phkaeser/wlmaker](https://github.com/phkaeser/wlmaker), com XWayland, contra `wlroots0.20`. |
-| [`big-dockapps/`](big-dockapps/PKGBUILD) | `libdockapp`, `wmcpuload`, `wmbattery`, `wmusic`, `wmshutdown`, `wmmoonclock`, `wmcube`, `wmudmount`, `wmnet`, `wmclock`, `wmmemload`, `wmsystemtray` | `20260412` | [window-maker/dockapps](https://github.com/window-maker/dockapps) fixado no commit `251e851`; `wmudmount` (3.0) e `wmsystemtray` (1.4) vêm dos tarballs do SourceForge. |
+| [`big-dockapps/`](big-dockapps/PKGBUILD) | `libdockapp`, `wmcpuload`, `wmbattery`, `wmusic`, `wmshutdown`, `wmmoonclock`, `wmcube`, `wmudmount`, `wmnet`, `wmclock`, `wmmemload`, `wmsystemtray`, `pclock`, `wmwifi`, `minidock`, `minicontrol`, `wmapmload`, `mountapp` | `20260412` | [window-maker/dockapps](https://github.com/window-maker/dockapps) fixado no commit `251e851`; `wmudmount` (3.0), `wmsystemtray` (1.4) e `mountapp` (3.0) vêm dos tarballs do SourceForge; `minidock` (1.9) e `minicontrol` (0.2) da Zenwalk; `wmapmload` (0.3.4) do site do autor. |
 | [`biglinux-livecd/`](biglinux-livecd/PKGBUILD) | `biglinux-livecd` | `26.10.26` | **Temporário**, só para as ISOs de teste: branch `window-maker` de [big-windowmaker/biglinux-livecd](https://github.com/big-windowmaker/biglinux-livecd), com o suporte à sessão live do Window Maker proposto ao upstream. Sai daqui quando a mudança estiver no `biglinux-stable`. |
+| [`gtk-nocsd/`](gtk-nocsd/PKGBUILD) | `gtk-nocsd` | `4.8` | Release 4.8 do [MorsMortium/gtk-nocsd](https://codeberg.org/MorsMortium/gtk-nocsd) (Codeberg). Tira a CSD das janelas GTK 3/4 e libadwaita; carregado pela sessão X11 do big-wm. |
 
 ### Observações
 
@@ -32,10 +33,15 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
   `libarchive` (ver `analysis/02-x11-wmaker-dockapps.md`, seção 2.3). O
   `check()` roda o `make check` do upstream. As sonames (`libwraster.so.6`,
   `libWINGs.so.3`, `libWUtil.so.5`, `libWMaker.so.1`) são as mesmas da 0.96.0.
+  Um patch próprio faz o `setstyle` manter os caminhos absolutos das
+  texturas dos temas (antes ele prefixava o diretório do tema e o papel de
+  parede não carregava); a enviar ao upstream.
 - **wlmaker**: os submódulos `libbase` e `inih` entram como fontes separadas,
   fixadas nos commits registrados na v0.8.1, e são ligados em `prepare()` com
   `git config submodule.<nome>.url` (padrão do Arch). O `prepare()` confere o
   commit da tag. O `check()` roda os 12 testes do CTest.
+  Os `.desktop` dos dockapps do wlmaker ganham `OnlyShowIn=wlmaker;`: na
+  sessão X11 eles não abrem e apareciam no menu e no rofi.
 - **big-dockapps**: num pacote split o `makepkg` não permite `pkgver` diferente
   por pacote. Por isso todos usam a data do commit fixado, que é maior que as
   versões do AUR. As versões upstream incluídas estão listadas no topo do
@@ -44,6 +50,15 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
   entram: o servidor atual da BigLinux (`packages.biglinux.com.br`) não os
   tem mais, só o espelho antigo. Só o `wmix` continua vindo do BigLinux. O
   `wmnet` substitui o `wmnd`, ligado a uma `libsnmp` que não existe mais.
+  `minidock`, `minicontrol`, `wmapmload` e `mountapp` não têm mais
+  manutenção upstream e levam patches: `minidock` (GTK 2) e `minicontrol`
+  (GTK 1.2) foram portados para GTK 3; `wmapmload` lê a bateria do
+  `/sys/class/power_supply` em vez do `/proc/apm`; `mountapp` compila sem o
+  configurador `mount.conf` (GTK 1.2) e só mostra os pontos de montagem
+  `user` do `/etc/fstab` (para mídia removível, use o `wmudmount`). Os
+  comandos padrão de `minidock` e `minicontrol` (`big-wm-open`, `WPrefs`,
+  `systemctl poweroff`) ficam em `minidock.cf` e `minicontrol.cf`, fora dos
+  patches.
 - **biglinux-livecd**: as dependências de execução só existem nos
   repositórios BigLinux, então o diretório tem `.ci-nodeps`: o CI compila sem
   resolver dependências e pula o teste de instalação.
