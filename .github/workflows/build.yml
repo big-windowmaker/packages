@@ -117,4 +117,4 @@ jobs:
           name: packages-${{ matrix.package }}
           path: out/
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 30
