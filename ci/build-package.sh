@@ -90,5 +90,12 @@ echo "::endgroup::"
 
 cp ./*.pkg.tar.zst "${work}"/namcap-*.txt "${out_dir}/"
 cp ./*.log "${out_dir}/" 2>/dev/null || true
+# Pacotes com epoch (ex.: wlmaker-1:0.8...) têm ":" no nome, que o
+# upload-artifact recusa. O pacman e o repo-add usam a versão do .PKGINFO,
+# não o nome do arquivo: "_" no lugar de ":" não muda nada para eles.
+for f in "${out_dir}"/*:*; do
+  [[ -e ${f} ]] || continue
+  mv -- "${f}" "${out_dir}/$(basename -- "${f}" | tr ':' '_')"
+done
 echo "Pacotes gerados em ${out_dir}:"
 ls -l "${out_dir}"
