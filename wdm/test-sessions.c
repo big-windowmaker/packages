@@ -1,12 +1,17 @@
 /*
- * Testes da libwdm do wdm (lista de sessões de src/libwdm/sessions.c e
- * WDMUnsetEnv), rodados no check() do PKGBUILD:
+ * Testes da libwdm do wdm (lista de sessões de src/libwdm/sessions.c,
+ * estado do pam_faillock de src/libwdm/faillock.c e WDMUnsetEnv), rodados
+ * no check() do PKGBUILD:
  *   cc -Iinclude $(pkg-config --cflags WINGs) test-sessions.c bin/libwdm.a \
  *      $(pkg-config --libs WINGs) -o test-sessions
  *   ./test-sessions <diretório temporário vazio>
  */
 #include <wdmsessions.h>
+#include <wdmfaillock.h>
 #include <wdmlib.h>
+
+#include <stdint.h>
+#include <time.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +36,38 @@ static void put(const char *dir, const char *name, const char *text)
 		exit(2);
 	}
 	fputs(text, f);
+	fclose(f);
+}
+
+/* registro do pam_faillock (faillock.h do Linux-PAM) */
+struct tally {
+	char source[52];
+	uint16_t reserved;
+	uint16_t status;
+	uint64_t time;
+};
+
+static void put_tally(const char *dir, const char *user, const long *ago,
+		      int n, time_t now, int valid)
+{
+	char path[1024];
+	struct tally t;
+	FILE *f;
+	int i;
+
+	snprintf(path, sizeof(path), "%s/%s", dir, user);
+	f = fopen(path, "w");
+	if (!f) {
+		perror(path);
+		exit(2);
+	}
+	for (i = 0; i < n; i++) {
+		memset(&t, 0, sizeof(t));
+		snprintf(t.source, sizeof(t.source), "tty7");
+		t.status = valid ? 0x1 | 0x4 : 0;
+		t.time = (uint64_t)(now - ago[i]);
+		fwrite(&t, sizeof(t), 1, f);
+	}
 	fclose(f);
 }
 
@@ -198,6 +235,47 @@ int main(int argc, char **argv)
 	CHECK(WDMSaveUserSession(state, "maria", NULL));	/* já esquecida */
 	CHECK(!WDMSaveUserSession(state, "../maria", "x11/big-wm"));
 	CHECK(WDMLoadUserSession(state, "../maria") == NULL);
+
+	/* pam_faillock */
+	{
+		char fl[1024], conf[1100], conf2[1100], conf3[1100];
+		time_t now = time(NULL);
+		const long recent[] = { 30, 20, 10 };
+		const long spread[] = { 2000, 1990, 5 };
+		const long old[] = { 720, 710, 700 };
+
+		CHECK(sizeof(struct tally) == 64);
+		snprintf(fl, sizeof(fl), "%s/faillock", argv[1]);
+		mkdir(fl, 0755);
+		snprintf(conf, sizeof(conf), "%s/faillock.conf", argv[1]);
+		put(argv[1], "faillock.conf", "# padrão do Arch\n deny = 3\nunlock_time=600\n");
+		snprintf(conf2, sizeof(conf2), "%s/faillock-never.conf", argv[1]);
+		put(argv[1], "faillock-never.conf", "deny = 3\nunlock_time = never\neven_deny_root\n");
+		snprintf(conf3, sizeof(conf3), "%s/faillock-dir.conf", argv[1]);
+		{
+			char text[1200];
+			snprintf(text, sizeof(text), "dir = %s\ndeny=3\n", fl);
+			put(argv[1], "faillock-dir.conf", text);
+		}
+		CHECK(WDMFaillockMinutesLeft("maria", 0, conf, fl, now) == 0);	/* sem arquivo */
+		put_tally(fl, "maria", recent, 2, now, 1);
+		CHECK(WDMFaillockMinutesLeft("maria", 0, conf, fl, now) == 0);	/* 2 < deny */
+		put_tally(fl, "maria", recent, 3, now, 1);
+		CHECK(WDMFaillockMinutesLeft("maria", 0, conf, fl, now) == 10);	/* 590 s */
+		CHECK(WDMFaillockMinutesLeft("maria", 0, conf3, NULL, now) == 10);	/* dir do .conf */
+		CHECK(WDMFaillockMinutesLeft("maria", 0, conf, fl, now + 589) == 1);
+		CHECK(WDMFaillockMinutesLeft("maria", 0, conf, fl, now + 600) == 0);	/* expirou */
+		CHECK(WDMFaillockMinutesLeft("maria", 0, conf2, fl, now + 99999) == -1);	/* never */
+		CHECK(WDMFaillockMinutesLeft("maria", 1, conf, fl, now) == 0);	/* root sem even_deny_root */
+		CHECK(WDMFaillockMinutesLeft("maria", 1, conf2, fl, now) == -1);
+		CHECK(WDMFaillockMinutesLeft("../maria", 0, conf, fl, now) == 0);
+		put_tally(fl, "maria", spread, 3, now, 1);
+		CHECK(WDMFaillockMinutesLeft("maria", 0, conf, fl, now) == 0);	/* fora do fail_interval */
+		put_tally(fl, "maria", old, 3, now, 1);
+		CHECK(WDMFaillockMinutesLeft("maria", 0, conf, fl, now) == 0);	/* já desbloqueou */
+		put_tally(fl, "maria", recent, 3, now, 0);
+		CHECK(WDMFaillockMinutesLeft("maria", 0, conf, fl, now) == 0);	/* registros inválidos */
+	}
 
 	/* WDMUnsetEnv: variável ausente não pode apagar o ambiente */
 	{

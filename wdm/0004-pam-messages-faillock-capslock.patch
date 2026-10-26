@@ -1,0 +1,910 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 20:35:07 -0300
+Subject: [PATCH] Mensagens do PAM, bloqueio do pam_faillock e aviso de Caps
+ Lock
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Depois de três senhas erradas (Caps Lock ligado, por exemplo) o
+pam_faillock bloqueava a conta por 10 minutos e a tela de login só dizia
+"Falha na autenticação", mesmo com a senha certa.
+
+wdm (daemon):
+- A conversa do PAM guarda as mensagens PAM_ERROR_MSG e PAM_TEXT_INFO dos
+  módulos (antes PAM_ERROR_MSG abortava a conversa) e responde cada
+  pergunta no índice certo.
+- Usa a localidade do sistema (LANG do systemd ou /etc/locale.conf) para
+  o Linux-PAM traduzir as mensagens ("Conta bloqueada devido a 3 falhas
+  de login.").
+- Novo pipe wdm -> wdmLogin (-r): antes do SIGUSR1 de falha, o wdm envia
+  as mensagens do PAM ou, se não houver nenhuma e o pam_faillock tiver
+  bloqueado a conta, os minutos que faltam (libwdm/faillock.c lê o
+  faillock.conf e /run/faillock/<usuário> como o pam_faillock).
+- PAM_RHOST só em telas remotas: com PAM_RHOST vazio o pam_faillock
+  registrava o login local como remoto.
+
+wdmLogin:
+- Mostra a mensagem do PAM ou "Conta bloqueada temporariamente após
+  várias senhas erradas. Tente de novo em N min."; a área de mensagens
+  quebra linhas (o WINGs do windowmaker >= 0.96.0.r130 não corta mais
+  caracteres UTF-8).
+- Depois de uma senha errada mantém o nome e volta direto para a senha
+  (Esc recomeça).
+- "Caps Lock ativado" em vermelho sob o campo de texto, atualizado pelos
+  eventos XkbStateNotify. Painel padrão 660x270.
+---
+ Makefile.in           |   7 +-
+ include/dm.h          |   1 +
+ include/wdmfaillock.h |  28 +++++++
+ po/pt_BR.po           |  17 +++++
+ src/libwdm/faillock.c | 148 +++++++++++++++++++++++++++++++++++++
+ src/wdm/Greet.c       |  57 +++++++++++++-
+ src/wdm/dm.c          |  38 ++++++++++
+ src/wdm/verify.c      |  86 +++++++++++++---------
+ src/wdmLogin/Login.c  | 167 +++++++++++++++++++++++++++++++++++++++---
+ src/wdmLogin/config.c |   2 +-
+ 10 files changed, 500 insertions(+), 51 deletions(-)
+ create mode 100644 include/wdmfaillock.h
+ create mode 100644 src/libwdm/faillock.c
+
+diff --git a/Makefile.in b/Makefile.in
+index a0cc48f..a54551b 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -127,6 +127,9 @@ src/libwdm/plcheckers.o: src/libwdm/plcheckers.c include/wdmlib.h
+ src/libwdm/sessions.o: src/libwdm/sessions.c include/wdmsessions.h
+ 	$(CC) -c $(libwdm_cflags) src/libwdm/sessions.c -o src/libwdm/sessions.o
+ 
++src/libwdm/faillock.o: src/libwdm/faillock.c include/wdmfaillock.h
++	$(CC) -c $(libwdm_cflags) src/libwdm/faillock.c -o src/libwdm/faillock.o
++
+ src/wdm/Greet.o: src/wdm/Greet.c include/dm.h include/wdmconfig.h include/config.h include/greet.h include/wdmlib.h
+ 	$(CC) -c $(wdm_cflags) src/wdm/Greet.c -o src/wdm/Greet.o
+ 
+@@ -251,9 +254,9 @@ $(DESTDIR)$(bindir)/wdmPrefs: bin/wdmPrefs
+ 	$(INSTALL) -d $(@D)
+ 	$(INSTALL_PROGRAM) bin/wdmPrefs $@
+ 
+-bin/libwdm.a: src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/libwdm/sessions.o
++bin/libwdm.a: src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/libwdm/sessions.o src/libwdm/faillock.o
+ 	mkdir -p bin
+-	$(ar) cru bin/libwdm.a src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/libwdm/sessions.o
++	$(ar) cru bin/libwdm.a src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/libwdm/sessions.o src/libwdm/faillock.o
+ 	$(ranlib) bin/libwdm.a
+ 
+ $(DESTDIR)$(MANDIR)/man1/wdmLogin.1: doc/wdmLogin.man
+diff --git a/include/dm.h b/include/dm.h
+index 4d85c9e..3610f94 100644
+--- a/include/dm.h
++++ b/include/dm.h
+@@ -525,5 +525,6 @@ extern char *wdmWm;
+ extern int  DesktopSessionsEnabled (void);
+ extern int  DisplayVT (struct display *d);
+ extern void ForgetServerConnection (void);
++extern const char *VerifyMessages (void);	/* messages of the PAM modules */
+ 
+ #endif /* _DM_H_ */
+diff --git a/include/wdmfaillock.h b/include/wdmfaillock.h
+new file mode 100644
+index 0000000..faddade
+--- /dev/null
++++ b/include/wdmfaillock.h
+@@ -0,0 +1,28 @@
++/*
++ * wdm - WINGs display manager
++ * Copyright (C) 2026 Big WindowMaker <https://github.com/big-windowmaker>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * wdmfaillock.h: is a user locked by pam_faillock?
++ */
++#ifndef _WDMFAILLOCK_H
++#define _WDMFAILLOCK_H
++
++#include <time.h>
++
++#define WDM_FAILLOCK_CONF "/etc/security/faillock.conf"
++
++/* Reads faillock.conf (dir, deny, fail_interval, unlock_time,
++ * even_deny_root) and the tally file <dir>/<user> the same way
++ * pam_faillock does.  Returns the minutes left until the account is
++ * unlocked (rounded up, >= 1), 0 when it is not locked, or -1 when it is
++ * locked until an administrator runs "faillock --reset".  "dir" overrides
++ * the directory of faillock.conf when not NULL. */
++int WDMFaillockMinutesLeft(const char *user, int isRoot, const char *conf,
++			   const char *dir, time_t now);
++
++#endif /* _WDMFAILLOCK_H */
+diff --git a/po/pt_BR.po b/po/pt_BR.po
+index 8de027d..f7b95c9 100644
+--- a/po/pt_BR.po
++++ b/po/pt_BR.po
+@@ -123,3 +123,20 @@ msgid ""
+ msgstr ""
+ "Não foi possível iniciar a sessão Wayland.\n"
+ "Veja journalctl -u wdm."
++
++msgid "Caps Lock is on"
++msgstr "Caps Lock ativado"
++
++msgid ""
++"Account temporarily locked after too many wrong passwords. Try again in %d "
++"min."
++msgstr ""
++"Conta bloqueada temporariamente após várias senhas erradas. Tente de novo em "
++"%d min."
++
++msgid ""
++"Account locked after too many wrong passwords. Ask the administrator to "
++"unlock it."
++msgstr ""
++"Conta bloqueada após várias senhas erradas. Peça ao administrador para "
++"desbloqueá-la."
+diff --git a/src/libwdm/faillock.c b/src/libwdm/faillock.c
+new file mode 100644
+index 0000000..5b94daf
+--- /dev/null
++++ b/src/libwdm/faillock.c
+@@ -0,0 +1,148 @@
++/*
++ * wdm - WINGs display manager
++ * Copyright (C) 2026 Big WindowMaker <https://github.com/big-windowmaker>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * faillock.c: lock state of pam_faillock, so the login panel can say that
++ * an account is locked instead of "Login failed" when pam_faillock is
++ * silent.  Record format and lock rule follow Linux-PAM's
++ * modules/pam_faillock (faillock.h, check_tally()).
++ */
++
++#include <wdmfaillock.h>
++#include <wdmsessions.h>	/* WDMValidUserName() */
++
++#include <ctype.h>
++#include <fcntl.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#define TALLY_STATUS_VALID 0x1
++
++struct tally {			/* 64 bytes, as written by pam_faillock */
++	char source[52];
++	uint16_t reserved;
++	uint16_t status;
++	uint64_t time;
++};
++
++struct options {
++	char dir[256];
++	long deny;
++	long fail_interval;
++	long unlock_time;
++	long root_unlock_time;
++	int even_deny_root;
++};
++
++static void read_conf(const char *path, struct options *o)
++{
++	char line[512];
++	FILE *f = fopen(path, "r");
++
++	if (!f)
++		return;
++	while (fgets(line, sizeof(line), f)) {
++		char *k = line, *v, *e;
++
++		line[strcspn(line, "#\r\n")] = '\0';
++		while (isspace((unsigned char)*k))
++			k++;
++		if (!*k)
++			continue;
++		v = strchr(k, '=');
++		if (v) {
++			*v++ = '\0';
++			while (isspace((unsigned char)*v))
++				v++;
++		}
++		for (e = k + strlen(k); e > k && isspace((unsigned char)e[-1]); )
++			*--e = '\0';
++		if (v)
++			for (e = v + strlen(v); e > v && isspace((unsigned char)e[-1]); )
++				*--e = '\0';
++		if (strcmp(k, "even_deny_root") == 0)
++			o->even_deny_root = 1;
++		else if (!v || !*v)
++			continue;
++		else if (strcmp(k, "dir") == 0)
++			snprintf(o->dir, sizeof(o->dir), "%s", v);
++		else if (strcmp(k, "deny") == 0)
++			o->deny = strtol(v, NULL, 10);
++		else if (strcmp(k, "fail_interval") == 0)
++			o->fail_interval = strtol(v, NULL, 10);
++		else if (strcmp(k, "unlock_time") == 0)
++			o->unlock_time = strcmp(v, "never") == 0 ? 0 : strtol(v, NULL, 10);
++		else if (strcmp(k, "root_unlock_time") == 0)
++			o->root_unlock_time = strcmp(v, "never") == 0 ? 0 : strtol(v, NULL, 10);
++	}
++	fclose(f);
++}
++
++int WDMFaillockMinutesLeft(const char *user, int isRoot, const char *conf,
++			   const char *dir, time_t now)
++{
++	struct options o;
++	struct tally t;
++	char path[512];
++	uint64_t latest = 0, times[1024];
++	long failures = 0, unlock;
++	int fd, n = 0, i;
++
++	if (!WDMValidUserName(user))
++		return 0;
++	memset(&o, 0, sizeof(o));
++	snprintf(o.dir, sizeof(o.dir), "/var/run/faillock");
++	o.deny = 3;
++	o.fail_interval = 900;
++	o.unlock_time = 600;
++	o.root_unlock_time = -1;
++	read_conf(conf ? conf : WDM_FAILLOCK_CONF, &o);
++	if (o.root_unlock_time < 0)
++		o.root_unlock_time = o.unlock_time;
++	if (dir)
++		snprintf(o.dir, sizeof(o.dir), "%s", dir);
++	if (o.deny <= 0 || (isRoot && !o.even_deny_root))
++		return 0;
++
++	snprintf(path, sizeof(path), "%s/%s", o.dir, user);
++	fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
++	if (fd < 0)
++		return 0;
++	while (n < 1024 && read(fd, &t, sizeof(t)) == (ssize_t)sizeof(t)) {
++		if (!(t.status & TALLY_STATUS_VALID))
++			continue;
++		times[n++] = t.time;
++		if (t.time > latest)
++			latest = t.time;
++	}
++	close(fd);
++	for (i = 0; i < n; i++)
++		if ((int64_t)(latest - times[i]) < o.fail_interval)
++			failures++;
++	if (failures < o.deny)
++		return 0;
++	unlock = isRoot ? o.root_unlock_time : o.unlock_time;
++	if (unlock == 0)
++		return -1;	/* until "faillock --reset" */
++	if ((int64_t)latest + unlock < (int64_t)now)
++		return 0;	/* unlock time expired */
++	{
++		int64_t left = (int64_t)latest + unlock - (int64_t)now;
++		int minutes = (int)((left + 59) / 60);
++
++		return minutes > 0 ? minutes : 1;
++	}
++}
+diff --git a/src/wdm/Greet.c b/src/wdm/Greet.c
+index cc474ef..31400ef 100644
+--- a/src/wdm/Greet.c
++++ b/src/wdm/Greet.c
+@@ -103,6 +103,10 @@ from the X Consortium.
+ #include <strings.h>
+ #include <string.h>
+ #include <ctype.h>
++#include <errno.h>
++#include <pwd.h>
++#include <time.h>
++#include <wdmfaillock.h>
+ #include <unistd.h>
+ #include <fcntl.h>
+ #include <signal.h>
+@@ -136,6 +140,10 @@ extern char *wdmCursorTheme;
+ extern int   wdmXineramaHead;
+ 
+ static int      pipe_filedes[2];
++/* wdm -> wdmLogin: why the last attempt failed, written before SIGUSR1.
++ * Records end with '\0': "P<PAM messages>" or "L<minutes>" (account
++ * locked by pam_faillock; 0 = until an administrator unlocks it). */
++static int      reply_filedes[2] = { -1, -1 };
+ #define CREDENTIAL_LEN 258
+ static char	name[CREDENTIAL_LEN], password[CREDENTIAL_LEN];
+ static char     xsessionArg[256], exitArg[256];
+@@ -242,6 +250,8 @@ static int InitGreet (struct display *d)
+     WDMDebug("Greet display=%s\n", d->name);
+ 
+     pipe(pipe_filedes);
++    if (pipe(reply_filedes) != 0)
++        reply_filedes[0] = reply_filedes[1] = -1;
+ 
+     pid = fork();
+ 
+@@ -257,6 +267,10 @@ static int InitGreet (struct display *d)
+ 
+         close(pipe_filedes[0]);
+         fcntl(pipe_filedes[1], F_SETFD, 0); /* Reset close-on-exec (just in case) */
++        if (reply_filedes[1] >= 0) {
++            close(reply_filedes[1]);
++            fcntl(reply_filedes[0], F_SETFD, 0);
++        }
+ 
+         env = (char **)systemEnv(d, (char*)NULL, FAKEHOME);
+ 
+@@ -309,6 +323,10 @@ static int InitGreet (struct display *d)
+ 	}
+ 	argv[argc] = wmalloc(25); 
+ 	sprintf(argv[argc++], "-f%i", pipe_filedes[1]);
++	if (reply_filedes[0] >= 0) {
++		argv[argc] = wmalloc(25);
++		sprintf(argv[argc++], "-r%i", reply_filedes[0]);
++	}
+ 
+ 	argv[argc++] = NULL;
+         execve(wdmLogin, argv, env);
+@@ -319,9 +337,43 @@ static int InitGreet (struct display *d)
+ 
+     close(pipe_filedes[1]);
+     RegisterCloseOnFork(pipe_filedes[0]);
++    if (reply_filedes[0] >= 0) {
++        close(reply_filedes[0]);
++        RegisterCloseOnFork(reply_filedes[1]);
++        /* a greeter that died must not block wdm */
++        fcntl(reply_filedes[1], F_SETFL, O_NONBLOCK);
++        fcntl(reply_filedes[1], F_SETFD, FD_CLOEXEC);
++    }
+     return pid;
+ }
+ 
++/* Tells wdmLogin why the attempt failed (see reply_filedes). */
++static void ReportFailure (struct greet_info *greet)
++{
++    char buf[1100];
++    const char *msgs = NULL;
++    struct passwd *pw;
++    int minutes;
++
++    if (reply_filedes[1] < 0)
++        return;
++#ifdef USE_PAM
++    msgs = VerifyMessages();
++#endif
++    if (msgs && *msgs)
++        snprintf(buf, sizeof(buf), "P%s", msgs);
++    else {
++        pw = greet->name ? getpwnam(greet->name) : NULL;
++        minutes = pw ? WDMFaillockMinutesLeft(greet->name, pw->pw_uid == 0,
++                                              NULL, NULL, time(NULL)) : 0;
++        if (minutes == 0)
++            return;
++        snprintf(buf, sizeof(buf), "L%d", minutes < 0 ? 0 : minutes);
++    }
++    if (write(reply_filedes[1], buf, strlen(buf) + 1) < 0)
++        WDMDebug("cannot write to %s: %s\n", wdmLogin, strerror(errno));
++}
++
+ static void CloseGreet (int pid)
+ {
+ 
+@@ -456,6 +508,7 @@ greet_user_rtn GreetUser(struct display *d, Display **dpy, struct verify_info
+                 }
+             }
+             else {
++                ReportFailure(greet);
+                 kill(pid,SIGUSR1);      /* Verify failed */
+             }
+         }
+@@ -470,8 +523,8 @@ greet_user_rtn GreetUser(struct display *d, Display **dpy, struct verify_info
+ 	    }
+             if (Verify (d, greet, verify))
+                 break;
+-            else
+-                kill(pid,SIGUSR1);      /* Verify failed */
++            ReportFailure(greet);
++            kill(pid,SIGUSR1);      /* Verify failed */
+         }
+     }
+     DeleteXloginResources (d, *dpy);
+diff --git a/src/wdm/dm.c b/src/wdm/dm.c
+index 2f74d8f..c67a100 100644
+--- a/src/wdm/dm.c
++++ b/src/wdm/dm.c
+@@ -41,6 +41,8 @@ from The Open Group.
+ 
+ # include	<stdio.h>
+ #include <string.h>
++#include <locale.h>
++#include <stdlib.h>
+ #ifdef X_POSIX_C_SOURCE
+ #define _POSIX_C_SOURCE X_POSIX_C_SOURCE
+ #include <signal.h>
+@@ -106,6 +108,41 @@ static int StorePid (void);
+ 
+ static int parent_pid = -1; 	/* PID of parent xdm process */
+ 
++/*
++ * System locale (/etc/locale.conf, which systemd normally passes in LANG):
++ * the messages of the PAM modules (pam_faillock: "account locked") come
++ * translated by Linux-PAM, and LANG is exported to wdmLogin and sessions.
++ */
++static void
++InitLocale (void)
++{
++    static const char *keys[] = { "LANG", "LC_MESSAGES", "LC_CTYPE", NULL };
++    char line[256];
++    FILE *f;
++    int i;
++
++    if (!getenv ("LANG") && (f = fopen ("/etc/locale.conf", "r")) != NULL) {
++	while (fgets (line, sizeof (line), f)) {
++	    char *v = strchr (line, '=');
++
++	    if (!v)
++		continue;
++	    *v++ = '\0';
++	    v[strcspn (v, "\r\n")] = '\0';
++	    if (*v == '"' && v[strlen (v) - 1] == '"' && strlen (v) >= 2) {
++		v[strlen (v) - 1] = '\0';
++		v++;
++	    }
++	    for (i = 0; keys[i]; i++)
++		if (strcmp (line, keys[i]) == 0 && *v && !getenv (keys[i]))
++		    setenv (keys[i], v, 0);
++	}
++	fclose (f);
++    }
++    setlocale (LC_CTYPE, "");
++    setlocale (LC_MESSAGES, "");
++}
++
+ int
+ main (int argc, char **argv)
+ {
+@@ -121,6 +158,7 @@ main (int argc, char **argv)
+     TitleLen = (argv[argc - 1] + strlen(argv[argc - 1])) - Title;
+ #endif
+ 
++    InitLocale ();
+     /*
+      * Step 1 - load configuration parameters
+      */
+diff --git a/src/wdm/verify.c b/src/wdm/verify.c
+index 7542a41..233373b 100644
+--- a/src/wdm/verify.c
++++ b/src/wdm/verify.c
+@@ -117,6 +117,33 @@ userEnv (struct display *d, int useSystemPath, char *user, char *home, char *she
+ static char *PAM_password;
+ static int pam_error;
+ 
++/*
++ * Messages of the PAM modules (PAM_ERROR_MSG, PAM_TEXT_INFO), e.g. the
++ * "account is locked" of pam_faillock, kept for the login panel.  They
++ * come translated by Linux-PAM in the locale set in main().
++ */
++static char PAM_messages[1024];
++
++const char *VerifyMessages (void)
++{
++	return PAM_messages;
++}
++
++static void PAM_add_message (const char *m)
++{
++	size_t l = strlen (PAM_messages);
++
++	if (!m || !*m)
++		return;
++	WDMInfo("PAM: %s\n", m);
++	snprintf (PAM_messages + l, sizeof (PAM_messages) - l, "%s%s",
++		  l ? "\n" : "", m);
++	/* no trailing newline */
++	l = strlen (PAM_messages);
++	while (l > 0 && PAM_messages[l - 1] == '\n')
++		PAM_messages[--l] = '\0';
++}
++
+ static int PAM_conv (int num_msg,
+ #ifdef sun
+ 		     struct pam_message **msg,
+@@ -125,50 +152,34 @@ static int PAM_conv (int num_msg,
+ #endif
+ 		     struct pam_response **resp,
+ 		     void *appdata_ptr) {
+-	int count = 0, replies = 0;
+-	struct pam_response *reply = NULL;
+-
+-#define PAM_RESPONSE_SIZE	sizeof(struct pam_response)
+-	size_t size = PAM_RESPONSE_SIZE;
+-
+-#define COPY_STRING(s) (s) ? strdup(s) : (char*)NULL
+-
++	struct pam_response *reply;
++	int count;
++
++	if (num_msg <= 0 || num_msg > PAM_MAX_NUM_MSG)
++		return PAM_CONV_ERR;
++	reply = calloc (num_msg, sizeof (struct pam_response));
++	if (!reply)
++		return PAM_BUF_ERR;
+ 	for (count = 0; count < num_msg; count++) {
+ 		switch (msg[count]->msg_style) {
+-		case PAM_PROMPT_ECHO_ON:
+-			/* user name given to PAM already */
+-			return PAM_CONV_ERR;
+ 		case PAM_PROMPT_ECHO_OFF:
+ 			/* wants password */
+-			if (reply) {
+-				reply = realloc(reply, size);
+-				bzero(reply + size - PAM_RESPONSE_SIZE, PAM_RESPONSE_SIZE);
+-			} else {
+-				reply = (struct pam_response*)malloc(size);
+-				bzero(reply, size);
+-			}
+-
+-			if (!reply)
+-				return PAM_CONV_ERR;
+-
+-			size += PAM_RESPONSE_SIZE;
+-			
+-			reply[replies].resp_retcode = PAM_SUCCESS;
+-			reply[replies].resp = COPY_STRING(PAM_password);
+-			/* PAM frees resp */
++			reply[count].resp = PAM_password ? strdup (PAM_password) : NULL;
+ 			break;
++		case PAM_ERROR_MSG:
+ 		case PAM_TEXT_INFO:
+-			/* ignore the informational mesage */
++			PAM_add_message (msg[count]->msg);
+ 			break;
++		case PAM_PROMPT_ECHO_ON:
++			/* user name given to PAM already; no other questions */
+ 		default:
+-			/* unknown or PAM_ERROR_MSG */
+-			if (reply) free (reply);
++			for (count = 0; count < num_msg; count++)
++				free (reply[count].resp);
++			free (reply);
+ 			return PAM_CONV_ERR;
+ 		}
+ 	}
+-
+-#undef COPY_STRING
+-	if (reply) *resp = reply;
++	*resp = reply;	/* PAM frees it */
+ 	return PAM_SUCCESS;
+ }
+ 
+@@ -525,12 +536,17 @@ done:
+ 	if (pam_error != PAM_SUCCESS) goto pam_failed;
+ 
+ 	PAM_password = greet->password;
++	PAM_messages[0] = '\0';
+ 	pam_error = pam_start("wdm", greet->name, &PAM_conversation, pamhp);
+ 	PAM_BAIL;
+ 	pam_error = pam_set_item(*pamhp, PAM_TTY, d->name);
+ 	PAM_BAIL;
+-	pam_error = pam_set_item(*pamhp, PAM_RHOST, "");
+-	PAM_BAIL;
++	/* only remote (XDMCP) displays have a remote host; an empty PAM_RHOST
++	 * made pam_faillock record local logins as remote ones */
++	if (d->displayType.location != Local) {
++		pam_error = pam_set_item(*pamhp, PAM_RHOST, d->name);
++		PAM_BAIL;
++	}
+ 	pam_error = pam_authenticate(*pamhp, 0);
+ 	PAM_BAIL;
+ 	pam_error = pam_acct_mgmt(*pamhp, 0);
+diff --git a/src/wdmLogin/Login.c b/src/wdmLogin/Login.c
+index 49734be..95826fa 100644
+--- a/src/wdmLogin/Login.c
++++ b/src/wdmLogin/Login.c
+@@ -40,6 +40,7 @@
+ #include <X11/Xlib.h>
+ #include <X11/xpm.h>
+ #include <X11/keysym.h>
++#include <X11/XKBlib.h>
+ #include <X11/cursorfont.h>
+ #ifdef HAVE_XINERAMA
+ #include <X11/extensions/Xinerama.h>
+@@ -62,7 +63,7 @@ static int help_heigth = 170;
+ static int text_width = 150, text_heigth = 26;
+ 
+ /* layout, computed from the window size in ComputeLayout() */
+-static int auth_x = 235, auth_w = 275, row_y = 178, sess_w = 118, opt_w = 98;
++static int auth_x = 235, auth_w = 275, auth_h = 120, row_y = 178, sess_w = 118, opt_w = 98;
+ 
+ static char displayArgDefault[] = "";
+ static char *displayArg = displayArgDefault;
+@@ -95,6 +96,8 @@ typedef struct LoginPanel
+ 	WMLabel *entryLabel;
+ 	WMFrame *msgF;
+ 	WMLabel *msgL;
++	WMLabel *capsL;		/* "Caps Lock is on", under the text field */
++	int capsShown;
+ 	int msgFlag;
+ 	WMFrame *wmF;
+ 	WMPopUpButton *wmBtn;
+@@ -161,6 +164,8 @@ static char *waylandSessionDirs = NULL;
+ static char *defaultSession = NULL;
+ static char *sessionStateDir = NULL;
+ static char *noticeArg = NULL;
++static int reply_fd = -1;	/* wdm -> wdmLogin: why the login failed */
++static int xkb_event_base = -1;
+ static WDMSessionList *sessions = NULL;
+ static int sessionTouched = False;	/* user picked a session by hand */
+ 
+@@ -408,7 +413,7 @@ LoginArgs(int argc, char *argv[])
+ 	int c;
+ 
+ 
+-	while((c = getopt(argc, argv, "asb:d:h:l:uw:c:x:f:X:W:D:R:e:")) != -1)
++	while((c = getopt(argc, argv, "asb:d:h:l:uw:c:x:f:X:W:D:R:e:r:")) != -1)
+ 	{
+ 		switch (c)
+ 		{
+@@ -451,6 +456,11 @@ LoginArgs(int argc, char *argv[])
+ 		case 'R':	/* directory with the last session of each user */
+ 			sessionStateDir = optarg;
+ 			break;
++		case 'r':	/* file descriptor with failure details from wdm */
++			reply_fd = strtol(optarg, NULL, 0);
++			if(reply_fd < 3)
++				reply_fd = -1;
++			break;
+ 		case 'e':	/* the previous session lasted only N seconds */
+ 			noticeArg = optarg;
+ 			break;
+@@ -696,6 +706,47 @@ changeOption(WMPopUpButton * self, LoginPanel * panel)
+ 	WMSetFocusToWidget(panel->entryText);
+ }
+ 
++/* Shows "Caps Lock is on" while the lock is active (XKB state). */
++static void
++UpdateCapsLock(LoginPanel * panel)
++{
++	XkbStateRec st;
++	int on;
++
++	if(!panel || XkbGetState(WMScreenDisplay(panel->scr), XkbUseCoreKbd, &st) != Success)
++		return;
++	on = (st.locked_mods & LockMask) != 0;
++	if(on == panel->capsShown)
++		return;
++	panel->capsShown = on;
++	if(panel->capsL)
++	{
++		if(on)
++			WMMapWidget(panel->capsL);
++		else
++			WMUnmapWidget(panel->capsL);
++	}
++	else if(on && !panel->msgFlag)
++		PrintInfoMsg(panel, _("Caps Lock is on"));
++}
++
++static void
++SetupCapsLock(LoginPanel * panel)
++{
++	Display *dpy = WMScreenDisplay(panel->scr);
++	int opcode, error, major = XkbMajorVersion, minor = XkbMinorVersion;
++
++	if(XkbQueryExtension(dpy, &opcode, &xkb_event_base, &error, &major, &minor))
++		XkbSelectEventDetails(dpy, XkbUseCoreKbd, XkbStateNotify,
++				XkbModifierLockMask, XkbModifierLockMask);
++	else
++		xkb_event_base = -1;
++	if(panel->capsL)
++		WMUnmapWidget(panel->capsL);
++	panel->capsShown = False;
++	UpdateCapsLock(panel);
++}
++
+ static int
+ CyclePopUp(WMPopUpButton *button, int delta)
+ {
+@@ -727,6 +778,8 @@ handleKeyPress(XEvent * event, void *clientData)
+ 	{
+ 		ClearMsgs(panel);
+ 	}
++	if(ks == XK_Caps_Lock)
++		UpdateCapsLock(panel);
+ 	switch(ks)
+ 	{
+ 	case XK_Return:
+@@ -890,6 +943,8 @@ ComputeLayout(int width, int height)
+ 		auth_w = 275;
+ 	text_width = auth_w - 125;
+ 	row_y = height - 62;
++	/* from 260 px of height there is room for the Caps Lock warning */
++	auth_h = height >= 260 ? 128 : 120;
+ 	sess_w = width >= 640 ? 250 : 118;
+ 	opt_w = width >= 640 ? 130 : 98;
+ }
+@@ -906,7 +961,7 @@ CreateAuthFrame(LoginPanel * panel)
+ 	WMSetFrameTitlePosition(panel->authF, WTPAtTop);
+ 	WMSetFrameTitle(panel->authF, _("Login Authentication"));
+ 	WMMoveWidget(panel->authF, auth_x, 10);
+-	WMResizeWidget(panel->authF, auth_w, 120);
++	WMResizeWidget(panel->authF, auth_w, auth_h);
+ 
+ 	gethostname(str, 127);
+ 
+@@ -969,6 +1024,27 @@ CreateAuthFrame(LoginPanel * panel)
+ 	WMResizeWidget(panel->entryText, text_width, text_heigth);
+ 	WMSetTextFieldText(panel->entryText, "");
+ 	WMSetTextFieldSecure(panel->entryText, False);
++
++	if(auth_h >= 128)
++	{
++		WMColor *red;
++
++		panel->capsL = WMCreateLabel(panel->authF);
++		WMMoveWidget(panel->capsL, 120, y + text_heigth + 1);
++		WMResizeWidget(panel->capsL, text_width, 15);
++		WMSetLabelWraps(panel->capsL, False);
++		WMSetLabelTextAlignment(panel->capsL, WALeft);
++		font = WMBoldSystemFontOfSize(panel->scr, 11);
++		if(font)
++		{
++			WMSetLabelFont(panel->capsL, font);
++			WMReleaseFont(font);
++		}
++		red = WMCreateRGBColor(panel->scr, 0xa000, 0x0000, 0x0000, True);
++		WMSetLabelTextColor(panel->capsL, red);
++		WMReleaseColor(red);
++		WMSetLabelText(panel->capsL, _("Caps Lock is on"));
++	}
+ }
+ 
+ static void
+@@ -979,14 +1055,16 @@ CreateMsgsFrames(LoginPanel * panel)
+ 	panel->msgF = WMCreateFrame(panel->winF1);
+ 	WMSetFrameRelief(panel->msgF, WRFlat);
+ 	WMSetFrameTitlePosition(panel->msgF, WTPAtBottom);
+-	WMMoveWidget(panel->msgF, auth_x, 132);
+-	WMResizeWidget(panel->msgF, auth_w, row_y - 134);
++	WMMoveWidget(panel->msgF, auth_x, auth_h + 12);
++	WMResizeWidget(panel->msgF, auth_w, row_y - auth_h - 14);
+ 	WMSetFrameTitle(panel->msgF, "");
+ 
+ 	panel->msgL = WMCreateLabel(panel->msgF);
+-	WMResizeWidget(panel->msgL, auth_w - 10, row_y - 150);
++	WMResizeWidget(panel->msgL, auth_w - 10, row_y - auth_h - 30);
+ 	WMMoveWidget(panel->msgL, 5, 1);
+-	WMSetLabelWraps(panel->msgL, False);	/* see CreateHelpFrames() */
++	/* PAM messages can be long; WINGs wraps UTF-8 correctly since
++	 * wmaker 0.96.0-96 (fa49b7c0), required by the package */
++	WMSetLabelWraps(panel->msgL, True);
+ 	font = WMBoldSystemFontOfSize(panel->scr, 12);
+ 	if(font)
+ 	{
+@@ -1493,6 +1571,65 @@ SignalTerm(int ignored)		/* all done */
+ 	errno = e;
+ }
+ 
++/* Last record written by wdm on the reply pipe, or "" (see Greet.c). */
++static void
++ReadReply(char *out, size_t size)
++{
++	char buf[2048];
++	ssize_t n, i, start = 0;
++
++	*out = '\0';
++	if(reply_fd < 0)
++		return;
++	while((n = read(reply_fd, buf, sizeof(buf) - 1)) > 0)
++	{
++		buf[n] = '\0';
++		for(i = 0, start = 0; i < n; i++)
++			if(buf[i] == '\0')
++			{
++				snprintf(out, size, "%s", buf + start);
++				start = i + 1;
++			}
++	}
++}
++
++static void
++LoginFailed(LoginPanel * panel)
++{
++	char reply[1100], msg[1200];
++	const char *text = _(ExitFailStr[OptionCode]);
++
++	ReadReply(reply, sizeof(reply));
++	if(reply[0] == 'P' && reply[1])
++		text = reply + 1;	/* PAM module, already translated */
++	else if(reply[0] == 'L')
++	{
++		int minutes = atoi(reply + 1);
++
++		if(minutes > 0)
++			snprintf(msg, sizeof(msg), _("Account temporarily locked after too many "
++				"wrong passwords. Try again in %d min."), minutes);
++		else
++			snprintf(msg, sizeof(msg), "%s", _("Account locked after too many wrong "
++				"passwords. Ask the administrator to unlock it."));
++		text = msg;
++	}
++
++	if(OptionCode == 0 && LoginName && LoginName[0])
++	{
++		/* keep the user name: straight back to the password */
++		if(LoginPswd)
++			wfree(LoginPswd);
++		LoginPswd = NULL;
++		LoginSwitch = True;
++		init_pwdfield("");
++		WMSetFocusToWidget(panel->entryText);
++	}
++	else
++		InitializeLoginInput(panel);
++	PrintErrMsg(panel, (char *) text);
++}
++
+ static void
+ HandleSignalPipe(int fd, int mask, void *data)
+ {
+@@ -1503,10 +1640,7 @@ HandleSignalPipe(int fd, int mask, void *data)
+ 	for(i = 0; i < n; i++)
+ 	{
+ 		if(buf[i] == 'u')
+-		{
+-			InitializeLoginInput(panel);
+-			PrintErrMsg(panel, _(ExitFailStr[OptionCode]));
+-		}
++			LoginFailed(panel);
+ 		else if(buf[i] == 't')
+ 		{
+ 			DestroyLoginPanel(panel);
+@@ -1686,6 +1820,12 @@ main(int argc, char **argv)
+ 
+ 	exit_request = 0;
+ 	SetupSignals();
++	SetupCapsLock(panel);
++	if(reply_fd >= 0)
++	{
++		fcntl(reply_fd, F_SETFL, O_NONBLOCK);
++		fcntl(reply_fd, F_SETFD, FD_CLOEXEC);
++	}
+ 
+ 	if(noticeArg && strcmp(noticeArg, "wayland") == 0)
+ 		PrintErrMsg(panel, _("The Wayland session could not be started.\n"
+@@ -1704,6 +1844,11 @@ main(int argc, char **argv)
+ 	{
+ 		XEvent event;
+ 		WMNextEvent(WMScreenDisplay(scr), &event);
++		if(xkb_event_base >= 0 && event.type == xkb_event_base)
++		{
++			UpdateCapsLock(panel);	/* XkbStateNotify */
++			continue;
++		}
+ 		WMHandleEvent(&event);
+ 	}
+ 	DestroyLoginPanel(panel);
+diff --git a/src/wdmLogin/config.c b/src/wdmLogin/config.c
+index 89d4c3b..79c1e1e 100644
+--- a/src/wdmLogin/config.c
++++ b/src/wdmLogin/config.c
+@@ -27,7 +27,7 @@
+ 
+ static Bool WDMCheckPLGeometry(WMPropList *pl, void *def, void *target);
+ 
+-static WMRect default_geometry = {{INT_MIN, INT_MIN}, {660, 240}};
++static WMRect default_geometry = {{INT_MIN, INT_MIN}, {660, 270}};
+ 
+ static WDMDictionaryStruct wdmLogin_config_struct[] = 
+ {

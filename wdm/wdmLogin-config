@@ -1,5 +1,5 @@
 {
-  geometry = ("660", "240");
+  geometry = ("660", "270");
   aa = "true";
   animations = "true";
 }

@@ -22,6 +22,11 @@
 #   0003  wdmLogin: seletor "Sessão (F2)", atalhos de teclado, sessão
 #         lembrada por usuário, aviso de sessão que terminou cedo, papel de
 #         parede sem distorção e tradução pt_BR.
+#   0004  mensagens dos módulos PAM na tela de login (pam_faillock: "Conta
+#         bloqueada…", traduzida pelo Linux-PAM na localidade do sistema);
+#         sem mensagem, o wdm calcula o bloqueio a partir do faillock.conf e
+#         de /run/faillock; nome mantido depois de senha errada; aviso
+#         "Caps Lock ativado"; PAM_RHOST só em telas remotas.
 # A configuração (wdm-config, Xservers, Xsession, Wsession, PAM, unidade do
 # systemd) fica neste diretório, fora dos patches.
 #
@@ -31,7 +36,7 @@ pkgname=wdm
 pkgver=1.28
 _debrel=27
 _snapshot=20230829T151102Z
-pkgrel=11
+pkgrel=12
 pkgdesc='WINGs Display Manager: login screen with the NeXT look, X11 and Wayland sessions'
 arch=(x86_64)
 url='https://github.com/raorn/wdm'
@@ -76,6 +81,7 @@ source=(
   0001-build-gcc15-pkgconf-version.patch
   0002-desktop-sessions-logind-wayland.patch
   0003-wdmLogin-session-selector-keyboard-pt_BR.patch
+  0004-pam-messages-faillock-capslock.patch
   wdm-config
   wdmLogin-config
   Xservers
@@ -96,8 +102,9 @@ sha256sums=('dbd4a1fe635592bda8ff748f6c071ba29141c7ea41c80477a64bf672c5d072b7'
             'ea21325e65b3ce1971d4374d81f5d00a48fa568cc6138f2c104649cfd8670143'
             'a3f940e583cf89684a78a9cc1adc26b2ed581f9c252bbb93d5efb082c6fe6eda'
             '6c94049ef09823996c44588e4bf7865332bb6071e3315fd5b9792b7837943ac1'
+            '9a963fc742d4d6d8889cc746e128783be9012b725c0bd9cf6a9fda531b9bee44'
             '2f9e342bdf5113645aba3802637be848b2cf9833d4cce2219fad1e66908360bb'
-            'b73057f2e41333406285b3572cb0de5e10b666537a7315a3c336593a45a56495'
+            '5894cdcf5c6149f79c3f4833533a152371a9ecb0acec9de7b24f67e0a57779fb'
             '2307e89b459169f00a7ef000de7bf4e39d8124ca060edaadcffa552f8fccabee'
             'ea0b27c20519b8087e5a331d8b76f4a7042bdc8171b1ac26fb9cbf3001822311'
             'ad4ab3067f9505ec6215eec33ae91237201042879305d4826ea1b18767acff1e'
@@ -109,7 +116,7 @@ sha256sums=('dbd4a1fe635592bda8ff748f6c071ba29141c7ea41c80477a64bf672c5d072b7'
             '64ef5a2ce80d9385e3a9e984349a36ae83a3349005509e8105d4f7065300cfe3'
             'bb9ee62229ca4e218da041818a88441534a0c2a95a0cfc8c04d6975ded836912'
             '3b7ece92f7a2b2f17a8c79368a4f6739d6c037ddd14bd7cae1f05b595e9318d7'
-            '04a3aa656245d5e53f461839665a08d62e77930c87185f51b98b58eac8c5e8f3')
+            '2d82e96483e3d3f36677e54581a85a280e1740982a8c805153f7741af517eadd')
 
 prepare() {
   cd "wdm-${pkgver}"
