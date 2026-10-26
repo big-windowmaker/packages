@@ -1,0 +1,19 @@
+pkgbase = gtk-nocsd
+	pkgdesc = LD_PRELOAD library to disable client-side decorations in GTK 3/4, libhandy and libadwaita apps
+	pkgver = 4.8
+	pkgrel = 1
+	url = https://codeberg.org/MorsMortium/gtk-nocsd
+	arch = x86_64
+	license = GPL-3.0-or-later
+	makedepends = libadwaita
+	depends = glibc
+	provides = gtk3-nocsd
+	provides = gtk4-nocsd
+	conflicts = gtk3-nocsd
+	conflicts = gtk4-nocsd
+	replaces = gtk3-nocsd
+	replaces = gtk4-nocsd
+	source = gtk-nocsd-4.8.tar.gz::https://codeberg.org/MorsMortium/gtk-nocsd/archive/4.8.tar.gz
+	sha256sums = 2be0214c37a57d1e0bcd7d217310c2af1307955710077f41db928fb40d33fa68
+
+pkgname = gtk-nocsd

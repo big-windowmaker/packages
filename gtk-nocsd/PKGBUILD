@@ -1,0 +1,37 @@
+# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+# Baseado no PKGBUILD do AUR (gtk-nocsd):
+# Contributor: MorsMortium <mors.mortium.8@protonmail.com>
+
+# Biblioteca LD_PRELOAD que desliga a decoração desenhada pelo aplicativo
+# (CSD) no GTK 3, GTK 4, libhandy e libadwaita: as janelas voltam a ter a
+# barra de título e as bordas do Window Maker. A sessão X11 do big-wm a
+# carrega quando ela está instalada (session/bin/startbigwm). Não existe nos
+# repositórios Manjaro/BigLinux.
+pkgname=gtk-nocsd
+pkgver=4.8
+pkgrel=1
+pkgdesc='LD_PRELOAD library to disable client-side decorations in GTK 3/4, libhandy and libadwaita apps'
+arch=(x86_64)
+url='https://codeberg.org/MorsMortium/gtk-nocsd'
+license=('GPL-3.0-or-later')
+# Os símbolos do GTK e da libadwaita são resolvidos no processo que carrega
+# a biblioteca; no build só os cabeçalhos são usados.
+depends=(glibc)
+makedepends=(libadwaita)
+provides=(gtk3-nocsd gtk4-nocsd)
+conflicts=(gtk3-nocsd gtk4-nocsd)
+replaces=(gtk3-nocsd gtk4-nocsd)
+source=("${pkgname}-${pkgver}.tar.gz::https://codeberg.org/MorsMortium/${pkgname}/archive/${pkgver}.tar.gz")
+sha256sums=('2be0214c37a57d1e0bcd7d217310c2af1307955710077f41db928fb40d33fa68')
+
+build() {
+  cd "${pkgname}"
+  make
+}
+
+package() {
+  cd "${pkgname}"
+  # NOOPT: sem o hard link em /opt/gtk-nocsd (só serve para compartilhar a
+  # biblioteca com flatpaks; o namcap o rejeita por ser entre diretórios).
+  make install DESTDIR="${pkgdir}" PREFIX=/usr LIBDIR=/usr/lib NOOPT=1
+}
