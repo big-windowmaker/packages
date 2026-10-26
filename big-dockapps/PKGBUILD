@@ -62,7 +62,7 @@ _mountapp_ver=3.0
 # são código-fonte); o namcap avisa por causa dele.
 _zenwalk=https://download.zenwalk.org/x86_64/people/jp/dockapps
 pkgver=20260412
-pkgrel=2
+pkgrel=3
 pkgdesc='Curated Window Maker dockapps for Big WindowMaker'
 arch=(x86_64)
 url='https://www.dockapps.net/'
@@ -295,6 +295,18 @@ package_wmbattery() {
   make DESTDIR="${pkgdir}" install
 }
 
+# Dockapps X11 com entrada de menu: na sessão Wayland (wlmaker) eles não
+# acoplam e o wmshutdown chegava a travar (SIGSEGV) chamando X11 sobre uma
+# janela Wayland. Ficam fora dos menus do wlmaker; no X11 nada muda.
+_x11_only_desktop() {
+  local _desktop
+  for _desktop in "${pkgdir}"/usr/share/applications/*.desktop; do
+    [[ -e ${_desktop} ]] || continue
+    grep -q '^NotShowIn=' "${_desktop}" ||
+      sed -i '0,/^\[Desktop Entry\]$/s//[Desktop Entry]\nNotShowIn=wlmaker;/' "${_desktop}"
+  done
+}
+
 package_wmusic() {
   pkgdesc='Dockapp that remote-controls MPRIS-compatible media players'
   url='https://www.dockapps.net/wmusic'
@@ -303,6 +315,7 @@ package_wmusic() {
 
   cd dockapps/wmusic
   make DESTDIR="${pkgdir}" install
+  _x11_only_desktop
 }
 
 package_wmshutdown() {
@@ -313,6 +326,7 @@ package_wmshutdown() {
 
   cd dockapps/wmshutdown
   make DESTDIR="${pkgdir}" install
+  _x11_only_desktop
 }
 
 package_wmmoonclock() {
@@ -325,6 +339,7 @@ package_wmmoonclock() {
   make DESTDIR="${pkgdir}" install
   # A página de manual do upstream se chama wmMoonClock.1.
   ln -s wmMoonClock.1.gz "${pkgdir}/usr/share/man/man1/wmmoonclock.1.gz"
+  _x11_only_desktop
 }
 
 package_wmcube() {

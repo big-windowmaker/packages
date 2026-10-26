@@ -1,7 +1,7 @@
 pkgbase = big-dockapps
 	pkgdesc = Curated Window Maker dockapps for Big WindowMaker
 	pkgver = 20260412
-	pkgrel = 2
+	pkgrel = 3
 	url = https://www.dockapps.net/
 	arch = x86_64
 	license = GPL-2.0-or-later
