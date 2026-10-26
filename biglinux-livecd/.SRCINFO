@@ -1,0 +1,37 @@
+pkgbase = biglinux-livecd
+	pkgdesc = BigLinux live-session setup and Calamares installer integration
+	pkgver = 26.10.26
+	pkgrel = 1
+	url = https://github.com/biglinux/biglinux-livecd
+	install = biglinux-livecd.install
+	arch = any
+	license = GPL-3.0-only
+	license = CC0-1.0
+	makedepends = git
+	depends = binutils
+	depends = btrfs-progs
+	depends = calamares
+	depends = circle-flags
+	depends = curl
+	depends = dbus
+	depends = e2fsprogs
+	depends = gettext
+	depends = gtk4
+	depends = libadwaita
+	depends = mtools
+	depends = python
+	depends = python-babel
+	depends = python-cairo
+	depends = python-gobject
+	depends = qefientrymanager
+	depends = sudo
+	depends = util-linux
+	depends = xdg-user-dirs
+	depends = xorg-xrandr
+	optdepends = speech-dispatcher: spoken feedback in the live-session wizard
+	optdepends = openssh: remote access to the live session with the sshenable boot argument
+	optdepends = shadow: set the temporary password the sshenable boot argument uses
+	source = biglinux-livecd::git+https://github.com/big-windowmaker/biglinux-livecd.git#commit=261b16f79be060ffc36bc7d3cdddf3fea1c65f38
+	sha256sums = 49ca0d48f7cf4a3792a7962c535e7e47e8380e13fdec34e66a92665c4c8d76be
+
+pkgname = biglinux-livecd

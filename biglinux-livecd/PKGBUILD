@@ -1,0 +1,69 @@
+# Maintainer: Bruno Goncalves <bigbruno@gmail.com>
+#
+# TEMPORÁRIO (Big WindowMaker): biglinux-livecd com o suporte à sessão live
+# do Window Maker (branch window-maker de big-windowmaker/biglinux-livecd),
+# usado só nas ISOs de teste até a mudança entrar no upstream. Remover este
+# diretório quando o pacote do biglinux-stable tiver o suporte.
+# shellcheck shell=bash disable=SC2034,SC2154
+
+pkgname=biglinux-livecd
+pkgver=26.10.26
+pkgrel=1
+pkgdesc="BigLinux live-session setup and Calamares installer integration"
+arch=('any')
+url="https://github.com/biglinux/biglinux-livecd"
+license=('GPL-3.0-only' 'CC0-1.0')
+depends=(
+    'binutils'
+    'btrfs-progs'
+    'calamares'
+    'circle-flags'
+    'curl'
+    'dbus'
+    'e2fsprogs'
+    'gettext'
+    'gtk4'
+    'libadwaita'
+    'mtools'
+    'python'
+    'python-babel'
+    'python-cairo'
+    'python-gobject'
+    'qefientrymanager'
+    'sudo'
+    'util-linux'
+    'xdg-user-dirs'
+    'xorg-xrandr'
+)
+optdepends=(
+    'speech-dispatcher: spoken feedback in the live-session wizard'
+    'openssh: remote access to the live session with the sshenable boot argument'
+    'shadow: set the temporary password the sshenable boot argument uses'
+)
+makedepends=('git')
+_commit=261b16f79be060ffc36bc7d3cdddf3fea1c65f38
+source=("biglinux-livecd::git+https://github.com/big-windowmaker/biglinux-livecd.git#commit=${_commit}")
+sha256sums=('49ca0d48f7cf4a3792a7962c535e7e47e8380e13fdec34e66a92665c4c8d76be')
+install="${pkgname}.install"
+
+package() {
+    cd "${srcdir}/${pkgname}" || return 1
+
+    cp -a biglinux-livecd/usr "${pkgdir}/"
+    local catalog locale
+    for catalog in biglinux-livecd/locale/*.po; do
+        locale=${catalog##*/}
+        locale=${locale%.po}
+        install -d "${pkgdir}/usr/share/locale/${locale}/LC_MESSAGES"
+        msgfmt -c "$catalog" \
+            -o "${pkgdir}/usr/share/locale/${locale}/LC_MESSAGES/${pkgname}.mo"
+    done
+    # All four trees, not just the live wizard: the installer wizard, the
+    # shared probes and the Calamares job modules were shipping uncompiled.
+    python -m compileall -q -j1 -s "${pkgdir}" -p / \
+        "${pkgdir}/usr/share/biglinux/livecd" \
+        "${pkgdir}/usr/share/biglinux/calamares" \
+        "${pkgdir}/usr/lib/biglinux-livecd" \
+        "${pkgdir}/usr/lib/calamares/modules" || return 1
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

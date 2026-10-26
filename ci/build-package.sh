@@ -55,16 +55,31 @@ if ! diff -u .SRCINFO <(as_builder makepkg --printsrcinfo); then
   exit 1
 fi
 
+# Pacotes cujas dependências de execução só existem nos repositórios
+# BigLinux/BigCommunity (que este contêiner não usa) marcam o diretório com
+# .ci-nodeps: compilam sem resolver dependências e pulam o teste de
+# instalação. Só serve para pacotes "any" cujo build não usa essas deps.
+nodeps=0
+[[ -f .ci-nodeps ]] && nodeps=1
+
 echo "::group::makepkg"
-as_builder makepkg --syncdeps --noconfirm --cleanbuild --log
+if ((nodeps)); then
+  as_builder makepkg --nodeps --noconfirm --cleanbuild --log
+else
+  as_builder makepkg --syncdeps --noconfirm --cleanbuild --log
+fi
 echo "::endgroup::"
 
 # Instala os pacotes no contêiner descartável: serve de teste de instalação
 # (dependências resolvíveis) e evita falsos positivos do namcap sobre
 # bibliotecas fornecidas por outro pacote do mesmo split.
-echo "::group::instalação"
-pacman -U --noconfirm ./*.pkg.tar.zst
-echo "::endgroup::"
+if ((nodeps)); then
+  echo "teste de instalação pulado (.ci-nodeps): dependências fora dos repositórios do contêiner"
+else
+  echo "::group::instalação"
+  pacman -U --noconfirm ./*.pkg.tar.zst
+  echo "::endgroup::"
+fi
 
 echo "::group::namcap pacotes"
 for pkg in ./*.pkg.tar.zst; do

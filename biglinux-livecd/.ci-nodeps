@@ -1,0 +1,2 @@
+Dependências de execução (calamares, circle-flags, qefientrymanager...) só existem
+nos repositórios BigLinux; o pacote é "any" e o build não as usa.
