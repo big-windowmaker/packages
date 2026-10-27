@@ -1,0 +1,100 @@
+From 76ddbb91be98cac6eb826303173da13791c35e32 Mon Sep 17 00:00:00 2001
+From: ruscher <teste@hemofilia.org.br>
+Date: Mon, 26 Oct 2026 23:23:33 -0300
+Subject: [PATCH 45/48] dock: Draws without running out of output buffers.
+
+The transparent buffer below the dock's contents was replaced on every
+commit: wlmdock then ran out of buffers ('No free output buffer slot'),
+and eg. the launcher menu did not show. It's replaced only when the size
+changes now. Also, size requests from layout changes are coalesced into
+one per event loop iteration, instead of one commit for each change
+(eg. for each tile added at startup).
+---
+ src/dock/container_surface.c | 12 +++++++++---
+ src/dock/subcompositor.c     | 26 ++++++++++++++++++++++++++
+ 2 files changed, 35 insertions(+), 3 deletions(-)
+
+diff --git a/src/dock/container_surface.c b/src/dock/container_surface.c
+index 6ec90b3..5031eb4 100644
+--- a/src/dock/container_surface.c
++++ b/src/dock/container_surface.c
+@@ -251,9 +251,15 @@ void wlmdock_container_surface_commit_size(
+     }
+     wlr_output_state_finish(&state);
+ 
+-    // Transparent where there is no content.
+-    struct wlr_buffer *wlr_buffer_ptr = bs_gfxbuf_create_wlr_buffer(
+-        width, height);
++    // Transparent where there is no content. A new buffer only for a new
++    // size.
++    struct wlr_buffer *current_ptr =
++        container_surface_ptr->transparent_buffer_ptr->buffer;
++    struct wlr_buffer *wlr_buffer_ptr = NULL;
++    if (NULL == current_ptr ||
++        current_ptr->width != width || current_ptr->height != height) {
++        wlr_buffer_ptr = bs_gfxbuf_create_wlr_buffer(width, height);
++    }
+     if (NULL != wlr_buffer_ptr) {
+         wlr_scene_buffer_set_buffer(
+             container_surface_ptr->transparent_buffer_ptr, wlr_buffer_ptr);
+diff --git a/src/dock/subcompositor.c b/src/dock/subcompositor.c
+index f932775..5411fcd 100644
+--- a/src/dock/subcompositor.c
++++ b/src/dock/subcompositor.c
+@@ -100,6 +100,13 @@ struct _wlmdock_subcompositor_t {
+ 
+     /** For @ref wlmtk_container_t::events for layout_invalidated. */
+     struct wl_listener        container_layout_invalidated_listener;
++    /**
++     * Requests the size from the event loop: Once for many invalidations in
++     * a row (eg. adding tiles, opening the menu). Committing each of them
++     * would use up the swapchain's buffers, before the parent compositor
++     * releases them ("No free output buffer slot"), and frames get lost.
++     */
++    struct wl_event_source    *request_size_event_source_ptr;
+ };
+ 
+ static bool _wlmdock_subcompositor_start(
+@@ -122,6 +129,7 @@ static void _wlmdock_subcompositor_handle_wlclient_keyboard_repeat_info(
+ static void _wlmdock_subcompositor_handle_container_layout_invalidated(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
++static void _wlmdock_subcompositor_idle_request_size(void *data_ptr);
+ 
+ static void _wlmdock_subcompositor_layer_surface_handle_configure(
+     void *data_ptr,
+@@ -261,6 +269,10 @@ void wlmdock_subcompositor_prepare(
+ /* ------------------------------------------------------------------------- */
+ void wlmdock_subcompositor_destroy(wlmdock_subcompositor_t *subcompositor_ptr)
+ {
++    if (NULL != subcompositor_ptr->request_size_event_source_ptr) {
++        wl_event_source_remove(subcompositor_ptr->request_size_event_source_ptr);
++        subcompositor_ptr->request_size_event_source_ptr = NULL;
++    }
+     _wlmdock_subcompositor_stop(subcompositor_ptr);
+ 
+     bs_listener_disconnect(
+@@ -486,6 +498,20 @@ void _wlmdock_subcompositor_handle_container_layout_invalidated(
+         listener_ptr, wlmdock_subcompositor_t,
+         container_layout_invalidated_listener);
+ 
++    if (NULL != subcompositor_ptr->request_size_event_source_ptr) return;
++    subcompositor_ptr->request_size_event_source_ptr = wl_event_loop_add_idle(
++        wl_display_get_event_loop(subcompositor_ptr->wl_display_ptr),
++        _wlmdock_subcompositor_idle_request_size,
++        subcompositor_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Requests the size, from the event loop. */
++void _wlmdock_subcompositor_idle_request_size(void *data_ptr)
++{
++    wlmdock_subcompositor_t *subcompositor_ptr = data_ptr;
++    // Once dispatched, the idle source is gone.
++    subcompositor_ptr->request_size_event_source_ptr = NULL;
+     _wlmdock_subcompositor_request_size(subcompositor_ptr);
+ }
+ 
+-- 
+2.55.0
+

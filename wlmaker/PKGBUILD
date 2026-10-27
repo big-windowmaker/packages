@@ -67,9 +67,20 @@
 #   0041  arrastar Dock e Clip para outro canto (quadrante da tela; Dock e
 #         Clip nunca no mesmo canto), gravado no State.plist; menu dos
 #         lançadores do wlmdock (Abrir, Matar, Remover, mudar de lado)
+#   0042  wlr-foreign-toplevel-management (para o Big Tabbed Dock)
+#   0043  o rastreador de janelas recebe o título, não o app_id
+#   0044  a área útil é recalculada quando um painel layer-shell aparece ou
+#         some (janelas maximizadas passavam por baixo do dock)
+#   0045  wlmdock não fica mais sem buffers ("No free output buffer slot")
+#   0046  carregar o State.plist padrão (o do sistema, não o do usuário)
+#   0047  tabela de tradução dos menus, com português (pt_BR)
+#   0048  o Dock tem um quadrado principal que não pode ser removido, como no
+#         Window Maker (logo do Big WindowMaker), com o menu do Dock: mudar
+#         de lado e "Restaurar lançadores padrão"; o Clip também restaura os
+#         seus; menus do Clip, Dock e dockapps em português
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=4
+pkgrel=5
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -145,6 +156,13 @@ _patches=(
   0039-config-Adds-wlmaker_state_store_section-to-store-cha.patch
   0040-clip-Drags-dock-apps-also-by-their-tile-s-border.patch
   0041-dock-Moves-the-Dock-and-Clip-like-Window-Maker-and-a.patch
+  0042-toplevel_tracker-wlr-foreign-toplevel-management.patch
+  0043-xdg_toplevel-forward-the-title-not-the-app_id-to-the.patch
+  0044-layer_panel-Recomputes-the-usable-area-when-a-layer-.patch
+  0045-dock-Draws-without-running-out-of-output-buffers.patch
+  0046-config-Adds-wlmaker_state_load_defaults-the-state-a-.patch
+  0047-i18n-Adds-a-small-translation-table-for-menu-items-w.patch
+  0048-dock-Keeps-a-main-tile-on-the-Dock-restores-default-.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -195,7 +213,14 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             '96db50650c3e77158aad667e0ff30decb3205baabc58e1d8974151edd8810423'
             'fa0758c9dd7f8bbff4d363ecf394ded6ab7c9c19ef2767b28fc243fca5904fe5'
             '8daeb7fb4babd8f9a678f68792a2979dbbd1dd977d3e05da596642ea921b3db6'
-            'e311266e75394b597998186e2044a8cfbaeeac785610bf6e21b40e65249b169d')
+            'e311266e75394b597998186e2044a8cfbaeeac785610bf6e21b40e65249b169d'
+            '14a9faa0ed17781cdf29ffe94c64997e3b362e27e27ab7ecc17851a8d07cdc8f'
+            'a98f22a564611cae980d4127bb3776681d48b29128dd8c2dd7e9982547dbe41a'
+            'b7f24d26d1bd2b8c38a646e97581904ecae3112146c5fec59339b51e21c299d3'
+            'eee1ed6715e461c33960a2099d16b0fe9dd51d79edc78d03ac2406a7ebeafc88'
+            '1f8778d0ec28f26e1e4da5d93c2dc692377fffd227e3e45c7485771bdf974f90'
+            'c47c568096c6f9fc225b3b6328dbb029d64c65b4b08e066d3d6fdcbdb23ae340'
+            '0ee92f3fdb6cc2e16d3914034957ededd0cf54c8430e9397b070d7a446da7da1')
 
 prepare() {
   cd wlmaker
@@ -225,11 +250,17 @@ prepare() {
 build() {
   # config_OPTIM=ON troca o -O0 padrão do upstream por -O2; config_DEBUG=OFF
   # remove -ggdb -DDEBUG (o makepkg cuida dos símbolos de depuração).
+  # "Restaurar lançadores padrão" usa o State.plist do big-wm (o que o
+  # big-wm-firstrun copia para ~/.config/wlmaker), e o quadrado principal do
+  # Dock mostra o logo do Big WindowMaker. Sem o big-wm instalado, valem o
+  # /etc/xdg/wlmaker/State.plist (ou o padrão embutido) e o ícone do wlmaker.
   cmake -S wlmaker -B build \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=None \
     -Dconfig_DEBUG=OFF \
     -Dconfig_OPTIM=ON \
+    -DWLMAKER_DEFAULT_STATE_FILE=/usr/share/big-wm/wlmaker/State.plist \
+    -DWLMDOCK_DEFAULT_ICON=/usr/share/WindowMaker/Icons/big-wm-logo.png \
     -Wno-dev
   cmake --build build
 }

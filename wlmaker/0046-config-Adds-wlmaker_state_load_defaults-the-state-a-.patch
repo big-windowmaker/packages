@@ -1,0 +1,205 @@
+From 9371c80f9c28c76152f4bba8c1906cc067610cb2 Mon Sep 17 00:00:00 2001
+From: ruscher <teste@hemofilia.org.br>
+Date: Mon, 26 Oct 2026 23:23:33 -0300
+Subject: [PATCH 46/48] config: Adds wlmaker_state_load_defaults, the state a
+ user starts with.
+
+For restoring defaults (eg. the Dock's launchers): Loads the given file,
+else the one configured at build time (CMake WLMAKER_DEFAULT_STATE_FILE,
+eg. a distribution's State.plist), else State.plist from the system's
+${XDG_CONFIG_DIRS} (not the user's), else the compiled-in default. Adds
+wlm_util_files_xdg_config_find_system for that. With a unit test.
+---
+ src/CMakeLists.txt |  6 ++++++
+ src/config.c       | 53 ++++++++++++++++++++++++++++++++++++++++++++++
+ src/config.h       | 17 +++++++++++++++
+ src/util/files.c   | 21 ++++++++++++++++++
+ src/util/files.h   | 12 +++++++++++
+ 5 files changed, 109 insertions(+)
+
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index cc0310c..a2dbf9c 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -143,6 +143,12 @@ endif()
+ if(XWAYLAND_FOUND)
+   target_compile_definitions(wlmaker_lib PUBLIC WLMAKER_HAVE_XWAYLAND)
+ endif()
++# Defaults for 'Restore Default Launchers', eg. a distribution's State.plist.
++set(WLMAKER_DEFAULT_STATE_FILE "" CACHE STRING
++  "State file with the defaults, preferred over \${XDG_CONFIG_DIRS}.")
++target_compile_definitions(
++  wlmaker_lib PRIVATE
++  "WLMAKER_DEFAULT_STATE_FILE=\"${WLMAKER_DEFAULT_STATE_FILE}\"")
+ 
+ 
+ add_executable(
+diff --git a/src/config.c b/src/config.c
+index 23b2fff..bb7da81 100644
+--- a/src/config.c
++++ b/src/config.c
+@@ -157,6 +157,39 @@ bspl_dict_t *wlmaker_state_load(
+                 embedded_binary_default_state_size)));
+ }
+ 
++/* ------------------------------------------------------------------------- */
++bspl_dict_t *wlmaker_state_load_defaults(
++    wlm_util_files_t *files_ptr,
++    const char *fname_ptr)
++{
++#ifndef WLMAKER_DEFAULT_STATE_FILE
++#define WLMAKER_DEFAULT_STATE_FILE ""
++#endif
++    const char *candidates[] = { fname_ptr, WLMAKER_DEFAULT_STATE_FILE };
++    char *found_ptr = NULL;
++    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
++        if (NULL != candidates[i] && '\0' != *candidates[i] &&
++            bs_file_realpath_is(candidates[i], S_IFREG)) {
++            found_ptr = logged_strdup(candidates[i]);
++            break;
++        }
++    }
++    if (NULL == found_ptr && NULL != files_ptr) {
++        found_ptr = wlm_util_files_xdg_config_find_system(
++            files_ptr, "State.plist", S_IFREG);
++    }
++
++    bspl_object_t *o = _wlmaker_plist_load(
++        "default wlmaker state",
++        found_ptr,
++        embedded_binary_default_state_data,
++        embedded_binary_default_state_size);
++    if (NULL != found_ptr) free(found_ptr);
++    bspl_dict_t *dict_ptr = bspl_dict_from_object(o);
++    if (NULL == dict_ptr && NULL != o) bspl_object_unref(o);
++    return dict_ptr;
++}
++
+ /* ------------------------------------------------------------------------- */
+ char *wlmaker_state_fname(wlm_util_files_t *files_ptr, const char *fname_ptr)
+ {
+@@ -357,6 +390,7 @@ static void test_embedded(bs_test_t *test_ptr);
+ static void test_file(bs_test_t *test_ptr);
+ static void test_style_file(bs_test_t *test_ptr);
+ static void test_state_store(bs_test_t *test_ptr);
++static void test_state_defaults(bs_test_t *test_ptr);
+ 
+ /** Unit test cases. */
+ static const bs_test_case_t wlmaker_config_test_cases[] = {
+@@ -364,6 +398,7 @@ static const bs_test_case_t wlmaker_config_test_cases[] = {
+     { true, "file", test_file },
+     { true, "style_file", test_style_file },
+     { true, "state_store", test_state_store },
++    { true, "state_defaults", test_state_defaults },
+     BS_TEST_CASE_SENTINEL()
+ };
+ 
+@@ -498,4 +533,22 @@ void test_state_store(bs_test_t *test_ptr)
+     }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Loads defaults: From the given file, otherwise compiled-in. */
++void test_state_defaults(bs_test_t *test_ptr)
++{
++    bspl_dict_t *d = wlmaker_state_load_defaults(
++        NULL, WLMAKER_SOURCE_DIR "/etc/State.plist");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++    BS_TEST_VERIFY_NEQ(test_ptr, NULL, bspl_dict_get_array(
++                           bspl_dict_get_dict(d, "Dock"), "Launchers"));
++    bspl_dict_unref(d);
++
++    // A missing file: Falls back (here, to the compiled-in default).
++    d = wlmaker_state_load_defaults(NULL, "/nonexistent/State.plist");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++    BS_TEST_VERIFY_NEQ(test_ptr, NULL, bspl_dict_get_dict(d, "Dock"));
++    bspl_dict_unref(d);
++}
++
+ /* == End of config.c ====================================================== */
+diff --git a/src/config.h b/src/config.h
+index a019959..c589a9c 100644
+--- a/src/config.h
++++ b/src/config.h
+@@ -148,6 +148,23 @@ bspl_dict_t *wlmaker_state_load(
+  */
+ char *wlmaker_state_fname(wlm_util_files_t *files_ptr, const char *fname_ptr);
+ 
++/**
++ * Loads the default state: What a user starts with, before changing it.
++ *
++ * Takes the first of: `fname_ptr`, if given and existing; the file
++ * configured at build time (`WLMAKER_DEFAULT_STATE_FILE`), if existing;
++ * `State.plist` from the system's configuration directories
++ * (`${XDG_CONFIG_DIRS}/wlmaker`, not the user's); the compiled-in default.
++ *
++ * @param files_ptr
++ * @param fname_ptr           May be NULL.
++ *
++ * @return A dict, or NULL on error. To be unreferenced by the caller.
++ */
++bspl_dict_t *wlmaker_state_load_defaults(
++    wlm_util_files_t *files_ptr,
++    const char *fname_ptr);
++
+ /**
+  * Stores values into a section of the state: Loads the current state (like
+  * @ref wlmaker_state_load), replaces or adds each key of `values_dict_ptr`
+diff --git a/src/util/files.c b/src/util/files.c
+index ed583e4..15574df 100644
+--- a/src/util/files.c
++++ b/src/util/files.c
+@@ -106,6 +106,27 @@ char *wlm_util_files_xdg_config_find(
+     return NULL;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++char *wlm_util_files_xdg_config_find_system(
++    wlm_util_files_t *files_ptr,
++    const char *fname_ptr,
++    int mode_type)
++{
++    const char * const *dirs_ptr = xdgConfigDirectories(&files_ptr->xdg_handle);
++    if (NULL == dirs_ptr) return NULL;
++
++    for (; NULL != *dirs_ptr; ++dirs_ptr) {
++        char *candidate_path_ptr = bs_strdupf(
++            "%s/%s/%s", *dirs_ptr, files_ptr->dirname_ptr, fname_ptr);
++        if (NULL == candidate_path_ptr) return NULL;
++        if (bs_file_realpath_is(candidate_path_ptr, mode_type)) {
++            return candidate_path_ptr;
++        }
++        free(candidate_path_ptr);
++    }
++    return NULL;
++}
++
+ /* ------------------------------------------------------------------------- */
+ char *wlm_util_files_xdg_data_find(
+     wlm_util_files_t *files_ptr,
+diff --git a/src/util/files.h b/src/util/files.h
+index 56a64e7..324a0c0 100644
+--- a/src/util/files.h
++++ b/src/util/files.h
+@@ -77,6 +77,18 @@ char *wlm_util_files_xdg_config_find(
+     const char *fname_ptr,
+     int mode_type);
+ 
++/**
++ * Like @ref wlm_util_files_xdg_config_find, but only looks in the system's
++ * directories `${XDG_CONFIG_DIRS}`: Not in the user's `${XDG_CONFIG_HOME}`.
++ * Eg. to find defaults of a file the user may have changed.
++ *
++ * @return Full path name, or NULL if not found. To be free()-ed.
++ */
++char *wlm_util_files_xdg_config_find_system(
++    wlm_util_files_t *files_ptr,
++    const char *fname_ptr,
++    int mode_type);
++
+ /**
+  * Finds a file (or directory, ...) from XDG data directories.
+  *
+-- 
+2.55.0
+

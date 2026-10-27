@@ -21,7 +21,7 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
 | Diretório | Pacotes gerados | Versão | Origem |
 |---|---|---|---|
 | [`windowmaker/`](windowmaker/PKGBUILD) | `windowmaker` | `0.96.0.r130.g558e67f` | `master` do [window-maker/wmaker](https://github.com/window-maker/wmaker) fixado no commit `558e67f`. Substitui o `extra/windowmaker 0.96.0`. |
-| [`wlmaker/`](wlmaker/PKGBUILD) | `wlmaker` | `1:0.8.r80.g7481afe` | `main` (desenvolvimento da 0.9) do [phkaeser/wlmaker](https://github.com/phkaeser/wlmaker) fixado no commit `7481afe`, com 41 patches da branch `big-wm/protocols` do [fork](https://github.com/big-windowmaker/wlmaker), XWayland, contra `wlroots0.20`. |
+| [`wlmaker/`](wlmaker/PKGBUILD) | `wlmaker` | `1:0.8.r80.g7481afe` | `main` (desenvolvimento da 0.9) do [phkaeser/wlmaker](https://github.com/phkaeser/wlmaker) fixado no commit `7481afe`, com 48 patches da branch `big-wm/protocols` do [fork](https://github.com/big-windowmaker/wlmaker), XWayland, contra `wlroots0.20`. |
 | [`big-dockapps/`](big-dockapps/PKGBUILD) | `libdockapp`, `wmcpuload`, `wmbattery`, `wmusic`, `wmshutdown`, `wmmoonclock`, `wmcube`, `wmudmount`, `wmnet`, `wmclock`, `wmmemload`, `wmsystemtray`, `pclock`, `wmwifi`, `minidock`, `minicontrol`, `wmapmload`, `mountapp` | `20260412` | [window-maker/dockapps](https://github.com/window-maker/dockapps) fixado no commit `251e851`; `wmudmount` (3.0), `wmsystemtray` (1.4) e `mountapp` (3.0) vêm dos tarballs do SourceForge; `minidock` (1.9) e `minicontrol` (0.2) da Zenwalk; `wmapmload` (0.3.4) do site do autor. |
 | [`biglinux-livecd/`](biglinux-livecd/PKGBUILD) | `biglinux-livecd` | `26.10.26` | **Temporário**, só para as ISOs de teste: branch `window-maker` de [big-windowmaker/biglinux-livecd](https://github.com/big-windowmaker/biglinux-livecd), com o suporte à sessão live do Window Maker proposto ao upstream. Sai daqui quando a mudança estiver no `biglinux-stable`. |
 | [`gtk-nocsd/`](gtk-nocsd/PKGBUILD) | `gtk-nocsd` | `4.8` | Release 4.8 do [MorsMortium/gtk-nocsd](https://codeberg.org/MorsMortium/gtk-nocsd) (Codeberg). Tira a CSD das janelas GTK 3/4 e libadwaita; carregado pela sessão X11 do big-wm. |
@@ -76,6 +76,10 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
   e a posição fica gravada em `~/.config/wlmaker/State.plist`. O `wlmdock`
   desenha com pixman por padrão (sem `WLR_RENDERER`), o que o faz aparecer
   também em VM e GPU onde o renderizador automático falhava.
+  Como no Window Maker, o Dock tem um quadrado principal (logo do Big
+  WindowMaker) que não pode ser removido: o menu dele muda o Dock de lado e
+  restaura os lançadores padrão (os do `State.plist` do big-wm); o Clip
+  também restaura os seus. Os menus aparecem em português.
   Na 0.9 não há mais dock embutido e o `Config.plist` padrão não inicia o
   `wlmdock`: a configuração da sessão precisa colocá-lo (e o
   `wlmdock --clip`, se houver `Clip.Launchers`) no `Autostart`.
