@@ -1,0 +1,35 @@
+wmweather: passa long às opções numéricas do curl_easy_setopt()
+
+curl_easy_setopt() é variádica e lê um long para as opções numéricas; o
+código passava int (1, 120, 10). Funciona por acaso no x86_64, mas é
+comportamento indefinido, e o curl atual avisa em tempo de compilação
+(-Wattribute-warning, "curl_easy_setopt expects a long argument").
+
+Upstream: wmweather 2.4.8 (Debian, people.debian.org/~godisch), sem
+repositório público; enviar ao mantenedor.
+
+--- a/src/wmweather.c
++++ b/src/wmweather.c
+@@ -148,17 +148,17 @@
+ 	curl = curl_easy_init();
+ 	assert(curl);
+ 	if (curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, curl_errmsg) != CURLE_OK ||
+-		curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1) != CURLE_OK ||
+-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120) != CURLE_OK ||
++		curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L) != CURLE_OK ||
++		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L) != CURLE_OK ||
+ 		curl_easy_setopt(curl, CURLOPT_USERAGENT, PACKAGE_STRING) != CURLE_OK ||
+ 		curl_easy_setopt(curl, CURLOPT_URL, url) != CURLE_OK ||
+-		curl_easy_setopt(curl, CURLOPT_NETRC, 1) != CURLE_OK ||
++		curl_easy_setopt(curl, CURLOPT_NETRC, 1L) != CURLE_OK ||
+ 		curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curl_callback) != CURLE_OK ||
+ 		curl_easy_setopt(curl, CURLOPT_WRITEHEADER, (void*)&header) != CURLE_OK ||
+ 		(proxy && curl_easy_setopt(curl, CURLOPT_PROXY, proxy) != CURLE_OK) ||
+ 		(proxy && proxy_user && curl_easy_setopt(curl, CURLOPT_PROXYUSERPWD, proxy_user) != CURLE_OK) ||
+-		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1) != CURLE_OK ||
+-		curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10) != CURLE_OK) {
++		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L) != CURLE_OK ||
++		curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L) != CURLE_OK) {
+ 		fprintf(stderr, "%s: %s\n", PACKAGE_NAME, curl_errmsg);
+ 		exit(1);
+ 	}

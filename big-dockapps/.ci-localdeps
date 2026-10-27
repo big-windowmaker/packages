@@ -1,0 +1,3 @@
+# Compilado e instalado antes no contêiner de CI (ver ci/build-package.sh):
+# o wmglobe liga na libwraster do windowmaker deste repositório.
+windowmaker

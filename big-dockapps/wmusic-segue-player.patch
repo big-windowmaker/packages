@@ -1,0 +1,167 @@
+wmusic: segue o player que está tocando e não trava ao abrir o player
+
+Dois defeitos deixavam o wmusic "sem funcionar" na sessão X11 do Big
+WindowMaker:
+
+- Ele sempre se ligava ao primeiro player MPRIS da lista. Navegadores
+  (Firefox) e players abertos mas parados também se registram no MPRIS,
+  então o visor ficava em "--" e os botões controlavam o player errado
+  enquanto outro tocava. Agora ele escolhe o que está tocando (ou um
+  pausado, ou o primeiro) e, enquanto o atual não toca, passa uma vez por
+  segundo para outro que começou a tocar. O botão de ejetar continua
+  trocando de player à mão.
+- Sem player, o clique duplo no visor (e as opções -r/-R) rodavam o
+  comando do player ("xmms" por padrão, que não existe mais) e esperavam
+  num laço sem fim até um player aparecer: o dockapp congelava para
+  sempre. Uma falha do comando fazia o dockapp sair. Agora o comando roda
+  em segundo plano e o dockapp se liga ao player quando ele aparecer; com
+  -R ele só sai depois que o player que ele acompanhava fechar.
+
+A enviar para wmaker-dev@googlegroups.com.
+
+diff --git a/wmusic/src/wmusic.c b/wmusic/src/wmusic.c
+index ecfb177..d9b4857 100644
+--- a/wmusic/src/wmusic.c
++++ b/wmusic/src/wmusic.c
+@@ -92,6 +92,7 @@ char *xmms_cmd = "xmms";
+ Bool main_vis=0, pl_vis=0, eq_vis=0;
+ unsigned int volume_step = 5;
+ Bool run_excusive=0;
++Bool ever_connected=0;	/* -R: exit only after the player went away */
+ 
+ Bool t_time=0;
+ unsigned int art_delay_secs = 0; /* secs of play before art shows */
+@@ -576,11 +577,50 @@ void buttonDrag(int x, int y)
+ 	}
+ }
+ 
++/* Status of a player without keeping it: used to find the one that is
++ * actually playing. */
++static PlayerctlPlaybackStatus PlayerStatus(PlayerctlPlayerName *name)
++{
++	GError *error = NULL;
++	PlayerctlPlayer *p;
++	PlayerctlPlaybackStatus status = PLAYERCTL_PLAYBACK_STATUS_STOPPED;
++
++	p = playerctl_player_new_from_name(name, &error);
++	if (error == NULL && p)
++		g_object_get(p, "playback-status", &status, NULL);
++	if (p)
++		g_object_unref(p);
++	g_clear_error(&error);
++	return status;
++}
++
++/* The player to follow: the one playing, else a paused one, else the
++ * first. Browsers and players left open but idle (Firefox, a stopped
++ * video player) register with MPRIS too and used to hide the player that
++ * was really playing, because the first one in the list always won. */
++static PlayerctlPlayerName *BestPlayer(GList *players)
++{
++	PlayerctlPlayerName *paused = NULL;
++	GList *l;
++
++	for (l = players; l; l = l->next) {
++		PlayerctlPlaybackStatus status = PlayerStatus(l->data);
++
++		if (status == PLAYERCTL_PLAYBACK_STATUS_PLAYING)
++			return l->data;
++		if (status == PLAYERCTL_PLAYBACK_STATUS_PAUSED && !paused)
++			paused = l->data;
++	}
++	return paused ? paused : (players ? players->data : NULL);
++}
++
+ int PlayerConnect(void)
+ {
+ 	GError *error = NULL;
+ 	static int previous_error_code = 0;
++	static unsigned int ticks = 0;
+ 	GList *players;
++	PlayerctlPlayerName *best = NULL;
+ 
+ 	players = playerctl_list_players(&error);
+ 	if (error)
+@@ -595,15 +635,37 @@ int PlayerConnect(void)
+ 		UpdateArtCache(NULL);
+ 	}
+ 
++	/* Once a second, while the current player is not playing, follow
++	 * another one that started playing. */
++	if (player && g_list_length(players) > 1 && ++ticks >= 10) {
++		PlayerctlPlaybackStatus status;
++		int current = CurrentPlayerIndex(players);
++
++		ticks = 0;
++		g_object_get(player, "playback-status", &status, NULL);
++		if (status != PLAYERCTL_PLAYBACK_STATUS_PLAYING) {
++			best = BestPlayer(players);
++			if (best && best != g_list_nth_data(players, current) &&
++			    PlayerStatus(best) == PLAYERCTL_PLAYBACK_STATUS_PLAYING) {
++				g_object_unref(player);
++				player = NULL;
++				UpdateArtCache(NULL);
++			} else
++				best = NULL;
++		}
++	}
++
+ 	if (!player && g_list_length(players) > 0) {
+-		player = playerctl_player_new_from_name(
+-			g_list_nth_data(players, 0), &error);
++		if (!best)
++			best = BestPlayer(players);
++		player = playerctl_player_new_from_name(best, &error);
+ 		if (error != NULL) {
+ 			/* don't spam error message */
+ 			if (error->code != previous_error_code)
+ 				DAWarning("Connection to player failed: %s",
+ 					  error->message);
+ 			previous_error_code = error->code;
++			g_clear_object(&player);
+ 		} else {
+ 			char *player_name;
+ 
+@@ -612,6 +674,7 @@ int PlayerConnect(void)
+ 			if (player_name)
+ 				DAWarning("Connected to %s", player_name);
+ 			g_free(player_name);
++			ever_connected = 1;
+ 			}
+ 		g_clear_error(&error);
+ 	} else
+@@ -658,7 +721,7 @@ void DisplayRoutine()
+ 	/* Compute display */
+ 	if (!player)
+ 	{
+-		if (run_excusive)
++		if (run_excusive && ever_connected)
+ 			exit(0);
+ 		title = strdup("--");
+ 		title_pos = 0;
+@@ -1060,16 +1123,18 @@ void ExecuteXmms(void)
+ 	char *command;
+ 	int status;
+ 
+-	command=malloc(strlen(xmms_cmd)+5);
++	/* Starts the player in the background and returns: the display routine
++	 * connects to it once it shows up on MPRIS. Waiting here froze the
++	 * dockapp for good when the command did not start an MPRIS player (the
++	 * default "xmms" is not installed anywhere nowadays), and a failure
++	 * made the whole dockapp exit. */
++	command = malloc(strlen(xmms_cmd) + 5);
++	if (!command)
++		return;
+ 	sprintf(command, "%s &", xmms_cmd);
+ 	status = system(command);
+ 	if (status)
+-	{
+-		fprintf(stderr, "XMMS can't be launched, exiting...");
+-		exit(1);
+-	}
+-	while (!PlayerConnect())
+-		usleep(10000L);
++		DAWarning("Could not launch the media player: %s", xmms_cmd);
+ 	free(command);
+ }
+ /*----------------------------------------------------------------------------*/

@@ -9,13 +9,17 @@
 # Fontes:
 #   - git window-maker/dockapps fixado em _commit: libdockapp, wmcpuload,
 #     wmbattery, wmusic, wmshutdown, wmmoonclock, wmcube, wmnet, wmclock,
-#     wmmemload, pclock e wmwifi;
+#     wmmemload, pclock, wmwifi, wmcalclock, wmtime, wmclockmon, wmtz, wmtop,
+#     wmfsm, wmmon, wmcliphist, wmgtemp, wmsun, wmcalc, wmpager, wmcpufreq e
+#     wmglobe;
 #   - wmudmount e wmsystemtray não estão no repositório dockapps: usam os
 #     tarballs oficiais das releases no SourceForge, com checksum;
 #   - minidock e minicontrol (Jean-Philippe Guillemin, Zenwalk), wmapmload
 #     (Thomas Nemeth) e mountapp (Steve Borho, SourceForge): tarballs das
 #     últimas releases, sem manutenção upstream. Os patches deste diretório
-#     os adaptam ao GCC 15+, ao GTK 3 e ao sysfs (ver o cabeçalho de cada um).
+#     os adaptam ao GCC 15+, ao GTK 3 e ao sysfs (ver o cabeçalho de cada um);
+#   - wmweather (Mike Henderson e Martin Godisch, da Debian): tarball da release
+#     2.4.8, que já busca o METAR por HTTPS (libcurl).
 #
 # Versão: o makepkg não permite pkgver diferente por pacote num split, então
 # todos usam a data do commit fixado (AAAAMMDD), que é maior que as versões do
@@ -24,7 +28,10 @@
 #   wmshutdown 1.6, wmmoonclock 1.30, wmcube 1.0.2, wmudmount 3.0,
 #   wmnet 1.7, wmclock 1.0.16, wmmemload 0.1.8, wmsystemtray 1.4,
 #   pclock 0.13.1, wmwifi 0.6, minidock 1.9, minicontrol 0.2,
-#   wmapmload 0.3.4, mountapp 3.0.
+#   wmapmload 0.3.4, mountapp 3.0, wmcalclock 1.26, wmtime 1.4,
+#   wmclockmon 1.0.0, wmtz 0.7, wmtop 0.85, wmfsm 0.36, wmmon 1.4,
+#   wmcliphist 2.1, wmgtemp 1.2, wmsun 1.06, wmcalc 0.7, wmpager 1.2,
+#   wmcpufreq 3.0, wmglobe 1.3, wmweather 2.4.8.
 # Se algum dockapp sair deste split no futuro, o pacote separado vai precisar
 # de epoch=1 para não "voltar" de versão.
 #
@@ -50,6 +57,21 @@ pkgname=(
   minicontrol
   wmapmload
   mountapp
+  wmcalclock
+  wmtime
+  wmclockmon
+  wmtz
+  wmtop
+  wmfsm
+  wmmon
+  wmcliphist
+  wmgtemp
+  wmsun
+  wmcalc
+  wmpager
+  wmcpufreq
+  wmglobe
+  wmweather
 )
 _commit=251e851a9d59d8bd0263ba1eebe08196f98f6d0b
 _wmudmount_ver=3.0
@@ -58,11 +80,12 @@ _minidock_ver=1.9
 _minicontrol_ver=0.2
 _wmapmload_ver=0.3.4
 _mountapp_ver=3.0
+_wmweather_ver=2.4.8
 # "x86_64" aqui é só o nome do diretório no servidor da Zenwalk (os tarballs
 # são código-fonte); o namcap avisa por causa dele.
 _zenwalk=https://download.zenwalk.org/x86_64/people/jp/dockapps
 pkgver=20260412
-pkgrel=3
+pkgrel=4
 pkgdesc='Curated Window Maker dockapps for Big WindowMaker'
 arch=(x86_64)
 url='https://www.dockapps.net/'
@@ -97,8 +120,15 @@ makedepends=(
   libnotify
   libsecret
   udisks2
-  # mountapp (libWUtil)
+  # mountapp (libWUtil) e wmglobe (libwraster: tem de ser o windowmaker deste
+  # repositório, ver .ci-localdeps)
   windowmaker
+  # wmgtemp
+  lm_sensors
+  # wmcpufreq (libcpupower)
+  cpupower
+  # wmweather
+  curl
 )
 source=(
   "dockapps::git+https://github.com/window-maker/dockapps.git#commit=${_commit}"
@@ -109,6 +139,7 @@ source=(
   # Sem HTTPS no servidor do autor; a integridade vem do sha256.
   "http://tnemeth.free.fr/projets/programmes/wmapmload-${_wmapmload_ver}.tar.gz"
   "https://downloads.sourceforge.net/project/mountapp/mountapp/${_mountapp_ver}/mountapp-${_mountapp_ver}.tar.gz"
+  "https://people.debian.org/~godisch/wmweather/wmweather-${_wmweather_ver}.tar.gz"
   wmwifi-no-interface.patch
   wmapmload-sysfs.patch
   mountapp-modern-build.patch
@@ -116,6 +147,11 @@ source=(
   minicontrol-gtk3.patch
   minidock.cf
   minicontrol.cf
+  wmcpufreq-libcpupower.patch
+  wmglobe-format-security.patch
+  wmweather-curl-long.patch
+  wmtzrc
+  wmusic-segue-player.patch
 )
 sha256sums=('cc9753fa925323b52110c595f4920da1aec6e1ae124a40be4062048991daed81'
             '7f1de94264c9593f94337de1ede4bac1d976a03d9af1563b400d46497caaee4e'
@@ -124,20 +160,33 @@ sha256sums=('cc9753fa925323b52110c595f4920da1aec6e1ae124a40be4062048991daed81'
             '3f582521ed76dd3da8eda5d06834a38017613af72645d074927a0f79cd97153f'
             'a545ebf0b4fd6d34f074cbddc7c0fb2c4f1f068d86053acb79895bf565ce2df9'
             'a05f33d89c5b86ea8b1303302b5dd8477f634ae16309b762ecf8805514e4122a'
+            'd92e7e411ee4f5f6f5e7ce7d3050e494b04721a5284ec73ea189745900697a36'
             'a552a7c550c05d75a825a04138f2c4d3a0acfc3bb051c4ed8af2aa6c97837843'
             '4d8f371d6261f3ec8cb8d451600f9b790b2dac2380c720b5c3c8ef8c1ba2d96d'
             'b0849ce552659d86e0107b73b0f706192d246fd3b985465f310427b7a8070a23'
             '47a22edf7f845ed1002daef4cb49d5915220f40b3836aaba8d04418a5962a134'
             '44a40908de9b48a72e03cabe86cfed475c4f8f2f01ba5e9d48e6326ef2b930b7'
             '56cc583e30b4a5ca61b63daec1a80216ba62fc6fdcfcd456ce81f50e7d1cc4ee'
-            'ed563d3dd8c387cd6c885c4a51a378293049f8aa9045082c2953edd69074a0cc')
+            'ed563d3dd8c387cd6c885c4a51a378293049f8aa9045082c2953edd69074a0cc'
+            '5d05c1b5a42fb04105cad588bfdff261340b72c5d6dd7ea15f23ac5115b00df1'
+            'e6f73c6ad76cf08276efdc29f06fc88e63425877958504b44f63d934638a104a'
+            'd7be5f4706ceb626961daa9296c98cf920a73786dbbba244d6a83d3a930984fe'
+            'cf5040ee03cd9a4bdcad227a5f52744934026980d4b161ad10c428b3f408f48b'
+            '957dcade76c8bb417a6bb10ee0ce865b67edb47657cac1f343413dde0b34e719')
 
 # Dockapps do repositório git que usam autotools.
-_autotools=(libdockapp wmcpuload wmbattery wmusic wmshutdown wmmoonclock wmnet wmclock wmmemload wmwifi)
+_autotools=(
+  libdockapp wmcpuload wmbattery wmusic wmshutdown wmmoonclock wmnet wmclock
+  wmmemload wmwifi wmCalClock wmclockmon wmtop wmfsm wmmon wmgtemp wmcalc
+  wmpager
+)
 
 prepare() {
   cd dockapps
   patch -Np1 -i ../wmwifi-no-interface.patch
+  patch -Np1 -i ../wmcpufreq-libcpupower.patch
+  patch -Np1 -i ../wmglobe-format-security.patch
+  patch -Np1 -i ../wmusic-segue-player.patch
   local _d
   for _d in "${_autotools[@]}"; do
     (cd "${_d}" && autoreconf -fi)
@@ -158,6 +207,9 @@ prepare() {
   patch -Np1 -i ../minicontrol-gtk3.patch
   # O tarball traz um binário i386 pré-compilado: compila sempre do fonte.
   rm -f minicontrol
+
+  cd "${srcdir}/wmweather-${_wmweather_ver}"
+  patch -Np1 -i ../wmweather-curl-long.patch
 }
 
 build() {
@@ -259,6 +311,57 @@ build() {
   MOUNT_CMD=/usr/bin/mount UMOUNT_CMD=/usr/bin/umount \
   EJECT_CMD=/usr/bin/eject XMESSAGE=/usr/bin/xmessage \
     ./configure --prefix=/usr --datadir=/usr/share
+  make
+
+  local _dockapp
+  for _dockapp in wmCalClock wmclockmon wmtop wmfsm wmmon wmgtemp wmpager; do
+    cd "${srcdir}/dockapps/${_dockapp}"
+    env "${_dockapp_env[@]}" ./configure --prefix=/usr --mandir=/usr/share/man
+    env "${_dockapp_env[@]}" make
+  done
+
+  # wmcalc procura o wmcalc.conf global em ${sysconfdir}.
+  cd "${srcdir}/dockapps/wmcalc"
+  ./configure --prefix=/usr --mandir=/usr/share/man --sysconfdir=/etc
+  make
+
+  # wmtime, wmsun e wmcpufreq usam Makefiles simples: flags do makepkg
+  # explícitas. O wmtime pedia -liconv, que no glibc não é uma biblioteca
+  # separada.
+  cd "${srcdir}/dockapps/wmtime"
+  make CFLAGS="${CFLAGS}" CPPFLAGS="${CPPFLAGS} -I${_stage}/usr/include" \
+    LDFLAGS="${LDFLAGS} -L${_stage}/usr/lib" \
+    LIBS="-lXpm -lXext -lX11 -lm -ldockapp"
+
+  cd "${srcdir}/dockapps/wmsun"
+  make CFLAGS="${CFLAGS}" CPPFLAGS="${CPPFLAGS} -I${_stage}/usr/include" \
+    LDFLAGS="${LDFLAGS} -L${_stage}/usr/lib"
+
+  cd "${srcdir}/dockapps/wmcpufreq/wmcpufreq"
+  make CFLAGS="${CFLAGS} ${CPPFLAGS} -I${_stage}/usr/include" \
+    INCDIR= LIBDIR="${LDFLAGS} -L${_stage}/usr/lib"
+
+  # O Makefile do wmtz junta CFLAGS e LDFLAGS numa variável só (FLAGS).
+  cd "${srcdir}/dockapps/wmtz/wmtz"
+  make FLAGS="${CFLAGS} ${CPPFLAGS} -I${_stage}/usr/include ${LDFLAGS} -L${_stage}/usr/lib"
+
+  # O Makefile do wmcliphist acrescenta os cabeçalhos do GTK 3 ao CFLAGS do
+  # ambiente.
+  cd "${srcdir}/dockapps/wmcliphist"
+  make PREFIX=/usr
+
+  # O autotools do wmglobe no repositório ficou pela metade (src/Makefile não
+  # é gerado): compila direto, como o Makefile.old fazia.
+  cd "${srcdir}/dockapps/wmglobe/src"
+  ${CC:-cc} ${CFLAGS} ${CPPFLAGS} $(pkg-config --cflags wrlib x11 xext xpm) \
+    -o wmglobe wmglobe.c rend.c wmgutil.c sunpos.c myconvert.c mycontext.c \
+    ${LDFLAGS} $(pkg-config --libs wrlib x11 xext xpm) -lm
+
+  # Sem --with-xmessage o configure exige o xmessage no build; o clique que
+  # mostra o boletim completo usa ele em tempo de execução (optdepends).
+  cd "${srcdir}/wmweather-${_wmweather_ver}/src"
+  ./configure --prefix=/usr --mandir=/usr/share/man --sysconfdir=/etc \
+    --with-xmessage=/usr/bin/xmessage
   make
 }
 
@@ -489,4 +592,180 @@ package_mountapp() {
   cd "mountapp-${_mountapp_ver}"
   make DESTDIR="${pkgdir}" install
   install -Dm644 -t "${pkgdir}/usr/share/doc/mountapp" README README.smb
+}
+
+package_wmcalclock() {
+  pkgdesc='Window Maker dockapp showing a calendar and a clock'
+  url='https://www.dockapps.net/wmcalclock'
+  license=('GPL-2.0-or-later')
+  depends=(glibc libx11 libxext libxpm)
+
+  cd dockapps/wmCalClock
+  make DESTDIR="${pkgdir}" install
+}
+
+package_wmtime() {
+  pkgdesc='Window Maker dockapp showing the time (analog and digital) and the date'
+  url='https://www.dockapps.net/wmtime'
+  license=('GPL-2.0-or-later')
+  depends=(glibc libdockapp libx11)
+
+  cd dockapps/wmtime
+  make DESTDIR="${pkgdir}" PREFIX=/usr install
+}
+
+package_wmclockmon() {
+  pkgdesc='Window Maker dockapp clock with alarms, styles and a calendar'
+  url='https://www.dockapps.net/wmclockmon'
+  license=('GPL-2.0-or-later')
+  # wmclockmon-config (alarmes e estilos) e wmclockmon-cal usam GTK 3.
+  depends=(glib2 glibc gtk3 libx11 libxext libxpm)
+
+  cd dockapps/wmclockmon
+  make DESTDIR="${pkgdir}" install
+}
+
+package_wmtz() {
+  pkgdesc='Window Maker dockapp showing the time in five time zones'
+  url='https://www.dockapps.net/wmtz'
+  license=('GPL-2.0-or-later')
+  depends=(glibc libdockapp libx11)
+  backup=(etc/wmtzrc)
+
+  cd dockapps/wmtz
+  install -Dm755 wmtz/wmtz "${pkgdir}/usr/bin/wmtz"
+  install -Dm644 wmtz/wmtz.1 "${pkgdir}/usr/share/man/man1/wmtz.1"
+  # Relógio mundial do Big WindowMaker (o do upstream mostra datas julianas
+  # e tempo sideral); o exemplo do upstream fica na documentação.
+  install -Dm644 "${srcdir}/wmtzrc" "${pkgdir}/etc/wmtzrc"
+  install -Dm644 wmtz/wmtzrc "${pkgdir}/usr/share/doc/wmtz/wmtzrc.upstream"
+  install -Dm644 -t "${pkgdir}/usr/share/doc/wmtz" BUGS CHANGES README
+}
+
+package_wmtop() {
+  pkgdesc='Window Maker dockapp showing the top three processes by CPU or memory'
+  url='https://www.dockapps.net/wmtop'
+  license=('GPL-2.0-or-later')
+  depends=(glibc libdockapp libx11)
+
+  cd dockapps/wmtop
+  make DESTDIR="${pkgdir}" install
+}
+
+package_wmfsm() {
+  pkgdesc='Window Maker dockapp to monitor filesystem usage'
+  url='https://www.dockapps.net/wmfsm'
+  license=('GPL-2.0-or-later')
+  depends=(glibc libdockapp libx11 libxpm)
+
+  cd dockapps/wmfsm
+  make DESTDIR="${pkgdir}" install
+}
+
+package_wmmon() {
+  pkgdesc='Window Maker dockapp to monitor CPU load, disk I/O and memory'
+  url='https://www.dockapps.net/wmmon'
+  license=('GPL-2.0-or-later')
+  depends=(glibc libdockapp libx11)
+
+  cd dockapps/wmmon
+  make DESTDIR="${pkgdir}" install
+  _x11_only_desktop
+}
+
+package_wmcliphist() {
+  pkgdesc='Window Maker dockapp keeping a clipboard history (GTK 3)'
+  url='https://www.dockapps.net/wmcliphist'
+  license=('GPL-2.0-or-later')
+  depends=(cairo glib2 glibc gtk3 libx11)
+
+  cd dockapps/wmcliphist
+  make DESTDIR="${pkgdir}" PREFIX=/usr install
+  # Exemplo de ~/.wmcliphistrc (sem ele valem os padrões).
+  install -Dm644 -t "${pkgdir}/usr/share/doc/wmcliphist" README wmcliphistrc
+}
+
+package_wmgtemp() {
+  pkgdesc='Window Maker dockapp showing CPU and system temperatures (lm_sensors)'
+  url='https://www.dockapps.net/wmgtemp'
+  license=('Artistic-1.0-Perl')
+  depends=(glibc libdockapp libx11 lm_sensors)
+
+  cd dockapps/wmgtemp
+  make DESTDIR="${pkgdir}" install
+  install -Dm644 Artistic "${pkgdir}/usr/share/licenses/${pkgname}/Artistic"
+}
+
+package_wmsun() {
+  pkgdesc='Window Maker dockapp showing sunrise and sunset times'
+  url='https://www.dockapps.net/wmsun'
+  license=('GPL-2.0-or-later')
+  depends=(glibc libdockapp libx11)
+
+  cd dockapps/wmsun
+  make DESTDIR="${pkgdir}" PREFIX=/usr install
+}
+
+package_wmcalc() {
+  pkgdesc='Window Maker dockapp with a small calculator'
+  url='https://www.dockapps.net/wmcalc'
+  license=('GPL-2.0-only')
+  depends=(glibc hicolor-icon-theme libx11 libxext libxpm)
+  backup=(etc/wmcalc.conf)
+
+  cd dockapps/wmcalc
+  make DESTDIR="${pkgdir}" install
+  _x11_only_desktop
+}
+
+package_wmpager() {
+  pkgdesc='Window Maker dockapp pager to switch workspaces'
+  url='https://www.dockapps.net/wmpager'
+  license=('BSD-3-Clause')
+  depends=(glibc libx11 libxext libxpm)
+
+  cd dockapps/wmpager
+  make DESTDIR="${pkgdir}" install
+  # A licença está no README.
+  install -Dm644 README "${pkgdir}/usr/share/licenses/${pkgname}/README"
+}
+
+package_wmcpufreq() {
+  pkgdesc='Window Maker dockapp showing CPU frequency and governor (libcpupower)'
+  url='https://www.dockapps.net/wmcpufreq'
+  license=('GPL-2.0-or-later')
+  depends=(cpupower glibc libdockapp libx11)
+
+  cd dockapps/wmcpufreq
+  install -Dm755 wmcpufreq/wmcpufreq "${pkgdir}/usr/bin/wmcpufreq"
+  install -Dm644 -t "${pkgdir}/usr/share/doc/wmcpufreq" README changelog
+}
+
+package_wmglobe() {
+  pkgdesc='Window Maker dockapp showing the Earth as a rotating globe'
+  url='https://www.dockapps.net/wmglobe'
+  license=('GPL-2.0-or-later')
+  # libwraster do windowmaker deste repositório (versões de símbolo
+  # LIBWRASTER6, diferentes das do extra/windowmaker).
+  depends=(glibc libx11 libxext libxpm windowmaker)
+
+  cd dockapps/wmglobe
+  install -Dm755 src/wmglobe "${pkgdir}/usr/bin/wmglobe"
+  install -Dm644 wmglobe.1 "${pkgdir}/usr/share/man/man1/wmglobe.1"
+  # Mapa alternativo: wmglobe -map /usr/share/wmglobe/wmgmap.jpeg
+  install -Dm644 wmgmap.jpeg "${pkgdir}/usr/share/wmglobe/wmgmap.jpeg"
+  install -Dm644 -t "${pkgdir}/usr/share/doc/wmglobe" CHANGES README
+}
+
+package_wmweather() {
+  pkgdesc='Window Maker dockapp showing the current weather (METAR) of an airport'
+  url='https://www.dockapps.net/wmweather'
+  license=('GPL-2.0-or-later')
+  depends=(curl glibc libx11 libxext libxpm)
+  optdepends=('xorg-xmessage: boletim completo ao clicar no dockapp')
+  backup=(etc/wmweather.conf)
+
+  cd "wmweather-${_wmweather_ver}/src"
+  make DESTDIR="${pkgdir}" install
+  install -Dm644 -t "${pkgdir}/usr/share/doc/wmweather" ../CHANGES ../README
 }

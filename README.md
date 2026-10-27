@@ -22,7 +22,7 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
 |---|---|---|---|
 | [`windowmaker/`](windowmaker/PKGBUILD) | `windowmaker` | `0.96.0.r130.g558e67f` | `master` do [window-maker/wmaker](https://github.com/window-maker/wmaker) fixado no commit `558e67f`. Substitui o `extra/windowmaker 0.96.0`. |
 | [`wlmaker/`](wlmaker/PKGBUILD) | `wlmaker` | `1:0.8.r80.g7481afe` | `main` (desenvolvimento da 0.9) do [phkaeser/wlmaker](https://github.com/phkaeser/wlmaker) fixado no commit `7481afe`, com 51 patches da branch `big-wm/protocols` do [fork](https://github.com/big-windowmaker/wlmaker), XWayland, contra `wlroots0.20`. |
-| [`big-dockapps/`](big-dockapps/PKGBUILD) | `libdockapp`, `wmcpuload`, `wmbattery`, `wmusic`, `wmshutdown`, `wmmoonclock`, `wmcube`, `wmudmount`, `wmnet`, `wmclock`, `wmmemload`, `wmsystemtray`, `pclock`, `wmwifi`, `minidock`, `minicontrol`, `wmapmload`, `mountapp` | `20260412` | [window-maker/dockapps](https://github.com/window-maker/dockapps) fixado no commit `251e851`; `wmudmount` (3.0), `wmsystemtray` (1.4) e `mountapp` (3.0) vêm dos tarballs do SourceForge; `minidock` (1.9) e `minicontrol` (0.2) da Zenwalk; `wmapmload` (0.3.4) do site do autor. |
+| [`big-dockapps/`](big-dockapps/PKGBUILD) | `libdockapp`, `wmcpuload`, `wmbattery`, `wmusic`, `wmshutdown`, `wmmoonclock`, `wmcube`, `wmudmount`, `wmnet`, `wmclock`, `wmmemload`, `wmsystemtray`, `pclock`, `wmwifi`, `minidock`, `minicontrol`, `wmapmload`, `mountapp`, `wmcalclock`, `wmtime`, `wmclockmon`, `wmtz`, `wmtop`, `wmfsm`, `wmmon`, `wmcliphist`, `wmgtemp`, `wmsun`, `wmcalc`, `wmpager`, `wmcpufreq`, `wmglobe`, `wmweather` | `20260412` | [window-maker/dockapps](https://github.com/window-maker/dockapps) fixado no commit `251e851`; `wmudmount` (3.0), `wmsystemtray` (1.4) e `mountapp` (3.0) vêm dos tarballs do SourceForge; `minidock` (1.9) e `minicontrol` (0.2) da Zenwalk; `wmapmload` (0.3.4) do site do autor; `wmweather` (2.4.8) do tarball da Debian. |
 | [`biglinux-livecd/`](biglinux-livecd/PKGBUILD) | `biglinux-livecd` | `26.10.26` | **Temporário**, só para as ISOs de teste: branch `window-maker` de [big-windowmaker/biglinux-livecd](https://github.com/big-windowmaker/biglinux-livecd), com o suporte à sessão live do Window Maker proposto ao upstream. Sai daqui quando a mudança estiver no `biglinux-stable`. |
 | [`gtk-nocsd/`](gtk-nocsd/PKGBUILD) | `gtk-nocsd` | `4.8` | Release 4.8 do [MorsMortium/gtk-nocsd](https://codeberg.org/MorsMortium/gtk-nocsd) (Codeberg). Tira a CSD das janelas GTK 3/4 e libadwaita; carregado pela sessão X11 do big-wm. |
 | [`onestepback-gtk-theme/`](onestepback-gtk-theme/PKGBUILD) | `onestepback-gtk-theme` | `0.997` | Zip da 0.997 do [site do autor](http://www.vide.memoire.free.fr/pages/onestepback/onestepback.php). Tema GTK 2/3/4 NeXTSTEP da sessão (`GTK_THEME` no big-wm), com dois ajustes no `gtk-4.0`. |
@@ -106,6 +106,26 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
   comandos padrão de `minidock` e `minicontrol` (`big-wm-open`, `WPrefs`,
   `systemctl poweroff`) ficam em `minidock.cf` e `minicontrol.cf`, fora dos
   patches.
+  A segunda leva (`wmcalclock`, `wmtime`, `wmclockmon`, `wmtz`, `wmtop`,
+  `wmfsm`, `wmmon`, `wmcliphist`, `wmgtemp`, `wmsun`, `wmcalc`, `wmpager`,
+  `wmcpufreq`, `wmglobe` e `wmweather`) traz os dockapps mais conhecidos que
+  faltavam: relógios e calendário, relógio mundial, processos, discos,
+  temperatura, área de transferência, calculadora, paginador, frequência da
+  CPU, globo e clima. Só três levam patch: `wmcpufreq` passa da
+  `libcpufreq` (que não existe mais) para a `libcpupower` do `cpupower`,
+  `wmglobe` compila com `-Werror=format-security` e `wmweather` passa `long`
+  ao `curl_easy_setopt()`. O `wmglobe` liga na
+  `libwraster`, cujas versões de símbolo diferem entre o nosso `windowmaker`
+  e o do Manjaro: por isso o diretório tem `.ci-localdeps` com `windowmaker`.
+  O `/etc/wmtzrc` do `wmtz` (arquivo `wmtzrc`) mostra UTC, Brasília, Lisboa,
+  Nova York e Tóquio no lugar das datas julianas do upstream. Precisam de
+  configuração ou de hardware: `wmweather` (código ICAO do aeroporto, ex.
+  `wmweather -s SBGR -m`, e rede), `wmsun` (`-lat`/`-lon`, longitude
+  positiva a oeste) e `wmcpufreq` (driver cpufreq: não abre em VM sem ele).
+  O `wmusic` leva um patch próprio: segue o player MPRIS que está tocando (o
+  primeiro da lista, muitas vezes o Firefox parado, escondia o player de
+  verdade) e não congela mais quando o comando do player (`-c`, `xmms` por
+  padrão) não abre um player MPRIS.
 - **biglinux-livecd**: as dependências de execução só existem nos
   repositórios BigLinux, então o diretório tem `.ci-nodeps`: o CI compila sem
   resolver dependências e pula o teste de instalação.

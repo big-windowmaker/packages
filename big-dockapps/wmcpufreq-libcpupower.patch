@@ -1,0 +1,109 @@
+wmcpufreq: usa a libcpupower no lugar da libcpufreq e não lê argv além do fim
+
+A libcpufreq (cpufrequtils) não existe mais nos repositórios; a sucessora é
+a libcpupower, do pacote cpupower, com a mesma API exceto
+cpufreq_cpu_exists(), reimplementada aqui (mesmo contrato: 0 se a CPU tem
+/sys/devices/system/cpu/cpuN/cpufreq). Também:
+- o laço das opções ia até argv[argc] (NULL) e lia argv[i+1] sem conferir:
+  qualquer opção na linha de comando derrubava o programa (SIGSEGV);
+- cpufreq_get_policy() pode devolver NULL (CPU sem política) e era
+  desreferenciado; governor e driver usam snprintf no lugar de strcpy em
+  buffers de 20 bytes, e começam zerados (o desenho lê sempre 8 caracteres).
+
+Upstream: window-maker/dockapps (wmcpufreq), ainda sem PR; enviar para wmaker-dev.
+
+diff --git a/wmcpufreq/wmcpufreq/Makefile b/wmcpufreq/wmcpufreq/Makefile
+index 226089b..13c8731 100644
+--- a/wmcpufreq/wmcpufreq/Makefile
++++ b/wmcpufreq/wmcpufreq/Makefile
+@@ -3,7 +3,7 @@ CFLAGS = -O2 -Wall
+ INCDIR = -I/usr/X11R6/include
+ DESTDIR= /usr/local/
+ LIBDIR = -L/usr/X11R6/lib
+-LIBS   = -lXpm -lX11 -lXext -lcpufreq -ldockapp
++LIBS   = -lXpm -lX11 -lXext -lcpupower -ldockapp
+ OBJS   = wmcpufreq.o
+ 
+ .c.o:
+diff --git a/wmcpufreq/wmcpufreq/wmcpufreq.c b/wmcpufreq/wmcpufreq/wmcpufreq.c
+index 70d283a..8b3c4e9 100644
+--- a/wmcpufreq/wmcpufreq/wmcpufreq.c
++++ b/wmcpufreq/wmcpufreq/wmcpufreq.c
+@@ -56,6 +56,15 @@ static char **wm_xpm;
+ static unsigned char *wm_bits;
+ struct cpufreq_policy *policy;
+ int cpu=0;
++
++/* libcpufreq had cpufreq_cpu_exists(); its successor libcpupower does not.
++ * Same contract: 0 when the CPU has a cpufreq directory in sysfs. */
++static int cpufreq_cpu_exists(unsigned int cpu)
++{
++   char path[64];
++   snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%u/cpufreq", cpu);
++   return access(path, F_OK) == 0 ? 0 : -1;
++}
+ unsigned long min,max,f_min,f_max;
+ int main(int argc, char *argv[])
+ {
+@@ -64,8 +73,8 @@ int main(int argc, char *argv[])
+    int idcpu;
+    unsigned long freq[8];
+    XEvent event;
+-   char gov[20];
+-   char drv[20],*ptr,*endptr;
++   char gov[20] = "";
++   char drv[20] = "",*ptr,*endptr;
+    char prg[LN_PATH];
+    ts.tv_sec=0;
+    ts.tv_nsec=DELAY;
+@@ -76,20 +85,20 @@ int main(int argc, char *argv[])
+      freq[i]=0;
+    if(argc >1)
+      {
+-	for (i=1; i<=argc; i++)
++	for (i=1; i<argc; i++)
+ 	  {
+ 	     if (!strcmp(argv[i], "-v"))
+ 	       {
+ 		  printf(WMCPUFREQ_VERSION);
+ 		  exit(0);
+ 	       }
+-	     if (!strcmp(argv[i], "-exe"))
++	     if (!strcmp(argv[i], "-exe") && i+1 < argc)
+ 	       {
+ 		  if(strlen(argv[i+1]) < LN_PATH )
+ 		    strcpy(prg,argv[i+1]);
+ 		  break;
+ 	       }
+-	     if (!strcmp(argv[i], "-cpuid"))
++	     if (!strcmp(argv[i], "-cpuid") && i+1 < argc)
+ 	       {
+ 		 if(strlen(argv[i+1]) < LN_PATH )
+ 		   idcpu=strtol(argv[i+1],&endptr,0);
+@@ -115,7 +124,7 @@ int main(int argc, char *argv[])
+ 	printf("no driver found \n");
+ 	exit(-1);
+      }
+-   strcpy(drv,ptr);
++   snprintf(drv, sizeof(drv), "%s", ptr);
+    cpufreq_put_driver(ptr);
+ 
+ 
+@@ -193,10 +202,13 @@ int main(int argc, char *argv[])
+ 	for(i=0;i<=ncpu;i++)
+ 	  freq[i]=cpufreq_get_freq_kernel(i+idcpu);
+ 	policy=cpufreq_get_policy(cpu);
+-	strcpy(gov,policy->governor);
+-	max=policy->max;
+-	min=policy->min;
+-	cpufreq_put_policy(policy);
++	if (policy)
++	  {
++	     snprintf(gov, sizeof(gov), "%s", policy->governor);
++	     max=policy->max;
++	     min=policy->min;
++	     cpufreq_put_policy(policy);
++	  }
+ 	/* show info */
+ 	show_mhz(freq,ncpu);
+ 	if (ncpu==0)

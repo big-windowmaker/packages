@@ -1,0 +1,23 @@
+# wmtz do Big WindowMaker: relógio mundial. Para mudar, copie este arquivo
+# para ~/.wmtzrc (o "CONFIG" do menu do wmtz abre o arquivo em uso no editor
+# de $XEDITOR, ou xedit). Opções e outros modos (JDN, GMST, @): man wmtz.
+#
+# timeN = rótulo de até 3 letras, com utdiffN = diferença em horas para o
+# UTC, negativa a leste de Greenwich (ex.: -9 para o Japão), sem horário de
+# verão; ou TZONE, com utdiffN = string TZ do POSIX (man tzset), que segue o
+# horário de verão e dá o rótulo mostrado.
+time1=UTC
+time2=TZONE
+time3=TZONE
+time4=TZONE
+time5=TZONE
+
+# UTC; Brasília (sem horário de verão desde 2019); Lisboa; Nova York; Tóquio.
+utdiff1=0
+utdiff2=BRT3
+utdiff3=WET0WEST,M3.5.0/1,M10.5.0
+utdiff4=EST5EDT,M3.2.0,M11.1.0
+utdiff5=JST-9
+
+# Longitude em graus decimais, positiva a leste (só para LMST).
+longitude=-46.6
