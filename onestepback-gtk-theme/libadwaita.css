@@ -1,0 +1,118 @@
+
+/**********************************************/
+/* Big WindowMaker: cores do libadwaita       */
+/**********************************************/
+
+/* Com GTK_THEME definido o libadwaita não carrega a folha de estilo dele,
+ * e com ela somem as cores nomeadas (@window_bg_color, @view_bg_color...)
+ * e as variáveis (--window-bg-color...) que os aplicativos usam no próprio
+ * CSS. Uma cor indefinida vira transparente: o Big Audio Player, o Big
+ * Video Player e o Big Recorder (window.background { background-color:
+ * @window_bg_color }) abriam com o fundo todo transparente. Aqui elas
+ * ganham os cinzas do OneStepBack.
+ *
+ * text_view_bg continua sem definição de propósito: o fundo do VTE usa
+ * essa cor, e sem ela os terminais (AshyTerm) seguem translúcidos. */
+
+@define-color accent_bg_color @scale_color;
+@define-color accent_fg_color @white_color;
+@define-color accent_color shade(@scale_color,0.8);
+@define-color destructive_bg_color #c01c28;
+@define-color destructive_fg_color @white_color;
+@define-color destructive_color #a51d2d;
+@define-color success_bg_color #26a269;
+@define-color success_fg_color @white_color;
+@define-color success_color #1b6e45;
+@define-color warning_bg_color #e5a50a;
+@define-color warning_fg_color alpha(@black_color,0.8);
+@define-color warning_color #7d5a00;
+@define-color error_bg_color #c01c28;
+@define-color error_fg_color @white_color;
+@define-color error_color #a51d2d;
+
+@define-color window_bg_color @base_color;
+@define-color window_fg_color @black_color;
+@define-color view_bg_color @lighter_color;
+@define-color view_fg_color @black_color;
+/* headerbar_bg_color já vem definido no início do tema (preto). */
+@define-color headerbar_fg_color @white_color;
+@define-color headerbar_border_color @white_color;
+@define-color headerbar_backdrop_color @headerbar_bg_color;
+@define-color headerbar_shade_color alpha(@black_color,0.36);
+@define-color headerbar_darker_shade_color alpha(@black_color,0.9);
+@define-color sidebar_bg_color shade(@base_color,1.1);
+@define-color sidebar_fg_color @black_color;
+@define-color sidebar_backdrop_color @sidebar_bg_color;
+@define-color sidebar_shade_color alpha(@black_color,0.15);
+@define-color sidebar_border_color @darker_color;
+@define-color secondary_sidebar_bg_color shade(@base_color,1.05);
+@define-color secondary_sidebar_fg_color @black_color;
+@define-color secondary_sidebar_backdrop_color @secondary_sidebar_bg_color;
+@define-color secondary_sidebar_shade_color alpha(@black_color,0.15);
+@define-color secondary_sidebar_border_color @darker_color;
+@define-color card_bg_color @lighter_color;
+@define-color card_fg_color @black_color;
+@define-color card_shade_color alpha(@black_color,0.15);
+@define-color dialog_bg_color @base_color;
+@define-color dialog_fg_color @black_color;
+@define-color popover_bg_color @base_color;
+@define-color popover_fg_color @black_color;
+@define-color popover_shade_color alpha(@black_color,0.25);
+@define-color thumbnail_bg_color @lighter_color;
+@define-color thumbnail_fg_color @black_color;
+@define-color shade_color alpha(@black_color,0.15);
+@define-color scrollbar_outline_color @white_color;
+
+:root {
+    --accent-bg-color: @accent_bg_color;
+    --accent-fg-color: @accent_fg_color;
+    --accent-color: @accent_color;
+    --destructive-bg-color: @destructive_bg_color;
+    --destructive-fg-color: @destructive_fg_color;
+    --destructive-color: @destructive_color;
+    --success-bg-color: @success_bg_color;
+    --success-fg-color: @success_fg_color;
+    --success-color: @success_color;
+    --warning-bg-color: @warning_bg_color;
+    --warning-fg-color: @warning_fg_color;
+    --warning-color: @warning_color;
+    --error-bg-color: @error_bg_color;
+    --error-fg-color: @error_fg_color;
+    --error-color: @error_color;
+    --window-bg-color: @window_bg_color;
+    --window-fg-color: @window_fg_color;
+    --view-bg-color: @view_bg_color;
+    --view-fg-color: @view_fg_color;
+    --headerbar-bg-color: @headerbar_bg_color;
+    --headerbar-fg-color: @headerbar_fg_color;
+    --headerbar-border-color: @headerbar_border_color;
+    --headerbar-backdrop-color: @headerbar_backdrop_color;
+    --headerbar-shade-color: @headerbar_shade_color;
+    --headerbar-darker-shade-color: @headerbar_darker_shade_color;
+    --sidebar-bg-color: @sidebar_bg_color;
+    --sidebar-fg-color: @sidebar_fg_color;
+    --sidebar-backdrop-color: @sidebar_backdrop_color;
+    --sidebar-border-color: @sidebar_border_color;
+    --sidebar-shade-color: @sidebar_shade_color;
+    --secondary-sidebar-bg-color: @secondary_sidebar_bg_color;
+    --secondary-sidebar-fg-color: @secondary_sidebar_fg_color;
+    --secondary-sidebar-backdrop-color: @secondary_sidebar_backdrop_color;
+    --secondary-sidebar-border-color: @secondary_sidebar_border_color;
+    --secondary-sidebar-shade-color: @secondary_sidebar_shade_color;
+    --card-bg-color: @card_bg_color;
+    --card-fg-color: @card_fg_color;
+    --card-shade-color: @card_shade_color;
+    --dialog-bg-color: @dialog_bg_color;
+    --dialog-fg-color: @dialog_fg_color;
+    --popover-bg-color: @popover_bg_color;
+    --popover-fg-color: @popover_fg_color;
+    --popover-shade-color: @popover_shade_color;
+    --thumbnail-bg-color: @thumbnail_bg_color;
+    --thumbnail-fg-color: @thumbnail_fg_color;
+    --shade-color: @shade_color;
+    --scrollbar-outline-color: @scrollbar_outline_color;
+    --border-opacity: 15%;
+    --dim-opacity: 55%;
+    --disabled-opacity: 50%;
+    --border-color: color-mix(in srgb, currentColor var(--border-opacity), transparent);
+}
