@@ -1,0 +1,294 @@
+
+/**********************************************/
+/* Big WindowMaker: classes do libadwaita     */
+/**********************************************/
+
+/* Com GTK_THEME definido o libadwaita não carrega a folha de estilo dele, e
+ * as classes que só ele desenha (cartões, listas em caixa, botões pílula e
+ * de ação, barra lateral de navegação, página de status, grupos de
+ * preferências, avisos, OSD, títulos) ficavam sem desenho nenhum: o
+ * instalador do BigLinux perdia os cartões e os títulos. Aqui elas ganham o
+ * relevo do NeXTSTEP com as cores do tema (luz em cima e à esquerda, sombra
+ * embaixo e à direita, cantos retos). Só nomes de cor do tema: o
+ * OneStepBack-Dark troca as cores e o desenho continua o mesmo. */
+
+/* Títulos e textos */
+
+.large-title {
+    font-size: 26pt;
+    font-weight: 300;
+}
+
+.title-1 {
+    font-size: 20pt;
+    font-weight: 800;
+}
+
+.title-2 {
+    font-size: 15pt;
+    font-weight: 800;
+}
+
+.title-3 {
+    font-size: 15pt;
+    font-weight: 700;
+}
+
+.title-4 {
+    font-size: 13pt;
+    font-weight: 700;
+}
+
+.heading {
+    font-weight: 700;
+}
+
+.caption-heading {
+    font-size: 9pt;
+    font-weight: 700;
+}
+
+.caption {
+    font-size: 9pt;
+}
+
+.monospace {
+    font-family: monospace;
+}
+
+.numeric {
+    font-feature-settings: "tnum";
+}
+
+.dim-label {
+    opacity: 0.6;
+}
+
+.accent {
+    color: @accent_color;
+}
+
+label.success {
+    color: @success_color;
+}
+
+label.warning {
+    color: @warning_color;
+}
+
+label.error {
+    color: @error_color;
+}
+
+/* Cartões: um painel em relevo, como os botões do tema */
+
+.card {
+    background-color: @base_color;
+    color: @theme_fg_color;
+    border-radius: 0;
+    border-left: 1px solid @outset_lighter_color;
+    border-top: 1px solid @outset_lighter_color;
+    border-right: 2px solid @outset_darker_color;
+    border-bottom: 2px solid @outset_darker_color;
+}
+
+.card.activatable:hover, button.card:hover {
+    background-color: shade(@base_color, 1.06);
+}
+
+.card.activatable:active, button.card:active, button.card:checked {
+    background-color: @darker_color;
+    border-left: 2px solid @inset_darker_color;
+    border-top: 2px solid @inset_darker_color;
+    border-right: 1px solid @inset_lighter_color;
+    border-bottom: 1px solid @inset_lighter_color;
+}
+
+.frame {
+    border-left: 2px solid @inset_darker_color;
+    border-top: 2px solid @inset_darker_color;
+    border-right: 1px solid @inset_lighter_color;
+    border-bottom: 1px solid @inset_lighter_color;
+}
+
+.view {
+    background-color: @lighter_color;
+    color: @theme_fg_color;
+}
+
+/* Botões */
+
+button.pill {
+    padding: 8px 28px;
+    border-radius: 0;
+}
+
+/* Botão padrão do NeXTSTEP: o texto em negrito e um filete preto em volta. */
+button.suggested-action, button.default {
+    font-weight: bold;
+    box-shadow: 0 0 0 1px @black_color;
+}
+
+button.destructive-action {
+    font-weight: bold;
+    color: @destructive_color;
+}
+
+button.flat {
+    background-color: transparent;
+    border-color: transparent;
+}
+
+button.flat:hover {
+    border-left-color: @outset_lighter_color;
+    border-top-color: @outset_lighter_color;
+    border-right-color: @outset_darker_color;
+    border-bottom-color: @outset_darker_color;
+}
+
+button.flat:active, button.flat:checked {
+    background-color: @darker_color;
+    border-left-color: @inset_darker_color;
+    border-top-color: @inset_darker_color;
+    border-right-color: @inset_lighter_color;
+    border-bottom-color: @inset_lighter_color;
+}
+
+/* Na barra preta (headerbar) os botões seguem como o tema os desenha. */
+headerbar button.flat, headerbar button.flat:hover {
+    border: none;
+}
+
+/* Listas em caixa (Adw.PreferencesGroup, Adw.ActionRow) */
+
+list.boxed-list, list.content {
+    background-color: @lighter_color;
+    padding: 0;
+    border-left: 1px solid @outset_lighter_color;
+    border-top: 1px solid @outset_lighter_color;
+    border-right: 2px solid @outset_darker_color;
+    border-bottom: 2px solid @outset_darker_color;
+}
+
+list.boxed-list > row, list.content > row {
+    padding: 6px 10px;
+    border-bottom: 1px solid @darker_color;
+}
+
+list.boxed-list > row:last-child, list.content > row:last-child {
+    border-bottom: none;
+}
+
+list.boxed-list-separate {
+    background-color: transparent;
+    padding: 0;
+    border: none;
+}
+
+list.boxed-list-separate > row {
+    background-color: @lighter_color;
+    margin-bottom: 6px;
+    padding: 6px 10px;
+    border-left: 1px solid @outset_lighter_color;
+    border-top: 1px solid @outset_lighter_color;
+    border-right: 2px solid @outset_darker_color;
+    border-bottom: 2px solid @outset_darker_color;
+}
+
+row.activatable:hover {
+    background-color: shade(@lighter_color, 1.05);
+}
+
+row.activatable:active {
+    background-color: @listitem_selected_bg_color;
+    color: @listitem_selected_fg_color;
+}
+
+row .subtitle {
+    font-size: 9pt;
+    opacity: 0.7;
+}
+
+/* Barra lateral de navegação */
+
+list.navigation-sidebar {
+    background-color: @base_color;
+    padding: 3px;
+    border: none;
+}
+
+list.navigation-sidebar > row {
+    background-color: transparent;
+    padding: 6px 8px;
+}
+
+list.navigation-sidebar > row:selected {
+    background-color: @listitem_selected_bg_color;
+    color: @listitem_selected_fg_color;
+}
+
+/* Página de status e páginas de preferências */
+
+/* Caminho completo: uma página de status costuma conter listas, e os títulos
+ * e ícones das linhas dela não podem crescer junto. */
+statuspage > scrolledwindow > viewport > box > clamp > box > .icon {
+    -gtk-icon-size: 128px;
+    opacity: 0.6;
+    margin-bottom: 24px;
+}
+
+statuspage > scrolledwindow > viewport > box > clamp > box > .title {
+    font-size: 20pt;
+    font-weight: 800;
+}
+
+statuspage > scrolledwindow > viewport > box > clamp > box > .description {
+    opacity: 0.7;
+}
+
+preferencespage > scrolledwindow > viewport > clamp > box {
+    margin: 24px 12px;
+    border-spacing: 24px;
+}
+
+preferencesgroup > box > box.header {
+    margin-bottom: 6px;
+}
+
+preferencesgroup > box > box.header label.title {
+    font-weight: 700;
+}
+
+preferencesgroup > box > box.header label.description {
+    opacity: 0.7;
+}
+
+/* Barras do Adw.ToolbarView */
+
+toolbarview > .top-bar, toolbarview > .bottom-bar {
+    background-color: @base_color;
+}
+
+.toolbar {
+    padding: 4px;
+    border-spacing: 4px;
+}
+
+/* Avisos (Adw.Toast): um painel com filete preto e sombra reta */
+
+toast {
+    background-color: @base_color;
+    color: @theme_fg_color;
+    margin: 12px;
+    padding: 6px 6px 6px 12px;
+    border-radius: 0;
+    border: 1px solid @black_color;
+    box-shadow: 4px 4px 0 alpha(@black_color, 0.35);
+}
+
+/* Controles sobre vídeo e imagem */
+
+.osd {
+    background-color: alpha(@black_color, 0.8);
+    color: @white_color;
+}

@@ -14,7 +14,7 @@
 pkgname=onestepback-gtk-theme
 _name=OneStepBack
 pkgver=0.997
-pkgrel=4
+pkgrel=5
 pkgdesc='GTK 2/3/4 theme with the embossed gray look of NeXTSTEP (light and dark)'
 arch=(any)
 url='http://www.vide.memoire.free.fr/pages/onestepback/onestepback.php'
@@ -23,14 +23,16 @@ optdepends=('gtk-engine-murrine: GTK 2 applications')
 makedepends=('imagemagick')
 source=("http://www.vide.memoire.free.fr/pages/onestepback/${_name}-v${pkgver}.zip"
         libadwaita.css
+        libadwaita-widgets.css
         dark.sed
         dark-gtk2.sed
         dark.css)
 sha256sums=('b81ea97e74e430a78fef5ac0be7d6894925e08bf38db6d944f9bb11bbdaccb01'
             'bf04110932c2bee712c92c764bd9464f265e932eb3b53d357ed93bc2ece437a2'
+            '0c7306c74967a4b6a7d5c70c4dae6423dd5602b7d0fd9866077e51f63e62f319'
             '9dbd8987e3efc34653e78f2cedff2cd526b392ae05ef15e5bbacd72e71e74a39'
             '6e0125d370b9aee537fdd8e1f22844f1df8e7b6c8c8e4eb8ff46ba9b84a2945c'
-            '69d4ba2c166003aab3f64715f026be2e2465daf6a8c9fbee7e06b0a2f5bf03c8')
+            '9d40c5ad3b53e3bb08e9b1f81f4bdae397302f39a0cae5986363f1fb8ecf6c29')
 
 # Terminais GTK 4 (VTE) transparentes, como o AshyTerm: o VTE pinta o fundo
 # do widget com @text_view_bg numa folha de estilo própria, de prioridade
@@ -49,6 +51,14 @@ sha256sums=('b81ea97e74e430a78fef5ac0be7d6894925e08bf38db6d944f9bb11bbdaccb01'
 # como transparente. O libadwaita.css acrescenta ao gtk-4.0 essas cores e as
 # variáveis --*-color com os cinzas do OneStepBack. Nenhuma regra do tema
 # usa esses nomes, então o resto da aparência não muda.
+#
+# Classes que só o libadwaita desenha (.card, .boxed-list, .pill,
+# .suggested-action, .destructive-action, .navigation-sidebar, página de
+# status, grupos de preferências, avisos, .osd, .title-1...): sem a folha de
+# estilo dele ficavam sem desenho, e o instalador do BigLinux perdia os
+# cartões. O libadwaita-widgets.css as desenha com o relevo do tema e só
+# com nomes de cor, então o OneStepBack-Dark (gerado depois, em build())
+# as recebe já escuras.
 prepare() {
   cd "${_name}"
   sed -i '/^@define-color text_view_bg /d' gtk-4.0/gtk.css
@@ -63,7 +73,7 @@ prepare() {
       return 1
     fi
   done
-  cat "${srcdir}/libadwaita.css" >> gtk-4.0/gtk.css
+  cat "${srcdir}/libadwaita.css" "${srcdir}/libadwaita-widgets.css" >> gtk-4.0/gtk.css
   if grep -Eq '@define-color[[:space:]]+text_view_bg' gtk-4.0/gtk.css; then
     return 1
   fi
@@ -123,6 +133,15 @@ check() {
   # Seta preta do tema claro clara no escuro; fundo da barra escuro.
   [[ $(magick "${dark}/img/arrow-down.png" -format '%[fx:int(255*maxima.r)]' info:) -ge 200 ]]
   [[ $(magick "${dark}/img/scrollbar_vertical.png" -format '%[fx:int(255*mean.r)]' info:) -le 90 ]]
+  # Classes do libadwaita nas duas variações; o gtk-3.0 não as recebe.
+  local theme
+  for theme in "${srcdir}/${_name}" "${dark}"; do
+    grep -q '^/\* Big WindowMaker: classes do libadwaita' "${theme}/gtk-4.0/gtk.css"
+    grep -qx '\.card {' "${theme}/gtk-4.0/gtk.css"
+    grep -qx 'list\.boxed-list, list\.content {' "${theme}/gtk-4.0/gtk.css"
+    ! grep -q 'classes do libadwaita' "${theme}/gtk-3.0/gtk.css"
+  done
+  grep -qx '    color: #ff8a8a;' "${dark}/gtk-4.0/gtk.css"
   # O tema claro continua como era.
   grep -qx '@define-color base_color #a8a8a8;' "${srcdir}/${_name}/gtk-3.0/gtk.css"
 }
