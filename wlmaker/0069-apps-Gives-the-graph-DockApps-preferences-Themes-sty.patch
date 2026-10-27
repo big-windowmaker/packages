@@ -1,0 +1,979 @@
+From 28a8ea85cdecc62ec2f66e54ff86f71587722b53 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 02:57:20 -0300
+Subject: [PATCH 69/73] apps: Gives the graph DockApps preferences: Themes,
+ style, label, click.
+
+wlm_graph_shared reads the preferences file of wlmcpugraph, wlmmemgraph and
+wlmnetgraph, watches it, and applies changes right away, clearing the graph:
+- Theme: The shared color themes (a gradient, line and background), or the
+  graph's own colors.
+- Interval: Seconds between updates; --interval remains the default.
+- GraphStyle: Filled, or just the line.
+- ShowLabel: Whether to show the label.
+- ClickCommand: Runs on a left click, eg. a task manager.
+The label may have several lines. A graph of a single value is colored by
+height, like a level meter.
+
+And their own:
+- wlmcpugraph: Cores (each core's usage, or the total), and a label with the
+  total usage in percent, hidden by default.
+- wlmmemgraph: Units (MB/GB, or percent), ShowSwap (a second line).
+- wlmnetgraph: Interface (all, or one), Label (the scale, or the download
+  and upload rates), Units (bytes, or bits per second).
+---
+ apps/CMakeLists.txt     |   1 +
+ apps/wlm_graph_shared.c | 250 +++++++++++++++++++++++++++++++---------
+ apps/wlm_graph_shared.h |  27 ++++-
+ apps/wlmcpugraph.c      |  66 +++++++++--
+ apps/wlmmemgraph.c      |  56 ++++++++-
+ apps/wlmnetgraph.c      | 123 +++++++++++++++++++-
+ 6 files changed, 452 insertions(+), 71 deletions(-)
+
+diff --git a/apps/CMakeLists.txt b/apps/CMakeLists.txt
+index 2005ba7..430d7a6 100644
+--- a/apps/CMakeLists.txt
++++ b/apps/CMakeLists.txt
+@@ -40,6 +40,7 @@ add_library(wlm_graph_shared STATIC wlm_graph_shared.c)
+ target_include_directories(wlm_graph_shared PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+ target_link_libraries(
+   wlm_graph_shared
++  wlm_settings
+   wlmclient_lib
+   primitives)
+ if(iwyu_path_and_options)
+diff --git a/apps/wlm_graph_shared.c b/apps/wlm_graph_shared.c
+index 7fd216d..aab3763 100644
+--- a/apps/wlm_graph_shared.c
++++ b/apps/wlm_graph_shared.c
+@@ -31,7 +31,9 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <linux/input-event-codes.h>
+ #include <wayland-client-core.h>
++#include <wayland-util.h>
+ #include <wlclient/wlclient.h>
+ 
+ #include "wlclient/icon.h"
+@@ -84,6 +86,10 @@ typedef struct {
+     uint32_t pixel_lut[256];
+     /** Pixel color for the line (top of usage). */
+     uint32_t pixel_line;
++    /** Pixel color of the background. */
++    uint32_t pixel_background;
++    /** Whether to draw only the line, without filling below it. */
++    bool line_only;
+     /**
+      * Scratch buffer for per-row counts during rendering.
+      *
+@@ -153,6 +159,8 @@ typedef struct {
+     wlm_graph_font_spec_t font;
+     /** Whether to show label. True implies label_fn is set. */
+     bool show_label;
++    /** Command to run on a left click. Empty for none. */
++    const char *click_command_ptr;
+ } wlm_graph_prefs_t;
+ 
+ /**
+@@ -163,8 +171,16 @@ typedef struct {
+ typedef struct {
+     /** Pointer to the common graph state. */
+     wlm_graph_state_t *graph_state;
+-    /** User preferences (immutable). */
+-    const wlm_graph_prefs_t *prefs;
++    /** User preferences: From the commandline, and the preferences file. */
++    wlm_graph_prefs_t *prefs;
++    /** The preferences from the commandline. */
++    const wlm_graph_prefs_t *arg_prefs;
++    /** Preferences file. */
++    wlm_settings_t *settings_ptr;
++    /** Counts preference changes: A timer of an earlier generation expires. */
++    uintptr_t timer_generation;
++    /** Listener for @ref wlmcl_client_events::pointer_button. */
++    struct wl_listener pointer_button_listener;
+     /** Icon handle. */
+     wlmcl_icon_t *icon_ptr;
+     /** Application configuration. */
+@@ -206,7 +222,8 @@ static void _wlm_graph_peak_connector_draw_between(
+ static void _wlm_graph_fill_columns_black(
+     uint32_t *graph_pixels,
+     const uint32_t graph_size[2],
+-    const uint32_t column_end);
++    const uint32_t column_end,
++    const uint32_t color);
+ static void _wlm_graph_scroll_left(
+     uint32_t *graph_pixels,
+     const uint32_t graph_size[2],
+@@ -581,12 +598,12 @@ static void _wlm_graph_rebuild_from_samples(
+     const uint32_t *graph_size = graph_state->graph_size;
+ 
+     if (NULL == graph_state->sample_current || 0 == graph_state->sample_current->values.num) {
+-        // No samples captured yet, fill with black.
++        // No samples captured yet, fill with the background.
+         graph_state->y_min = graph_size[1];
+         graph_state->y_min_prev = graph_size[1];
+         graph_state->sample_peak = NULL;
+         for (uint32_t i = 0; i < graph_size[0] * graph_size[1]; i++) {
+-            graph_state->graph_pixels[i] = WLM_GRAPH_PIXEL_BLACK;
++            graph_state->graph_pixels[i] = graph_state->pixel_background;
+         }
+         return;
+     }
+@@ -614,9 +631,10 @@ static void _wlm_graph_rebuild_from_samples(
+         }
+     } while (0 < column && sample != graph_state->sample_current);
+ 
+-    // Fill remaining columns with black.
++    // Fill remaining columns with the background.
+     if (0 < column) {
+-        _wlm_graph_fill_columns_black(graph_state->graph_pixels, graph_size, column);
++        _wlm_graph_fill_columns_black(graph_state->graph_pixels, graph_size,
++                                      column, graph_state->pixel_background);
+     }
+ 
+     // Compute y_min/sample_peak via rescan rather than tracking inline above.
+@@ -704,24 +722,28 @@ static uint32_t _wlm_graph_column_render(
+     // Cache LUT pointer for inner loop.
+     const uint32_t * const pixel_lut = graph_state->pixel_lut;
+ 
+-    // Clear stale pixels above peak, scanning up until we hit black.
+-    // Works because non-black pixels are contiguous from y_min downward.
++    // Clear stale pixels above peak, scanning up until we hit background.
++    // Works because non-background pixels are contiguous from y_min downward.
++    // Not so for just the line: All of the column is cleared then.
++    const uint32_t bg = graph_state->pixel_background;
+     uint32_t *pixel = &pixels[(y_line * graph_size[0]) + column];
+     for (uint32_t y = y_line; y > 0; ) {
+         y--;
+         pixel -= graph_size[0];
+-        if (WLM_GRAPH_PIXEL_BLACK == *pixel) break;
+-        *pixel = WLM_GRAPH_PIXEL_BLACK;
++        if (bg == *pixel && !graph_state->line_only) break;
++        *pixel = bg;
+     }
+ 
+     // Rows from peak onwards: render intensity based on count at each row.
+     pixel = &pixels[(y_line * graph_size[0]) + column];
+     const uint32_t *row_count = &row_counts[y_line];
+     if (1 >= values_num) {
+-        // Single value: all non-zero counts use max LUT index.
+-        const uint32_t pixel_max = pixel_lut[255];
++        // Single value: Colored by height, from the LUT's low to its high
++        // end. Like a level meter.
++        const uint32_t h = BS_MAX(graph_size[1] - 1, 1U);
+         for (uint32_t y = y_line; y < graph_size[1]; y++) {
+-            *pixel = (0 < *row_count++) ? pixel_max : WLM_GRAPH_PIXEL_BLACK;
++            *pixel = (0 < *row_count++ && !graph_state->line_only) ?
++                pixel_lut[((graph_size[1] - 1 - y) * 255) / h] : bg;
+             pixel += graph_size[0];
+         }
+     } else {
+@@ -729,8 +751,8 @@ static uint32_t _wlm_graph_column_render(
+         const uint32_t divisor = values_num - 1;
+         for (uint32_t y = y_line; y < graph_size[1]; y++) {
+             const uint32_t count = *row_count++;
+-            *pixel = (0 == count) ?
+-                WLM_GRAPH_PIXEL_BLACK : pixel_lut[((count - 1) * 255) / divisor];
++            *pixel = (0 == count || graph_state->line_only) ?
++                bg : pixel_lut[((count - 1) * 255) / divisor];
+             pixel += graph_size[0];
+         }
+     }
+@@ -937,22 +959,29 @@ static void _wlm_graph_label_draw(
+         prefs->font.weight);
+     cairo_set_font_size(cairo_ptr, font_size);
+ 
+-    // Position: top-left corner, inside margin.
+-    const double x = margin_px + padding;
+-    const double y = margin_px + padding + font_size;
+-
+-    // Draw text with black outline for readability.
+-    cairo_move_to(cairo_ptr, x, y);
+-    cairo_text_path(cairo_ptr, label);
+-
+-    // Stroke outline (black).
+-    cairo_set_source_argb8888(cairo_ptr, WLM_GRAPH_PIXEL_BLACK);
+-    cairo_set_line_width(cairo_ptr, (2.0 * scale) / scale_base);
+-    cairo_stroke_preserve(cairo_ptr);
+-
+-    // Fill text (white).
+-    cairo_set_source_argb8888(cairo_ptr, WLM_GRAPH_LABEL_COLOR);
+-    cairo_fill(cairo_ptr);
++    // Position: top-left corner, inside margin. One line per '\n'.
++    char line[64];
++    double y = margin_px + padding + font_size;
++    for (const char *p = label; '\0' != *p; y += font_size + padding) {
++        size_t len = strcspn(p, "\n");
++        snprintf(line, sizeof(line), "%.*s", (int)BS_MIN(len, sizeof(line) - 1), p);
++        p += len;
++        if ('\n' == *p) p++;
++        const double x = margin_px + padding;
++
++        // Draw text with black outline for readability.
++        cairo_move_to(cairo_ptr, x, y);
++        cairo_text_path(cairo_ptr, line);
++
++        // Stroke outline (black).
++        cairo_set_source_argb8888(cairo_ptr, WLM_GRAPH_PIXEL_BLACK);
++        cairo_set_line_width(cairo_ptr, (2.0 * scale) / scale_base);
++        cairo_stroke_preserve(cairo_ptr);
++
++        // Fill text (white).
++        cairo_set_source_argb8888(cairo_ptr, WLM_GRAPH_LABEL_COLOR);
++        cairo_fill(cairo_ptr);
++    }
+ 
+     cairo_destroy(cairo_ptr);
+ }
+@@ -986,17 +1015,19 @@ static void _wlm_graph_scroll_left(
+  * @param graph_pixels      Pixel buffer to fill.
+  * @param graph_size        Graph dimensions [width, height].
+  * @param column_end        Number of columns to fill (0 to column_end-1).
++ * @param color             The background's color.
+  */
+ static void _wlm_graph_fill_columns_black(
+     uint32_t *graph_pixels,
+     const uint32_t graph_size[2],
+-    const uint32_t column_end)
++    const uint32_t column_end,
++    const uint32_t color)
+ {
+     const uint32_t width = graph_size[0];
+     uint32_t *row = graph_pixels;
+     for (uint32_t y = 0; y < graph_size[1]; y++) {
+         for (uint32_t x = 0; x < column_end; x++) {
+-            row[x] = WLM_GRAPH_PIXEL_BLACK;
++            row[x] = color;
+         }
+         row += width;
+     }
+@@ -1160,6 +1191,7 @@ static int _wlm_graph_args_parse(
+     prefs->font.weight = CAIRO_FONT_WEIGHT_NORMAL;
+     prefs->font.slant = CAIRO_FONT_SLANT_NORMAL;
+     prefs->show_label = has_label;
++    prefs->click_command_ptr = "";
+ 
+     for (int i = 1; i < argc; i++) {
+         if (0 == strcmp(argv[i], "--interval") && i + 1 < argc) {
+@@ -1402,6 +1434,101 @@ static void _wlm_graph_timer_callback(wlmcl_client_t *client_ptr, void *ud_ptr)
+         _wlm_graph_timer_callback, handle);
+ }
+ 
++/* == Preferences ========================================================== */
++
++/** Graph styles, for the `GraphStyle` preference. */
++static const char *const _wlm_graph_styles[] = { "Filled", "Line", NULL };
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Applies the preferences: The common ones, then the app's own.
++ *
++ * @param handle            Graph handle.
++ */
++static void _wlm_graph_apply_settings(wlm_graph_handle_t *handle)
++{
++    wlm_graph_state_t * const gs = handle->graph_state;
++    const wlm_graph_app_config_t * const config = handle->config;
++    wlm_settings_t * const s = handle->settings_ptr;
++
++    *handle->prefs = *handle->arg_prefs;
++    handle->prefs->interval_usec = (uint64_t)(1e6 * wlm_settings_number(
++        s, "Interval", handle->arg_prefs->interval_usec / 1e6, 0.01, 3600.0));
++    if (NULL != config->label_fn) {
++        handle->prefs->show_label = wlm_settings_bool(
++            s, "ShowLabel", handle->arg_prefs->show_label);
++    }
++    handle->prefs->click_command_ptr = wlm_settings_string(
++        s, "ClickCommand", "");
++    gs->line_only = 1 == wlm_settings_choice(
++        s, "GraphStyle", _wlm_graph_styles, 0);
++
++    // Colors: Of the theme, or the graph's own.
++    static const wlm_theme_t own = { .name_ptr = "Default" };
++    const wlm_theme_t *t = wlm_settings_theme(s, &own);
++    if (0 != t->graph_low) {
++        for (uint32_t i = 0; i < 256; i++) {
++            gs->pixel_lut[i] = WLM_GRAPH_PIXEL_BLACK |
++                wlm_theme_blend(t->graph_low, t->graph_high, i);
++        }
++        gs->pixel_line = WLM_GRAPH_PIXEL_BLACK | t->graph_line;
++        gs->pixel_background = WLM_GRAPH_PIXEL_BLACK | t->background;
++    } else {
++        if (NULL != config->pixel_lut) {
++            memcpy(gs->pixel_lut, config->pixel_lut, sizeof(gs->pixel_lut));
++            gs->pixel_line = WLM_GRAPH_PIXEL_LINE_DEFAULT;
++        } else {
++            _wlm_graph_pixel_lut_init(gs->pixel_lut, &gs->pixel_line,
++                                      handle->prefs->color_mode);
++        }
++        gs->pixel_background = WLM_GRAPH_PIXEL_BLACK;
++    }
++
++    if (NULL != config->settings_fn) config->settings_fn(config->app_state, s);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Clears the graph's history, and redraws it empty. */
++static void _wlm_graph_clear_history(wlm_graph_handle_t *handle)
++{
++    wlm_graph_state_t * const gs = handle->graph_state;
++    if (NULL == gs->samples_alloc || 0 == gs->graph_size[0]) return;
++    _wlm_graph_sample_values_free(gs->samples_alloc, gs->graph_size[0]);
++    _wlm_graph_samples_init(gs->samples_alloc, gs->graph_size[0]);
++    gs->sample_current = &gs->samples_alloc[0];
++    _wlm_graph_rebuild_from_samples(gs, handle->config->accumulate_mode);
++}
++
++/* ------------------------------------------------------------------------- */
++/** The preferences file changed: Applies it, and redraws. */
++static void _wlm_graph_handle_settings_fd(
++    __UNUSED__ wlmcl_client_t *client_ptr,
++    void *ud_ptr)
++{
++    wlm_graph_handle_t * const handle = ud_ptr;
++    if (!wlm_settings_handle_fd(handle->settings_ptr)) return;
++    _wlm_graph_apply_settings(handle);
++    _wlm_graph_clear_history(handle);
++    if (NULL != handle->dblbuf_ptr) {
++        wlmcl_dblbuf_register_ready_callback(
++            handle->dblbuf_ptr, _wlm_graph_icon_render_callback, handle);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles pointer buttons: A left click runs the configured command. */
++static void _wlm_graph_handle_pointer_button(
++    struct wl_listener *listener_ptr,
++    void *data_ptr)
++{
++    wlm_graph_handle_t * const handle = BS_CONTAINER_OF(
++        listener_ptr, wlm_graph_handle_t, pointer_button_listener);
++    struct wlmcl_client_pointer_button_event *event_ptr = data_ptr;
++    if (event_ptr->wl_surface_ptr != wlmcl_icon_wl_surface(handle->icon_ptr) ||
++        BTN_LEFT != event_ptr->button || !event_ptr->pressed) return;
++    wlm_settings_spawn(handle->prefs->click_command_ptr);
++}
++
+ /* == Internal state management ============================================ */
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -1432,36 +1559,45 @@ int wlm_graph_app_run(
+     bs_log_settings.severity = BS_INFO;
+ 
+     // Parse command line arguments and initialize preferences.
+-    wlm_graph_prefs_t prefs;
++    wlm_graph_prefs_t arg_prefs, prefs;
+     const bool has_custom_lut = (NULL != config->pixel_lut);
+     const bool has_label = (NULL != config->label_fn);
+     const int parse_result = _wlm_graph_args_parse(
+         argc, argv, config->app_name, config->app_help,
+-        has_custom_lut, has_label, &prefs);
++        has_custom_lut, has_label, &arg_prefs);
+     if (0 != parse_result) {
+         return (1 == parse_result) ? EXIT_SUCCESS : EXIT_FAILURE;
+     }
++    if (config->label_hidden_by_default) arg_prefs.show_label = false;
++    prefs = arg_prefs;
++
++    wlm_settings_t *settings_ptr = wlm_settings_create(config->app_name, NULL);
++    if (NULL == settings_ptr) return EXIT_FAILURE;
+ 
+     // Allocate graph state.
+     wlm_graph_state_t *graph_state = calloc(1, sizeof(wlm_graph_state_t));
+     if (NULL == graph_state) {
+         bs_log(BS_ERROR, "%s: Failed to allocate graph state", config->app_name);
++        wlm_settings_destroy(settings_ptr);
+         return EXIT_FAILURE;
+     }
+ 
+-    // Initialize pixel lookup table.
+-    if (NULL != config->pixel_lut) {
+-        memcpy(graph_state->pixel_lut, config->pixel_lut, sizeof(graph_state->pixel_lut));
+-        graph_state->pixel_line = WLM_GRAPH_PIXEL_LINE_DEFAULT;
+-    } else {
+-        _wlm_graph_pixel_lut_init(graph_state->pixel_lut, &graph_state->pixel_line, prefs.color_mode);
+-    }
++    // Colors and options: From the preferences.
++    wlm_graph_handle_t handle = {
++        .graph_state = graph_state,
++        .prefs = &prefs,
++        .arg_prefs = &arg_prefs,
++        .settings_ptr = settings_ptr,
++        .config = config,
++    };
++    _wlm_graph_apply_settings(&handle);
+ 
+     // Initialize graph buffers with default icon size.
+     const uint32_t size_default[2] = {WLM_GRAPH_BASE_ICON_SIZE, WLM_GRAPH_BASE_ICON_SIZE};
+     if (!_wlm_graph_buffers_resize(graph_state, size_default, prefs.margin_logical_px)) {
+         bs_log(BS_ERROR, "Icon dimensions too small for graph");
+         _wlm_graph_state_free(graph_state);
++        wlm_settings_destroy(settings_ptr);
+         return EXIT_FAILURE;
+     }
+     // Initialize graph pixels (malloc leaves garbage, need opaque black).
+@@ -1475,6 +1611,7 @@ int wlm_graph_app_run(
+     if (NULL == wlclient_ptr) {
+         _wlm_graph_state_free(graph_state);
+         config->state_free_fn(config->app_state);
++        wlm_settings_destroy(settings_ptr);
+         return EXIT_FAILURE;
+     }
+ 
+@@ -1489,6 +1626,7 @@ int wlm_graph_app_run(
+         _wlm_graph_state_free(graph_state);
+         config->state_free_fn(config->app_state);
+         wlmcl_client_destroy(wlclient_ptr);
++        wlm_settings_destroy(settings_ptr);
+         return EXIT_FAILURE;
+     }
+ 
+@@ -1498,18 +1636,23 @@ int wlm_graph_app_run(
+         _wlm_graph_state_free(graph_state);
+         config->state_free_fn(config->app_state);
+         wlmcl_client_destroy(wlclient_ptr);
++        wlm_settings_destroy(settings_ptr);
+         return EXIT_FAILURE;
+     }
+ 
+-    // Create handle for callbacks.
+-    wlm_graph_handle_t handle = {
+-        .graph_state = graph_state,
+-        .prefs = &prefs,
+-        .icon_ptr = icon_ptr,
+-        .config = config,
+-        .wlclient_ptr = wlclient_ptr,
+-        .dblbuf_ptr = NULL,
+-    };
++    // Complete the handle for callbacks.
++    handle.icon_ptr = icon_ptr;
++    handle.wlclient_ptr = wlclient_ptr;
++    handle.dblbuf_ptr = NULL;
++
++    handle.pointer_button_listener.notify = _wlm_graph_handle_pointer_button;
++    wl_signal_add(&wlmcl_client_events(wlclient_ptr)->pointer_button,
++                  &handle.pointer_button_listener);
++    const int settings_fd = wlm_settings_watch(settings_ptr);
++    if (0 <= settings_fd) {
++        wlmcl_client_register_fd(
++            wlclient_ptr, settings_fd, _wlm_graph_handle_settings_fd, &handle);
++    }
+ 
+     wlmcl_icon_register_configure_callback(
+         icon_ptr, _handle_icon_configure, &handle);
+@@ -1518,6 +1661,8 @@ int wlm_graph_app_run(
+         _wlm_graph_timer_callback, &handle);
+ 
+     wlmcl_client_run(wlclient_ptr);
++    if (0 <= settings_fd) wlmcl_client_unregister_fd(wlclient_ptr, settings_fd);
++    wl_list_remove(&handle.pointer_button_listener.link);
+     wlmcl_icon_destroy(icon_ptr);
+     if (NULL != handle.dblbuf_ptr) {
+         wlmcl_dblbuf_destroy(handle.dblbuf_ptr);
+@@ -1527,6 +1672,7 @@ int wlm_graph_app_run(
+     _wlm_graph_state_free(graph_state);
+     config->state_free_fn(config->app_state);
+     wlmcl_client_destroy(wlclient_ptr);
++    wlm_settings_destroy(settings_ptr);
+     return EXIT_SUCCESS;
+ }
+ 
+diff --git a/apps/wlm_graph_shared.h b/apps/wlm_graph_shared.h
+index e3e13d2..64d9cc2 100644
+--- a/apps/wlm_graph_shared.h
++++ b/apps/wlm_graph_shared.h
+@@ -23,8 +23,11 @@
+ #ifndef WLM_GRAPH_SHARED_H
+ #define WLM_GRAPH_SHARED_H
+ 
++#include <stdbool.h>
+ #include <stdint.h>
+ 
++#include "wlm_settings.h"
++
+ /* == Definitions ========================================================== */
+ 
+ /**
+@@ -152,6 +155,24 @@ typedef struct {
+      * @return Label string (caller retains ownership), or NULL.
+      */
+     const char *(*label_fn)(void *app_state);
++
++    /**
++     * Whether the label is hidden unless the preference `ShowLabel` is set.
++     */
++    bool label_hidden_by_default;
++
++    /**
++     * Optional callback to apply the app's own preferences.
++     *
++     * Called at start, and whenever the preferences file changes. The graph's
++     * history is cleared after a change, so the number of values may change.
++     * The common preferences are applied by the graph: `Theme`, `Interval`
++     * (seconds), `GraphStyle` (Filled, Line), `ShowLabel`, `ClickCommand`.
++     *
++     * @param app_state     The app_state pointer from this config.
++     * @param settings_ptr  The preferences.
++     */
++    void (*settings_fn)(void *app_state, wlm_settings_t *settings_ptr);
+ } wlm_graph_app_config_t;
+ 
+ /* == Public API =========================================================== */
+@@ -159,8 +180,10 @@ typedef struct {
+ /**
+  * Runs a graph application.
+  *
+- * Handles argument parsing, wlclient setup, icon creation, callback
+- * registration, main loop, and cleanup. Apps just need to initialize their
++ * Handles argument parsing, preferences (from
++ * `${XDG_CONFIG_HOME}/wlmaker/<app_name>.plist`, watched for changes),
++ * wlclient setup, icon creation, callback registration, main loop, and
++ * cleanup. Apps just need to initialize their
+  * state and provide a configuration.
+  *
+  * Graph state is managed internally by this function.
+diff --git a/apps/wlmcpugraph.c b/apps/wlmcpugraph.c
+index d2d8cf3..a7148ed 100644
+--- a/apps/wlmcpugraph.c
++++ b/apps/wlmcpugraph.c
+@@ -45,7 +45,11 @@ static const char _app_help[] =
+     "  - 1/4 cores active (cyan)\n"
+     "  - 1/2 cores active (green)\n"
+     "  - 3/4 cores active (yellow)\n"
+-    "  - All cores active (red)";
++    "  - All cores active (red)\n"
++    "\n"
++    "Preferences, in ~/.config/wlmaker/wlmcpugraph.plist: Theme, Interval,\n"
++    "GraphStyle (Filled, Line), ShowLabel (total usage in percent),\n"
++    "Cores (PerCore, Total), ClickCommand (run on a left click).";
+ 
+ /** Line buffer size for /proc/stat parsing. */
+ #define LINE_BUFFER_SIZE 256
+@@ -73,6 +77,12 @@ typedef struct {
+     cpu_times_t *cpu_times_prev;
+     /** Number of elements in cpu_times_prev. */
+     uint32_t cpu_usage_num;
++    /** Usage per CPU of the last sample (cpu_usage_num elements). */
++    uint8_t *usage;
++    /** Whether to show the total usage, instead of each core's. */
++    bool total;
++    /** Label: The total usage, in percent. */
++    char label[8];
+ } cpugraph_state_t;
+ 
+ /* == Memory management ==================================================== */
+@@ -97,6 +107,13 @@ static bool _cpu_state_arrays_alloc(cpugraph_state_t *state, const uint32_t cpu_
+     if (NULL == state->cpu_times_prev) {
+         return false;
+     }
++    free(state->usage);
++    state->usage = calloc(cpu_usage_num, sizeof(uint8_t));
++    if (NULL == state->usage) {
++        free(state->cpu_times_prev);
++        state->cpu_times_prev = NULL;
++        return false;
++    }
+ 
+     state->cpu_usage_num = cpu_usage_num;
+     return true;
+@@ -115,6 +132,8 @@ static void _state_free(void *app_state)
+ 
+     free(state->cpu_times_prev);
+     state->cpu_times_prev = NULL;
++    free(state->usage);
++    state->usage = NULL;
+     state->cpu_usage_num = 0;
+ }
+ 
+@@ -158,14 +177,15 @@ static wlm_graph_read_result_t _stats_read_fn(void *app_state, wlm_graph_values_
+         return WLM_GRAPH_READ_ERROR;
+     }
+ 
+-    // Reallocate buffer if size doesn't match.
+-    if (cpu_count != values->num) {
+-        uint8_t *new_buf = realloc(values->data, cpu_count);
++    // Reallocate buffer if size doesn't match: One value per CPU, or one.
++    const uint32_t values_num = state->total ? 1 : cpu_count;
++    if (values_num != values->num) {
++        uint8_t *new_buf = realloc(values->data, values_num);
+         if (NULL == new_buf) {
+             return WLM_GRAPH_READ_ERROR;
+         }
+         values->data = new_buf;
+-        values->num = cpu_count;
++        values->num = values_num;
+     }
+ 
+     // Reallocate internal state arrays if CPU count changed.
+@@ -203,7 +223,7 @@ static wlm_graph_read_result_t _stats_read_fn(void *app_state, wlm_graph_values_
+                 usage = (uint8_t)(((total_diff - idle_diff) * 255) / total_diff);
+             }
+ 
+-            values->data[read_count] = usage;
++            state->usage[read_count] = usage;
+ 
+             // Update previous absolute values for next iteration.
+             prev->total = abs_total;
+@@ -213,7 +233,36 @@ static wlm_graph_read_result_t _stats_read_fn(void *app_state, wlm_graph_values_
+         }
+     }
+ 
+-    return (read_count == cpu_count) ? WLM_GRAPH_READ_OK : WLM_GRAPH_READ_ERROR;
++    if (read_count != cpu_count) return WLM_GRAPH_READ_ERROR;
++
++    unsigned sum = 0;
++    for (uint32_t i = 0; i < cpu_count; i++) sum += state->usage[i];
++    const uint8_t average = (uint8_t)(sum / cpu_count);
++    if (state->total) {
++        values->data[0] = average;
++    } else {
++        memcpy(values->data, state->usage, cpu_count);
++    }
++    snprintf(state->label, sizeof(state->label), "%u%%",
++             (unsigned)((average * 100 + 127) / 255));
++    return WLM_GRAPH_READ_OK;
++}
++
++/* ------------------------------------------------------------------------- */
++/** @return The label: Total usage, in percent. */
++static const char *_label_fn(void *app_state)
++{
++    cpugraph_state_t *state = app_state;
++    return state->label;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Applies the preferences: `Cores` = PerCore or Total. */
++static void _settings_fn(void *app_state, wlm_settings_t *settings_ptr)
++{
++    cpugraph_state_t *state = app_state;
++    static const char *const cores[] = { "PerCore", "Total", NULL };
++    state->total = 1 == wlm_settings_choice(settings_ptr, "Cores", cores, 0);
+ }
+ 
+ /* == Main program ========================================================= */
+@@ -243,6 +292,9 @@ int main(const int argc, const char **argv)
+         .stats_read_fn = _stats_read_fn,
+         .app_state = &state,
+         .state_free_fn = _state_free,
++        .label_fn = _label_fn,
++        .label_hidden_by_default = true,
++        .settings_fn = _settings_fn,
+     };
+ 
+     return wlm_graph_app_run(argc, argv, &config);
+diff --git a/apps/wlmmemgraph.c b/apps/wlmmemgraph.c
+index 35638e6..10c5577 100644
+--- a/apps/wlmmemgraph.c
++++ b/apps/wlmmemgraph.c
+@@ -40,13 +40,17 @@ static const char _app_help[] =
+     "  - Buffers: middle of graph (dark cyan)\n"
+     "  - Used: bottom of graph (green)\n"
+     "\n"
+-    "The label displays total memory usage.";
++    "The label displays total memory usage.\n"
++    "\n"
++    "Preferences, in ~/.config/wlmaker/wlmmemgraph.plist: Theme, Interval,\n"
++    "GraphStyle (Filled, Line), ShowLabel, Units (Size, Percent), ShowSwap,\n"
++    "ClickCommand (run on a left click).";
+ 
+ /** Line buffer size for /proc/meminfo parsing. */
+ #define LINE_BUFFER_SIZE 256
+ 
+ /** Number of fields to parse from /proc/meminfo. */
+-#define MEMINFO_FIELD_COUNT 5
++#define MEMINFO_FIELD_COUNT 7
+ 
+ /* == Definitions ========================================================== */
+ 
+@@ -87,7 +91,7 @@ static void _memgraph_lut_init(uint32_t lut[256])
+ }
+ 
+ /** Maximum length of the label string. */
+-#define LABEL_BUFFER_SIZE 16
++#define LABEL_BUFFER_SIZE 64
+ 
+ /** Kilobytes per megabyte. */
+ #define KB_PER_MB 1024UL
+@@ -108,6 +112,10 @@ typedef struct {
+     unsigned long mem_used_kb;
+     /** Formatted label string. */
+     char label[LABEL_BUFFER_SIZE];
++    /** Label in percent, instead of a size. */
++    bool percent;
++    /** Label also shows the swap used. */
++    bool show_swap;
+ } memgraph_state_t;
+ 
+ /* == Cleanup ============================================================== */
+@@ -220,6 +228,8 @@ static wlm_graph_read_result_t _stats_read_fn(void *app_state, wlm_graph_values_
+     unsigned long buffers = 0;
+     unsigned long cached = 0;
+     unsigned long sreclaimable = 0;
++    unsigned long swap_total = 0;
++    unsigned long swap_free = 0;
+ 
+     char line[LINE_BUFFER_SIZE];
+     size_t label_len = 0;
+@@ -254,6 +264,12 @@ static wlm_graph_read_result_t _stats_read_fn(void *app_state, wlm_graph_values_
+         } else if (LABEL_MATCH("SReclaimable")) {
+             sreclaimable = value;
+             fields_found++;
++        } else if (LABEL_MATCH("SwapTotal")) {
++            swap_total = value;
++            fields_found++;
++        } else if (LABEL_MATCH("SwapFree")) {
++            swap_free = value;
++            fields_found++;
+         }
+     }
+ 
+@@ -277,12 +293,43 @@ static wlm_graph_read_result_t _stats_read_fn(void *app_state, wlm_graph_values_
+     // Store values and format label for display.
+     state->mem_total_kb = mem_total;
+     state->mem_used_kb = used;
+-    _format_memory_size(state->label, sizeof(state->label), used);
++    char mem[24], swap[24];
++    const unsigned long swap_used =
++        swap_total > swap_free ? swap_total - swap_free : 0;
++    if (state->percent) {
++        snprintf(mem, sizeof(mem), "%lu%%", (used * 100 + mem_total / 2) / mem_total);
++        snprintf(swap, sizeof(swap), "%lu%%", 0 == swap_total ? 0UL :
++                 (swap_used * 100 + swap_total / 2) / swap_total);
++    } else if (state->show_swap) {
++        // Two lines: Compact, to fit the width.
++        snprintf(mem, sizeof(mem), "%lu.%luG", used / KB_PER_GB,
++                 (used % KB_PER_GB) * 10 / KB_PER_GB);
++        snprintf(swap, sizeof(swap), "%lu.%luG", swap_used / KB_PER_GB,
++                 (swap_used % KB_PER_GB) * 10 / KB_PER_GB);
++    } else {
++        _format_memory_size(mem, sizeof(mem), used);
++        swap[0] = '\0';
++    }
++    if (state->show_swap) {
++        snprintf(state->label, sizeof(state->label), "%s\nS %s", mem, swap);
++    } else {
++        snprintf(state->label, sizeof(state->label), "%s", mem);
++    }
+ 
+     return WLM_GRAPH_READ_OK;
+ }
+ #undef LABEL_MATCH
+ 
++/* ------------------------------------------------------------------------- */
++/** Applies the preferences: `Units` (Size, Percent), `ShowSwap`. */
++static void _settings_fn(void *app_state, wlm_settings_t *settings_ptr)
++{
++    memgraph_state_t *state = app_state;
++    static const char *const units[] = { "Size", "Percent", NULL };
++    state->percent = 1 == wlm_settings_choice(settings_ptr, "Units", units, 0);
++    state->show_swap = wlm_settings_bool(settings_ptr, "ShowSwap", false);
++}
++
+ /* == Main program ========================================================= */
+ 
+ /** Main program. */
+@@ -309,6 +356,7 @@ int main(const int argc, const char **argv)
+         .state_free_fn = _state_free,
+         .pixel_lut = pixel_lut,
+         .label_fn = _label_fn,
++        .settings_fn = _settings_fn,
+     };
+ 
+     return wlm_graph_app_run(argc, argv, &config);
+diff --git a/apps/wlmnetgraph.c b/apps/wlmnetgraph.c
+index ddb2a2c..f108619 100644
+--- a/apps/wlmnetgraph.c
++++ b/apps/wlmnetgraph.c
+@@ -41,7 +41,11 @@ static const char _app_help[] =
+     "  - Transmit: outgoing traffic (cyan)\n"
+     "  - Bidirectional: combined traffic (red)\n"
+     "\n"
+-    "The label displays current throughput. Scale auto-adjusts to peak rate.";
++    "The label displays current throughput. Scale auto-adjusts to peak rate.\n"
++    "\n"
++    "Preferences, in ~/.config/wlmaker/wlmnetgraph.plist: Theme, Interval,\n"
++    "GraphStyle (Filled, Line), ShowLabel, Interface (All, or eg. eth0),\n"
++    "Label (Scale, Rates), Units (Bytes, Bits), ClickCommand.";
+ 
+ /* == Definitions ========================================================== */
+ 
+@@ -135,10 +139,58 @@ typedef struct {
+     uint32_t history_index;
+     /** Number of valid entries in history. */
+     uint32_t history_num;
++
++    /** Interface to show, or empty for all (but loopback). */
++    char interface[32];
++    /** Whether the label shows the rates, instead of the scale. */
++    bool label_rates;
++    /** Whether to show bits per second, instead of bytes. */
++    bool bits;
++    /** Time of the previous read, in microseconds. 0 if none yet. */
++    uint64_t prev_usec;
++    /** Receive rate, in bytes per second. */
++    unsigned long long rx_per_sec;
++    /** Transmit rate, in bytes per second. */
++    unsigned long long tx_per_sec;
++    /** The label. */
++    char label[48];
+ } netgraph_state_t;
+ 
+ /* == Label ================================================================ */
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Formats a rate compactly, eg. "1.2M" or "30K". In bits, with a "b".
++ *
++ * @param buf
++ * @param buf_size
++ * @param bytes             Bytes per second.
++ * @param bits              Whether to show bits.
++ */
++static void _format_rate(char *buf, size_t buf_size,
++                         unsigned long long bytes, bool bits)
++{
++    unsigned long long v = bits ? bytes * 8 : bytes;
++    static const char units[] = " KMGT";
++    int u = 0;
++    // Bytes in units of 1024, like the scale. Bits in units of 1000.
++    const unsigned long long base = bits ? 1000 : 1024;
++    unsigned long long scaled10 = v * 10;
++    while (scaled10 >= base * 10 && u < 4) {
++        scaled10 /= base;
++        ++u;
++    }
++    const char *suffix = bits ? "b" : (0 == u ? "B" : "");
++    if (0 == u) {
++        snprintf(buf, buf_size, "%llu%s", v, suffix);
++    } else if (scaled10 < 100) {
++        snprintf(buf, buf_size, "%llu.%llu%c%s",
++                 scaled10 / 10, scaled10 % 10, units[u], suffix);
++    } else {
++        snprintf(buf, buf_size, "%llu%c%s", scaled10 / 10, units[u], suffix);
++    }
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Finds index of smallest scale >= val.
+@@ -162,9 +214,19 @@ static size_t _scale_index_ceil(const unsigned long long val)
+ static const char *_label_fn(void *app_state)
+ {
+     netgraph_state_t *state = app_state;
+-    return _scales[state->scale_index].label;
++    char a[16], b[16];
++    if (state->label_rates) {
++        _format_rate(a, sizeof(a), state->rx_per_sec, state->bits);
++        _format_rate(b, sizeof(b), state->tx_per_sec, state->bits);
++        snprintf(state->label, sizeof(state->label),
++                 "\xe2\x86\x93%s\n\xe2\x86\x91%s", a, b);
++        return state->label;
++    }
++    if (!state->bits) return _scales[state->scale_index].label;
++    _format_rate(a, sizeof(a), _scales[state->scale_index].bytes, true);
++    snprintf(state->label, sizeof(state->label), "%s/s", a);
++    return state->label;
+ }
+-
+ /* == Cleanup ============================================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -232,11 +294,12 @@ static wlm_graph_read_result_t _stats_read_fn(void *app_state, wlm_graph_values_
+             continue;
+         }
+ 
+-        // Extract interface name and skip loopback.
++        // Extract interface name and skip loopback. Or all but the chosen.
+         *colon = '\0';
+         char *iface = line;
+         while (' ' == *iface) iface++;  // Trim leading spaces.
+-        if (0 == strcmp(iface, "lo")) {
++        if ('\0' == state->interface[0] ? 0 == strcmp(iface, "lo") :
++            0 != strcmp(iface, state->interface)) {
+             continue;
+         }
+ 
+@@ -268,6 +331,15 @@ static wlm_graph_read_result_t _stats_read_fn(void *app_state, wlm_graph_values_
+     state->prev_rx_bytes = total_rx_bytes;
+     state->prev_tx_bytes = total_tx_bytes;
+ 
++    // Rates per second, for the label.
++    const uint64_t now_usec = bs_usec();
++    if (0 != state->prev_usec && now_usec > state->prev_usec) {
++        const uint64_t dt = now_usec - state->prev_usec;
++        state->rx_per_sec = (rx_rate * 1000000ULL) / dt;
++        state->tx_per_sec = (tx_rate * 1000000ULL) / dt;
++    }
++    state->prev_usec = now_usec;
++
+     // Store raw rates in history for regeneration.
+     state->history[state->history_index].rx_rate = rx_rate;
+     state->history[state->history_index].tx_rate = tx_rate;
+@@ -343,6 +415,8 @@ static void _regenerate_fn(void *app_state, wlm_graph_values_t *samples, const u
+             const uint32_t hist_index =
+                 (history_offset - i) % WLM_GRAPH_REGENERATE_HISTORY_MAX;
+             const rate_history_t *h = &state->history[hist_index];
++            // Samples cleared by the graph (eg. preferences changed): Empty.
++            if (NET_CATEGORY_COUNT > samples[i].num) continue;
+ 
+             // Regenerate scaled values at current peak.
+             samples[i].data[NET_CATEGORY_IN] =
+@@ -356,8 +430,44 @@ static void _regenerate_fn(void *app_state, wlm_graph_values_t *samples, const u
+ 
+     // Clear samples without available history.
+     for (uint32_t i = samples_num_regenerate; i < samples_num; i++) {
+-        memset(samples[i].data, 0, samples[i].num);
++        if (NULL != samples[i].data) memset(samples[i].data, 0, samples[i].num);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Applies the preferences: `Interface` (All, or a name), `Label` (Scale,
++ * Rates), `Units` (Bytes, Bits).
++ */
++static void _settings_fn(void *app_state, wlm_settings_t *settings_ptr)
++{
++    netgraph_state_t *state = app_state;
++    const char *iface = wlm_settings_string(settings_ptr, "Interface", "All");
++    if (0 == strcmp(iface, "All")) iface = "";
++    if (0 != strcmp(iface, state->interface)) {
++        // Another interface: Its counters start anew.
++        snprintf(state->interface, sizeof(state->interface), "%s", iface);
++        state->prev_rx_bytes = 0;
++        state->prev_tx_bytes = 0;
++        state->prev_usec = 0;
++        state->peak_rate = 0;
++        state->history_index = 0;
++        state->history_num = 0;
++        wlm_graph_values_t values = {};
++        _stats_read_fn(state, &values);
++        free(values.data);
++        state->peak_rate = 0;
++        state->history_index = 0;
++        state->history_num = 0;
+     }
++    // The graph clears its history after a change: So does the regeneration.
++    state->history_index = 0;
++    state->history_num = 0;
++    static const char *const labels[] = { "Scale", "Rates", NULL };
++    state->label_rates = 1 == wlm_settings_choice(
++        settings_ptr, "Label", labels, 0);
++    static const char *const units[] = { "Bytes", "Bits", NULL };
++    state->bits = 1 == wlm_settings_choice(settings_ptr, "Units", units, 0);
+ }
+ 
+ /* == Main program ========================================================= */
+@@ -393,6 +503,7 @@ int main(const int argc, const char **argv)
+         .app_state = &state,
+         .state_free_fn = _state_free,
+         .label_fn = _label_fn,
++        .settings_fn = _settings_fn,
+     };
+ 
+     return wlm_graph_app_run(argc, argv, &config);
+-- 
+2.55.0
+

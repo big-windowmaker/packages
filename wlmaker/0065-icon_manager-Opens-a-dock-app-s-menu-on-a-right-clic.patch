@@ -1,0 +1,173 @@
+From 715b4ffe87071631545e8fb26fe1dff20aa572c4 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 02:38:32 -0300
+Subject: [PATCH 65/73] icon_manager: Opens a dock-app's menu on a right-click
+ anywhere on its tile.
+
+Like on Window Maker: The right button on a dock-app opens the tile's menu,
+also on the dock-app itself, and without holding a modifier. The dock-app no
+longer gets the right button; dock-apps offer their own actions through the
+menu instead. The menu also moves the Clip, which the dock-app is part of,
+to the other side or end, like the Clip's own menu does: Shared through
+wlmaker_clip_add_move_items.
+---
+ src/clip.c         | 41 ++++++++++++++++++++++++++---------------
+ src/clip.h         | 15 +++++++++++++++
+ src/icon_manager.c | 21 +++++++++++----------
+ 3 files changed, 52 insertions(+), 25 deletions(-)
+
+diff --git a/src/clip.c b/src/clip.c
+index 987a4f9..0d84fda 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -808,15 +808,16 @@ static void _wlmaker_clip_menu_restore(void *ud_ptr)
+ }
+ 
+ /** Moves the Clip to the corner `corner` XOR `flip`. */
+-static void _wlmaker_clip_flip(wlmaker_clip_t *clip_ptr, uint32_t flip)
++static void _wlmaker_clip_flip(wlmaker_server_t *server_ptr, uint32_t flip)
+ {
++    if (NULL == server_ptr->clip_dock_ptr) return;
+     const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
+-        clip_ptr->wlmtk_dock_ptr);
++        server_ptr->clip_dock_ptr);
+     wlmaker_dock_place_t place = { pos_ptr->edge, pos_ptr->anchor };
+     place = wlmaker_dock_place_from_corner(
+         wlmaker_dock_place_corner(place) ^ flip,
+         wlmaker_dock_place_vertical(place));
+-    wlmaker_clip_move_dock(clip_ptr->server_ptr, "Clip", place);
++    wlmaker_clip_move_dock(server_ptr, "Clip", place);
+ }
+ 
+ /** Context menu callback: Moves the Clip to the other side. */
+@@ -831,6 +832,27 @@ static void _wlmaker_clip_menu_flip_end(void *ud_ptr)
+     _wlmaker_clip_flip(ud_ptr, WLR_EDGE_TOP | WLR_EDGE_BOTTOM);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++bool wlmaker_clip_add_move_items(
++    wlmaker_server_t *server_ptr,
++    wlmaker_context_menu_t *context_menu_ptr)
++{
++    if (NULL == server_ptr->clip_dock_ptr) return true;
++    const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
++        server_ptr->clip_dock_ptr);
++    uint32_t corner = pos_ptr->edge | pos_ptr->anchor;
++    return wlmaker_context_menu_add_item(
++        context_menu_ptr,
++        wlmaker_i18n((corner & WLR_EDGE_LEFT) ?
++                     "Move to Right Side" : "Move to Left Side"),
++        _wlmaker_clip_menu_flip_side, server_ptr) &&
++        wlmaker_context_menu_add_item(
++            context_menu_ptr,
++            wlmaker_i18n((corner & WLR_EDGE_TOP) ?
++                         "Move to Bottom" : "Move to Top"),
++            _wlmaker_clip_menu_flip_end, server_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Opens the Clip's right-click menu: Workspace navigation and management.
+@@ -870,18 +892,7 @@ void _wlmaker_clip_open_menu(wlmaker_clip_t *clip_ptr)
+             server_ptr);
+     }
+     // Moving the Clip to another corner. Like dragging it.
+-    const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
+-        clip_ptr->wlmtk_dock_ptr);
+-    uint32_t corner = pos_ptr->edge | pos_ptr->anchor;
+-    rv = rv && wlmaker_context_menu_add_item(
+-        cm_ptr,
+-        wlmaker_i18n((corner & WLR_EDGE_LEFT) ?
+-                     "Move to Right Side" : "Move to Left Side"),
+-        _wlmaker_clip_menu_flip_side, clip_ptr);
+-    rv = rv && wlmaker_context_menu_add_item(
+-        cm_ptr,
+-        wlmaker_i18n((corner & WLR_EDGE_TOP) ? "Move to Bottom" : "Move to Top"),
+-        _wlmaker_clip_menu_flip_end, clip_ptr);
++    rv = rv && wlmaker_clip_add_move_items(server_ptr, cm_ptr);
+     bspl_array_t *defaults_ptr = _wlmaker_clip_default_launchers(server_ptr);
+     if (NULL != defaults_ptr) {
+         rv = rv && wlmaker_context_menu_add_item(
+diff --git a/src/clip.h b/src/clip.h
+index 2d0ec36..a11e0ee 100644
+--- a/src/clip.h
++++ b/src/clip.h
+@@ -35,6 +35,7 @@ typedef struct _wlmaker_clip_t wlmaker_clip_t;
+ 
+ #include "config.h"
+ #include "dock_position.h"
++#include "context_menu.h"
+ #include "server.h"
+ 
+ #ifdef __cplusplus
+@@ -77,6 +78,20 @@ void wlmaker_clip_move_dock(
+     const char *section_ptr,
+     wlmaker_dock_place_t place);
+ 
++/**
++ * Adds the items moving the Clip to the other side, and to the other end, to
++ * a context menu. Like on the Clip's own menu. For the menus of tiles that
++ * are part of the Clip, eg. the dock-apps.
++ *
++ * @param server_ptr
++ * @param context_menu_ptr
++ *
++ * @return true on success, or if there is no Clip.
++ */
++bool wlmaker_clip_add_move_items(
++    wlmaker_server_t *server_ptr,
++    wlmaker_context_menu_t *context_menu_ptr);
++
+ /** Unit test set. */
+ extern const bs_test_set_t wlmaker_clip_test_set;
+ 
+diff --git a/src/icon_manager.c b/src/icon_manager.c
+index 223f1f8..beb7ab4 100644
+--- a/src/icon_manager.c
++++ b/src/icon_manager.c
+@@ -36,6 +36,7 @@
+ #include <wlr/types/wlr_xdg_shell.h>
+ #undef WLR_USE_UNSTABLE
+ 
++#include "clip.h"
+ #include "context_menu.h"
+ #include "dockapps.h"
+ #include "i18n.h"
+@@ -781,6 +782,9 @@ void _wlmaker_toplevel_icon_open_menu(
+             toplevel_icon_ptr);
+         ++items;
+     }
++    // Moves the Clip, which the dock-app is part of.
++    rv = rv && wlmaker_clip_add_move_items(server_ptr, cm_ptr);
++    if (NULL != server_ptr->clip_dock_ptr) items += 2;
+     if (0 != _wlmaker_toplevel_icon_pid(toplevel_icon_ptr)) {
+         rv = rv && wlmaker_context_menu_add_item(
+             cm_ptr, wlmaker_i18n("Kill"), _wlmaker_toplevel_icon_menu_kill,
+@@ -841,17 +845,14 @@ bool _wlmaker_toplevel_icon_element_pointer_button(
+ 
+     uint32_t modifier = wlmim_cursor_options(
+         server_ptr->input_manager_ptr)->move_window_modifier;
+-    // Right button with the move modifier, or on the tile's border (not on
+-    // the dock-app, which may use the button itself): The tile's menu.
++    // The right button opens the tile's menu, like on Window Maker. Also on
++    // the dock-app itself: It does not get the right button. Dock-apps
++    // offer their own actions through the menu instead.
+     if (NULL != server_ptr->dockapps_ptr &&
+-        BTN_RIGHT == button_event_ptr->button &&
+-        WLMTK_BUTTON_DOWN == button_event_ptr->type &&
+-        ((0 != modifier &&
+-          modifier == button_event_ptr->keyboard_modifiers) ||
+-         NULL == toplevel_icon_ptr->content_surface_ptr ||
+-         !wlmtk_surface_element(
+-             toplevel_icon_ptr->content_surface_ptr)->pointer_inside)) {
+-        _wlmaker_toplevel_icon_open_menu(toplevel_icon_ptr);
++        BTN_RIGHT == button_event_ptr->button) {
++        if (WLMTK_BUTTON_DOWN == button_event_ptr->type) {
++            _wlmaker_toplevel_icon_open_menu(toplevel_icon_ptr);
++        }
+         return true;
+     }
+ 
+-- 
+2.55.0
+

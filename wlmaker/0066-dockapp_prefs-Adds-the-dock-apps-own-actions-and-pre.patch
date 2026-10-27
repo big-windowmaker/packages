@@ -1,0 +1,1352 @@
+From 79d715e975bec9383b34adb669cbb6300fcbc1de Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 02:46:06 -0300
+Subject: [PATCH 66/73] dockapp_prefs: Adds the dock-apps' own actions and
+ preferences to their menus.
+
+What a dock-app's menu offers is described in share/wlmaker/Dockapps.plist,
+installed to the data directory: Per dock-app, 'Actions' at the top of the
+menu, running a command, and a 'Preferences' submenu. A boolean preference
+is an item with a check box; others are submenus with a radio button per
+choice. Choices are listed in the preference, shared by name (eg. the color
+themes), or read from a directory (eg. the network interfaces).
+
+Choosing an option stores it in the dock-app's preferences file,
+${XDG_CONFIG_HOME}/wlmaker/<dock-app>.plist, keeping its other values, and
+replacing the file atomically. The dock-app watches it, and applies the
+change right away. An action's command may refer to a preference's value as
+${Key}, eg. the program to open on a click; it is left out when empty.
+
+Describes wlmcalclock, wlmcpugraph, wlmmemgraph, wlmnetgraph, wlmmixer and
+wlmclock. Titles are translated to Portuguese through the i18n table.
+---
+ share/CMakeLists.txt         |   3 +
+ share/wlmaker/Dockapps.plist | 185 +++++++++
+ src/CMakeLists.txt           |   2 +
+ src/dockapp_prefs.c          | 786 +++++++++++++++++++++++++++++++++++
+ src/dockapp_prefs.h          | 126 ++++++
+ src/i18n.c                   |  73 ++++
+ src/icon_manager.c           |  27 +-
+ tests/wlmaker_test.c         |   2 +
+ 8 files changed, 1200 insertions(+), 4 deletions(-)
+ create mode 100644 share/wlmaker/Dockapps.plist
+ create mode 100644 src/dockapp_prefs.c
+ create mode 100644 src/dockapp_prefs.h
+
+diff --git a/share/CMakeLists.txt b/share/CMakeLists.txt
+index f7dca21..89a206e 100644
+--- a/share/CMakeLists.txt
++++ b/share/CMakeLists.txt
+@@ -258,6 +258,9 @@ install(FILES
+   "wlmaker/icons/firefox-56x56.png"
+   "wlmaker/icons/terminal-56x56.png"
+   DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/wlmaker/icons")
++install(FILES
++  "wlmaker/Dockapps.plist"
++  DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/wlmaker")
+ install(
+   FILES
+   "Themes/Default.plist"
+diff --git a/share/wlmaker/Dockapps.plist b/share/wlmaker/Dockapps.plist
+new file mode 100644
+index 0000000..9fc02fc
+--- /dev/null
++++ b/share/wlmaker/Dockapps.plist
+@@ -0,0 +1,185 @@
++// Preferences of the dock-apps, offered in their right-click menus.
++//
++// For each dock-app (by the name of its executable): `Actions`, items at
++// the top of the menu that run a command, and `Preferences`, a submenu with
++// options. wlmaker stores the chosen values in the dock-app's preferences
++// file, ${XDG_CONFIG_HOME}/wlmaker/<dock-app>.plist (eg.
++// ~/.config/wlmaker/wlmcalclock.plist). The dock-app applies them right away.
++// The file can also be edited by hand, eg. for a command of one's own.
++//
++// An action's `Command` runs through `/bin/sh -c`. ${Key} is replaced by the
++// value of the preference `Key`. An action whose command ends up empty is
++// left out.
++//
++// A preference has a `Key`, a `Title`, and a `Default`. With `Type = Bool`
++// it is an item with a check box. Otherwise, it is a submenu offering the
++// `Choices`: A list of (Value, Title) pairs, or the name of a list in the
++// `Choices` dict below. `ChoicesFromDirectory` adds the names of the entries
++// in a directory, except for those listed in `Exclude`.
++//
++// Titles are in English. wlmaker translates them, where it can.
++{
++  Choices = {
++    Theme = (
++      (Default, "Default Colors"),
++      (Green, "Green LCD (Classic)"),
++      (Amber, "Amber"),
++      (Blue, "Blue"),
++      (NeXT, "NeXT Grey"),
++      (HighContrast, "High Contrast")
++    );
++    Interval = (
++      ("0.5", "Every Half Second"),
++      ("1", "Every Second"),
++      ("2", "Every 2 Seconds"),
++      ("5", "Every 5 Seconds")
++    );
++    GraphStyle = (
++      (Filled, "Filled"),
++      (Line, "Line Only")
++    );
++    MonitorCommand = (
++      ("", "Nothing"),
++      ("xfce4-taskmanager", "Task Manager"),
++      ("gnome-system-monitor", "System Monitor"),
++      ("xdg-terminal-exec htop", "htop in a Terminal")
++    );
++  };
++
++  Dockapps = {
++    wlmcalclock = {
++      Actions = (
++        { Title = "Open Calendar"; Command = "${CalendarCommand}"; }
++      );
++      Preferences = (
++        { Key = Theme; Title = "Theme"; Choices = Theme; Default = Default; },
++        { Key = ClockStyle; Title = "Clock Style"; Default = Digital;
++          Choices = ((Digital, "Digital"), (Analog, "Analog")); },
++        { Key = TwelveHour; Title = "12-Hour Clock (AM/PM)"; Type = Bool;
++          Default = No; },
++        { Key = Seconds; Title = "Show Seconds"; Type = Bool; Default = No; },
++        { Key = BlinkColon; Title = "Blinking Colon"; Type = Bool;
++          Default = No; },
++        { Key = CalendarStyle; Title = "Calendar Style"; Default = Paper;
++          Choices = ((Paper, "Paper Sheet"), (LCD, "Digital Display")); },
++        { Key = ShowYear; Title = "Show the Year"; Type = Bool;
++          Default = No; },
++        { Key = TimeZone; Title = "Time Zone"; Default = Local;
++          Choices = (
++            (Local, "Local Time"),
++            ("America/Sao_Paulo", "Brasília"),
++            ("America/Manaus", "Manaus"),
++            ("America/Rio_Branco", "Rio Branco"),
++            ("America/Noronha", "Fernando de Noronha"),
++            (UTC, "UTC"),
++            ("Europe/Lisbon", "Lisbon"),
++            ("Europe/London", "London"),
++            ("America/New_York", "New York"),
++            ("Asia/Tokyo", "Tokyo")
++          ); },
++        { Key = CalendarCommand; Title = "On Click"; Default = "";
++          Choices = (
++            ("", "Nothing"),
++            ("gnome-calendar", "GNOME Calendar"),
++            ("thunderbird -calendar", "Thunderbird Calendar"),
++            ("xdg-terminal-exec sh -c 'cal -3; read x'", "Calendar in a Terminal")
++          ); }
++      );
++    };
++
++    wlmcpugraph = {
++      Actions = (
++        { Title = "Open Task Manager"; Command = "${ClickCommand}"; }
++      );
++      Preferences = (
++        { Key = Theme; Title = "Theme"; Choices = Theme; Default = Default; },
++        { Key = Cores; Title = "Show"; Default = PerCore;
++          Choices = ((PerCore, "Each Core"), (Total, "Total Usage")); },
++        { Key = GraphStyle; Title = "Graph Style"; Choices = GraphStyle;
++          Default = Filled; },
++        { Key = ShowLabel; Title = "Show Percentage"; Type = Bool;
++          Default = No; },
++        { Key = Interval; Title = "Update"; Choices = Interval; Default = "1"; },
++        { Key = ClickCommand; Title = "On Click"; Choices = MonitorCommand;
++          Default = ""; }
++      );
++    };
++
++    wlmmemgraph = {
++      Actions = (
++        { Title = "Open Task Manager"; Command = "${ClickCommand}"; }
++      );
++      Preferences = (
++        { Key = Theme; Title = "Theme"; Choices = Theme; Default = Default; },
++        { Key = GraphStyle; Title = "Graph Style"; Choices = GraphStyle;
++          Default = Filled; },
++        { Key = ShowLabel; Title = "Show Usage"; Type = Bool; Default = Yes; },
++        { Key = Units; Title = "Units"; Default = Size;
++          Choices = ((Size, "MB / GB"), (Percent, "Percent")); },
++        { Key = ShowSwap; Title = "Show Swap"; Type = Bool; Default = No; },
++        { Key = Interval; Title = "Update"; Choices = Interval; Default = "1"; },
++        { Key = ClickCommand; Title = "On Click"; Choices = MonitorCommand;
++          Default = ""; }
++      );
++    };
++
++    wlmnetgraph = {
++      Actions = (
++        { Title = "Open Network Settings"; Command = "${ClickCommand}"; }
++      );
++      Preferences = (
++        { Key = Theme; Title = "Theme"; Choices = Theme; Default = Default; },
++        { Key = Interface; Title = "Interface"; Default = All;
++          Choices = ((All, "All Interfaces"));
++          ChoicesFromDirectory = "/sys/class/net"; Exclude = (lo); },
++        { Key = GraphStyle; Title = "Graph Style"; Choices = GraphStyle;
++          Default = Filled; },
++        { Key = ShowLabel; Title = "Show Text"; Type = Bool; Default = Yes; },
++        { Key = Label; Title = "Text"; Default = Scale;
++          Choices = ((Scale, "Graph Scale"), (Rates, "Download / Upload")); },
++        { Key = Units; Title = "Units"; Default = Bytes;
++          Choices = ((Bytes, "Bytes per Second"), (Bits, "Bits per Second")); },
++        { Key = Interval; Title = "Update"; Choices = Interval; Default = "1"; },
++        { Key = ClickCommand; Title = "On Click"; Default = "";
++          Choices = (
++            ("", "Nothing"),
++            ("nm-connection-editor", "Network Connections"),
++            ("big-network-info", "Network Information"),
++            ("xdg-terminal-exec nmtui", "nmtui in a Terminal")
++          ); }
++      );
++    };
++
++    wlmmixer = {
++      Actions = (
++        { Title = "Mute / Unmute"; Command = "pactl set-sink-mute @DEFAULT_SINK@ toggle"; },
++        { Title = "Open Volume Control"; Command = "${MixerCommand}"; }
++      );
++      Preferences = (
++        { Key = Theme; Title = "Theme"; Choices = Theme; Default = Default; },
++        { Key = ShowPercent; Title = "Show Percentage"; Type = Bool;
++          Default = Yes; },
++        { Key = ClickMutes; Title = "Click Mutes"; Type = Bool; Default = Yes; },
++        { Key = ScrollVolume; Title = "Wheel Changes Volume"; Type = Bool;
++          Default = Yes; },
++        { Key = Step; Title = "Volume Step"; Default = "5";
++          Choices = (("1", "1 %"), ("2", "2 %"), ("5", "5 %"), ("10", "10 %")); },
++        { Key = MaxVolume; Title = "Maximum Volume"; Default = "100";
++          Choices = (("100", "100 %"), ("125", "125 %"), ("150", "150 %")); },
++        { Key = MixerCommand; Title = "Volume Control"; Default = "pavucontrol";
++          Choices = (
++            ("", "Nothing"),
++            (pavucontrol, "PulseAudio Volume Control"),
++            ("pavucontrol-qt", "PulseAudio Volume Control (Qt)"),
++            (pwvucontrol, "PipeWire Volume Control")
++          ); }
++      );
++    };
++
++    wlmclock = {
++      Preferences = (
++        { Key = Theme; Title = "Theme"; Choices = Theme; Default = Default; }
++      );
++    };
++  };
++}
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index e6079b1..7a301d0 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -34,6 +34,7 @@ set(public_header_files
+   context_menu.h
+   corner.h
+   dock_position.h
++  dockapp_prefs.h
+   i18n.h
+   dockapps.h
+   icon_manager.h
+@@ -63,6 +64,7 @@ target_sources(wlmaker_lib PRIVATE
+   context_menu.c
+   corner.c
+   dock_position.c
++  dockapp_prefs.c
+   i18n.c
+   dockapps.c
+   icon_manager.c
+diff --git a/src/dockapp_prefs.c b/src/dockapp_prefs.c
+new file mode 100644
+index 0000000..e6b7493
+--- /dev/null
++++ b/src/dockapp_prefs.c
+@@ -0,0 +1,786 @@
++/* ========================================================================= */
++/**
++ * @file dockapp_prefs.c
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "dockapp_prefs.h"
++
++#include <dirent.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <strings.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#include "action.h"
++#include "i18n.h"
++
++/* == Declarations ========================================================= */
++
++/** State of the dock-app's preferences. */
++struct _wlmaker_dockapp_prefs_t {
++    /** All of `Dockapps.plist`. */
++    bspl_dict_t               *schema_dict_ptr;
++    /** The dock-app's dict in it. */
++    bspl_dict_t               *app_dict_ptr;
++    /** The values stored in the preferences file. Maybe empty. */
++    bspl_dict_t               *values_dict_ptr;
++    /** Path of the preferences file. */
++    char                      *fname_ptr;
++};
++
++/** Argument of a preference's item: What to store where. */
++typedef struct {
++    /** Path of the preferences file. */
++    char                      *fname_ptr;
++    /** The key. */
++    char                      *key_ptr;
++    /** The value. */
++    char                      *value_ptr;
++} _wlmaker_dockapp_prefs_store_arg_t;
++
++/** Argument of an action's item: What to run. */
++typedef struct {
++    /** Runs the command. */
++    wlmaker_server_t          *server_ptr;
++    /** The command. */
++    char                      *command_ptr;
++} _wlmaker_dockapp_prefs_action_arg_t;
++
++static bspl_dict_t *_wlmaker_dockapp_prefs_find(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    const char *key_ptr);
++static bspl_array_t *_wlmaker_dockapp_prefs_choices(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    bspl_dict_t *pref_dict_ptr);
++static bool _wlmaker_dockapp_prefs_add_option(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    wlmaker_context_menu_t *context_menu_ptr,
++    wlmtk_menu_t *menu_ptr,
++    const char *title_ptr,
++    wlmtk_menu_item_indicator_t indicator,
++    bool checked,
++    const char *key_ptr,
++    const char *value_ptr);
++static bool _wlmaker_dockapp_prefs_add_choice(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    wlmaker_context_menu_t *context_menu_ptr,
++    wlmtk_menu_t *menu_ptr,
++    const char *key_ptr,
++    const char *current_ptr,
++    const char *value_ptr,
++    const char *title_ptr);
++static void _wlmaker_dockapp_prefs_store_callback(void *ud_ptr);
++static void _wlmaker_dockapp_prefs_store_arg_free(void *ud_ptr);
++static void _wlmaker_dockapp_prefs_action_callback(void *ud_ptr);
++static void _wlmaker_dockapp_prefs_action_arg_free(void *ud_ptr);
++static int _wlmaker_dockapp_prefs_strcmp(const void *a_ptr, const void *b_ptr);
++
++/* == Exported methods ===================================================== */
++
++/* ------------------------------------------------------------------------- */
++wlmaker_dockapp_prefs_t *wlmaker_dockapp_prefs_load(
++    wlm_util_files_t *files_ptr,
++    const char *schema_fname_ptr,
++    const char *prefs_fname_ptr,
++    const char *name_ptr)
++{
++    char *found_ptr = NULL;
++    if (NULL == schema_fname_ptr && NULL != files_ptr) {
++        found_ptr = wlm_util_files_xdg_data_find(
++            files_ptr, "Dockapps.plist", S_IFREG);
++        schema_fname_ptr = found_ptr;
++    }
++    if (NULL == schema_fname_ptr || NULL == name_ptr) return NULL;
++
++    bspl_object_t *o = bspl_create_object_from_plist_file(schema_fname_ptr);
++    if (NULL != found_ptr) free(found_ptr);
++    bspl_dict_t *schema_dict_ptr = bspl_dict_from_object(o);
++    if (NULL == schema_dict_ptr) {
++        if (NULL != o) bspl_object_unref(o);
++        return NULL;
++    }
++    bspl_dict_t *app_dict_ptr = bspl_dict_get_dict(
++        bspl_dict_get_dict(schema_dict_ptr, "Dockapps"), name_ptr);
++    if (NULL == app_dict_ptr) {
++        bspl_dict_unref(schema_dict_ptr);
++        return NULL;
++    }
++
++    wlmaker_dockapp_prefs_t *prefs_ptr = logged_calloc(1, sizeof(*prefs_ptr));
++    if (NULL == prefs_ptr) {
++        bspl_dict_unref(schema_dict_ptr);
++        return NULL;
++    }
++    prefs_ptr->schema_dict_ptr = schema_dict_ptr;
++    prefs_ptr->app_dict_ptr = app_dict_ptr;
++
++    if (NULL != prefs_fname_ptr) {
++        prefs_ptr->fname_ptr = logged_strdup(prefs_fname_ptr);
++    } else if (NULL != files_ptr) {
++        char *n = bs_strdupf("%s.plist", name_ptr);
++        if (NULL != n) {
++            prefs_ptr->fname_ptr = wlm_util_files_xdg_config_fname(
++                files_ptr, n);
++            free(n);
++        }
++    }
++    if (NULL == prefs_ptr->fname_ptr) {
++        wlmaker_dockapp_prefs_destroy(prefs_ptr);
++        return NULL;
++    }
++
++    struct stat st;
++    if (0 == stat(prefs_ptr->fname_ptr, &st)) {
++        o = bspl_create_object_from_plist_file(prefs_ptr->fname_ptr);
++        prefs_ptr->values_dict_ptr = bspl_dict_from_object(o);
++        if (NULL == prefs_ptr->values_dict_ptr && NULL != o) {
++            bspl_object_unref(o);
++        }
++    }
++    if (NULL == prefs_ptr->values_dict_ptr) {
++        prefs_ptr->values_dict_ptr = bspl_dict_create();
++    }
++    if (NULL == prefs_ptr->values_dict_ptr) {
++        wlmaker_dockapp_prefs_destroy(prefs_ptr);
++        return NULL;
++    }
++    return prefs_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_dockapp_prefs_destroy(wlmaker_dockapp_prefs_t *prefs_ptr)
++{
++    if (NULL != prefs_ptr->values_dict_ptr) {
++        bspl_dict_unref(prefs_ptr->values_dict_ptr);
++    }
++    if (NULL != prefs_ptr->schema_dict_ptr) {
++        bspl_dict_unref(prefs_ptr->schema_dict_ptr);
++    }
++    if (NULL != prefs_ptr->fname_ptr) free(prefs_ptr->fname_ptr);
++    free(prefs_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dockapp_prefs_add_actions(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    wlmaker_server_t *server_ptr,
++    wlmaker_context_menu_t *context_menu_ptr)
++{
++    bspl_array_t *actions_ptr = bspl_dict_get_array(
++        prefs_ptr->app_dict_ptr, "Actions");
++    if (NULL == actions_ptr) return true;
++
++    for (size_t i = 0; i < bspl_array_size(actions_ptr); ++i) {
++        bspl_dict_t *a_ptr = bspl_dict_from_object(
++            bspl_array_at(actions_ptr, i));
++        const char *title_ptr = bspl_dict_get_string_value(a_ptr, "Title");
++        const char *cmd_ptr = bspl_dict_get_string_value(a_ptr, "Command");
++        if (NULL == title_ptr || NULL == cmd_ptr) continue;
++
++        char *expanded_ptr = wlmaker_dockapp_prefs_expand(prefs_ptr, cmd_ptr);
++        if (NULL == expanded_ptr) return false;
++        // Commands that end up empty (eg. 'Nothing' chosen): Left out.
++        if (strspn(expanded_ptr, " \t") == strlen(expanded_ptr)) {
++            free(expanded_ptr);
++            continue;
++        }
++        _wlmaker_dockapp_prefs_action_arg_t *arg_ptr = logged_calloc(
++            1, sizeof(*arg_ptr));
++        if (NULL == arg_ptr) {
++            free(expanded_ptr);
++            return false;
++        }
++        arg_ptr->server_ptr = server_ptr;
++        arg_ptr->command_ptr = expanded_ptr;
++        if (!wlmaker_context_menu_add_option(
++                context_menu_ptr, NULL, wlmaker_i18n(title_ptr),
++                WLMTK_MENU_ITEM_INDICATOR_NONE, false,
++                _wlmaker_dockapp_prefs_action_callback, arg_ptr,
++                _wlmaker_dockapp_prefs_action_arg_free)) return false;
++    }
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dockapp_prefs_add_preferences(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    wlmaker_context_menu_t *context_menu_ptr)
++{
++    bspl_array_t *list_ptr = bspl_dict_get_array(
++        prefs_ptr->app_dict_ptr, "Preferences");
++    if (NULL == list_ptr || 0 == bspl_array_size(list_ptr)) return true;
++
++    wlmtk_menu_t *menu_ptr = wlmaker_context_menu_add_submenu(
++        context_menu_ptr, NULL, wlmaker_i18n("Preferences"));
++    if (NULL == menu_ptr) return false;
++
++    for (size_t i = 0; i < bspl_array_size(list_ptr); ++i) {
++        bspl_dict_t *p_ptr = bspl_dict_from_object(bspl_array_at(list_ptr, i));
++        const char *key_ptr = bspl_dict_get_string_value(p_ptr, "Key");
++        const char *title_ptr = bspl_dict_get_string_value(p_ptr, "Title");
++        if (NULL == key_ptr || NULL == title_ptr) continue;
++        const char *current_ptr = wlmaker_dockapp_prefs_value(
++            prefs_ptr, key_ptr);
++        const char *type_ptr = bspl_dict_get_string_value(p_ptr, "Type");
++
++        if (NULL != type_ptr && 0 == strcmp(type_ptr, "Bool")) {
++            bool on = false;
++            if (NULL != current_ptr) {
++                on = (0 == strcasecmp(current_ptr, "Yes") ||
++                      0 == strcasecmp(current_ptr, "True") ||
++                      0 == strcasecmp(current_ptr, "On") ||
++                      0 == strcasecmp(current_ptr, "Enabled"));
++            }
++            if (!_wlmaker_dockapp_prefs_add_option(
++                    prefs_ptr, context_menu_ptr, menu_ptr,
++                    wlmaker_i18n(title_ptr),
++                    WLMTK_MENU_ITEM_INDICATOR_CHECK, on,
++                    key_ptr, on ? "No" : "Yes")) return false;
++            continue;
++        }
++
++        // A choice: A submenu, with a radio button per value.
++        wlmtk_menu_t *sub_ptr = wlmaker_context_menu_add_submenu(
++            context_menu_ptr, menu_ptr, wlmaker_i18n(title_ptr));
++        if (NULL == sub_ptr) return false;
++        bspl_array_t *choices_ptr = _wlmaker_dockapp_prefs_choices(
++            prefs_ptr, p_ptr);
++        for (size_t c = 0;
++             NULL != choices_ptr && c < bspl_array_size(choices_ptr); ++c) {
++            bspl_array_t *pair_ptr = bspl_array_from_object(
++                bspl_array_at(choices_ptr, c));
++            if (NULL == pair_ptr || 2 > bspl_array_size(pair_ptr)) continue;
++            if (!_wlmaker_dockapp_prefs_add_choice(
++                    prefs_ptr, context_menu_ptr, sub_ptr, key_ptr,
++                    current_ptr,
++                    bspl_array_string_value_at(pair_ptr, 0),
++                    wlmaker_i18n(bspl_array_string_value_at(pair_ptr, 1)))) {
++                return false;
++            }
++        }
++
++        // Entries of a directory, eg. the network interfaces.
++        const char *dir_ptr = bspl_dict_get_string_value(
++            p_ptr, "ChoicesFromDirectory");
++        if (NULL == dir_ptr) continue;
++        bspl_array_t *exclude_ptr = bspl_dict_get_array(p_ptr, "Exclude");
++        DIR *d = opendir(dir_ptr);
++        if (NULL == d) continue;
++        char *names[64];
++        size_t n = 0;
++        for (struct dirent *e = readdir(d); NULL != e && n < 64;
++             e = readdir(d)) {
++            if ('.' == e->d_name[0]) continue;
++            bool excluded = false;
++            for (size_t x = 0;
++                 NULL != exclude_ptr && x < bspl_array_size(exclude_ptr);
++                 ++x) {
++                const char *v = bspl_array_string_value_at(exclude_ptr, x);
++                if (NULL != v && 0 == strcmp(v, e->d_name)) excluded = true;
++            }
++            if (excluded) continue;
++            names[n] = logged_strdup(e->d_name);
++            if (NULL != names[n]) ++n;
++        }
++        closedir(d);
++        qsort(names, n, sizeof(names[0]), _wlmaker_dockapp_prefs_strcmp);
++        bool rv = true;
++        for (size_t k = 0; k < n; ++k) {
++            rv = rv && _wlmaker_dockapp_prefs_add_choice(
++                prefs_ptr, context_menu_ptr, sub_ptr, key_ptr,
++                current_ptr, names[k], names[k]);
++            free(names[k]);
++        }
++        if (!rv) return false;
++    }
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++const char *wlmaker_dockapp_prefs_value(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    const char *key_ptr)
++{
++    const char *v = bspl_dict_get_string_value(
++        prefs_ptr->values_dict_ptr, key_ptr);
++    if (NULL != v) return v;
++    return bspl_dict_get_string_value(
++        _wlmaker_dockapp_prefs_find(prefs_ptr, key_ptr), "Default");
++}
++
++/* ------------------------------------------------------------------------- */
++char *wlmaker_dockapp_prefs_expand(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    const char *command_ptr)
++{
++    bs_dynbuf_t dynbuf = {};
++    if (!bs_dynbuf_init(&dynbuf, 256, 65536)) return NULL;
++    bool rv = true;
++    for (const char *p = command_ptr; rv && '\0' != *p; ) {
++        const char *end_ptr;
++        if ('$' == p[0] && '{' == p[1] &&
++            NULL != (end_ptr = strchr(p + 2, '}'))) {
++            char key[64];
++            size_t len = BS_MIN((size_t)(end_ptr - p - 2), sizeof(key) - 1);
++            memcpy(key, p + 2, len);
++            key[len] = '\0';
++            const char *v = wlmaker_dockapp_prefs_value(prefs_ptr, key);
++            if (NULL != v) rv = bs_dynbuf_append(&dynbuf, v, strlen(v));
++            p = end_ptr + 1;
++        } else {
++            rv = bs_dynbuf_append_char(&dynbuf, *p++);
++        }
++    }
++    rv = rv && bs_dynbuf_append_char(&dynbuf, '\0');
++    char *s = rv ? logged_strdup(dynbuf.data_ptr) : NULL;
++    bs_dynbuf_fini(&dynbuf);
++    return s;
++}
++
++/** Arguments for @ref _wlmaker_dockapp_prefs_copy_entry. */
++typedef struct {
++    /** Copy to. */
++    bspl_dict_t               *dict_ptr;
++    /** Key to skip. */
++    const char                *skip_key_ptr;
++} _wlmaker_dockapp_prefs_copy_arg_t;
++
++/** Copies an entry into a dict, except for the skipped key. */
++static bool _wlmaker_dockapp_prefs_copy_entry(
++    const char *key_ptr,
++    bspl_object_t *object_ptr,
++    void *ud_ptr)
++{
++    _wlmaker_dockapp_prefs_copy_arg_t *arg_ptr = ud_ptr;
++    if (0 == strcmp(key_ptr, arg_ptr->skip_key_ptr)) return true;
++    return bspl_dict_add(arg_ptr->dict_ptr, key_ptr, object_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dockapp_prefs_store(
++    const char *fname_ptr,
++    const char *key_ptr,
++    const char *value_ptr)
++{
++    bspl_dict_t *old_dict_ptr = NULL;
++    struct stat st;
++    if (0 == stat(fname_ptr, &st)) {
++        bspl_object_t *o = bspl_create_object_from_plist_file(fname_ptr);
++        old_dict_ptr = bspl_dict_from_object(o);
++        if (NULL == old_dict_ptr && NULL != o) bspl_object_unref(o);
++    }
++
++    bool rv = false;
++    bspl_dict_t *dict_ptr = bspl_dict_create();
++    bspl_string_t *s_ptr = bspl_string_create(value_ptr);
++    if (NULL == dict_ptr || NULL == s_ptr) goto done;
++    _wlmaker_dockapp_prefs_copy_arg_t arg = {
++        .dict_ptr = dict_ptr, .skip_key_ptr = key_ptr };
++    if (NULL != old_dict_ptr &&
++        !bspl_dict_foreach(old_dict_ptr, _wlmaker_dockapp_prefs_copy_entry,
++                           &arg)) goto done;
++    if (!bspl_dict_add(dict_ptr, key_ptr, bspl_object_from_string(s_ptr))) {
++        goto done;
++    }
++
++    bs_dynbuf_t dynbuf = {};
++    if (!bs_dynbuf_init(&dynbuf, 1024, SIZE_MAX)) goto done;
++    rv = bspl_object_write(bspl_object_from_dict(dict_ptr), &dynbuf) &&
++        bs_dynbuf_append_char(&dynbuf, '\n') &&
++        bs_dynbuf_write_file(&dynbuf, fname_ptr, S_IRUSR | S_IWUSR);
++    bs_dynbuf_fini(&dynbuf);
++    if (!rv) bs_log(BS_WARNING, "Failed to store \"%s\"", fname_ptr);
++
++done:
++    if (NULL != s_ptr) bspl_string_unref(s_ptr);
++    if (NULL != dict_ptr) bspl_dict_unref(dict_ptr);
++    if (NULL != old_dict_ptr) bspl_dict_unref(old_dict_ptr);
++    return rv;
++}
++
++/* == Local (static) methods =============================================== */
++
++/* ------------------------------------------------------------------------- */
++/** @return The schema's dict of preference `key_ptr`, or NULL. */
++bspl_dict_t *_wlmaker_dockapp_prefs_find(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    const char *key_ptr)
++{
++    bspl_array_t *list_ptr = bspl_dict_get_array(
++        prefs_ptr->app_dict_ptr, "Preferences");
++    for (size_t i = 0; NULL != list_ptr && i < bspl_array_size(list_ptr);
++         ++i) {
++        bspl_dict_t *p_ptr = bspl_dict_from_object(bspl_array_at(list_ptr, i));
++        const char *k = bspl_dict_get_string_value(p_ptr, "Key");
++        if (NULL != k && 0 == strcmp(k, key_ptr)) return p_ptr;
++    }
++    return NULL;
++}
++
++/* ------------------------------------------------------------------------- */
++/** @return The preference's choices: Its own, or the named shared list. */
++bspl_array_t *_wlmaker_dockapp_prefs_choices(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    bspl_dict_t *pref_dict_ptr)
++{
++    bspl_object_t *o = bspl_dict_get(pref_dict_ptr, "Choices");
++    bspl_array_t *a_ptr = bspl_array_from_object(o);
++    if (NULL != a_ptr) return a_ptr;
++    const char *name_ptr = bspl_string_value_from_object(o);
++    if (NULL == name_ptr) return NULL;
++    return bspl_dict_get_array(
++        bspl_dict_get_dict(prefs_ptr->schema_dict_ptr, "Choices"), name_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Adds a radio button for `value_ptr`: Checked if it is the current. */
++bool _wlmaker_dockapp_prefs_add_choice(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    wlmaker_context_menu_t *context_menu_ptr,
++    wlmtk_menu_t *menu_ptr,
++    const char *key_ptr,
++    const char *current_ptr,
++    const char *value_ptr,
++    const char *title_ptr)
++{
++    if (NULL == value_ptr || NULL == title_ptr) return true;
++    return _wlmaker_dockapp_prefs_add_option(
++        prefs_ptr, context_menu_ptr, menu_ptr, title_ptr,
++        WLMTK_MENU_ITEM_INDICATOR_RADIO,
++        NULL != current_ptr && 0 == strcmp(current_ptr, value_ptr),
++        key_ptr, value_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Adds an item that stores `value_ptr` for `key_ptr` when triggered. */
++bool _wlmaker_dockapp_prefs_add_option(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    wlmaker_context_menu_t *context_menu_ptr,
++    wlmtk_menu_t *menu_ptr,
++    const char *title_ptr,
++    wlmtk_menu_item_indicator_t indicator,
++    bool checked,
++    const char *key_ptr,
++    const char *value_ptr)
++{
++    _wlmaker_dockapp_prefs_store_arg_t *arg_ptr = logged_calloc(
++        1, sizeof(*arg_ptr));
++    if (NULL == arg_ptr) return false;
++    arg_ptr->fname_ptr = logged_strdup(prefs_ptr->fname_ptr);
++    arg_ptr->key_ptr = logged_strdup(key_ptr);
++    arg_ptr->value_ptr = logged_strdup(value_ptr);
++    if (NULL == arg_ptr->fname_ptr || NULL == arg_ptr->key_ptr ||
++        NULL == arg_ptr->value_ptr) {
++        _wlmaker_dockapp_prefs_store_arg_free(arg_ptr);
++        return false;
++    }
++    return wlmaker_context_menu_add_option(
++        context_menu_ptr, menu_ptr, title_ptr, indicator, checked,
++        _wlmaker_dockapp_prefs_store_callback, arg_ptr,
++        _wlmaker_dockapp_prefs_store_arg_free);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Item callback: Stores the preference. The dock-app sees the change. */
++void _wlmaker_dockapp_prefs_store_callback(void *ud_ptr)
++{
++    _wlmaker_dockapp_prefs_store_arg_t *arg_ptr = ud_ptr;
++    wlmaker_dockapp_prefs_store(
++        arg_ptr->fname_ptr, arg_ptr->key_ptr, arg_ptr->value_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Releases a @ref _wlmaker_dockapp_prefs_store_arg_t. */
++void _wlmaker_dockapp_prefs_store_arg_free(void *ud_ptr)
++{
++    _wlmaker_dockapp_prefs_store_arg_t *arg_ptr = ud_ptr;
++    if (NULL != arg_ptr->fname_ptr) free(arg_ptr->fname_ptr);
++    if (NULL != arg_ptr->key_ptr) free(arg_ptr->key_ptr);
++    if (NULL != arg_ptr->value_ptr) free(arg_ptr->value_ptr);
++    free(arg_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Item callback: Runs the action's command. */
++void _wlmaker_dockapp_prefs_action_callback(void *ud_ptr)
++{
++    _wlmaker_dockapp_prefs_action_arg_t *arg_ptr = ud_ptr;
++    if (NULL == arg_ptr->server_ptr) return;
++    wlmaker_action_execute(
++        arg_ptr->server_ptr, WLMAKER_ACTION_SHELL_EXECUTE,
++        arg_ptr->command_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Releases a @ref _wlmaker_dockapp_prefs_action_arg_t. */
++void _wlmaker_dockapp_prefs_action_arg_free(void *ud_ptr)
++{
++    _wlmaker_dockapp_prefs_action_arg_t *arg_ptr = ud_ptr;
++    free(arg_ptr->command_ptr);
++    free(arg_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Compares strings, for qsort(). */
++int _wlmaker_dockapp_prefs_strcmp(const void *a_ptr, const void *b_ptr)
++{
++    return strcmp(*(char *const*)a_ptr, *(char *const*)b_ptr);
++}
++
++/* == Unit tests =========================================================== */
++
++static void test_load_expand(bs_test_t *test_ptr);
++static void test_store(bs_test_t *test_ptr);
++static void test_menu(bs_test_t *test_ptr);
++static void test_installed(bs_test_t *test_ptr);
++
++static const bs_test_case_t _wlmaker_dockapp_prefs_test_cases[] = {
++    { true, "load_expand", test_load_expand },
++    { true, "store", test_store },
++    { true, "menu", test_menu },
++    { true, "installed", test_installed },
++    BS_TEST_CASE_SENTINEL()
++};
++
++const bs_test_set_t wlmaker_dockapp_prefs_test_set = BS_TEST_SET(
++    true, "dockapp_prefs", _wlmaker_dockapp_prefs_test_cases);
++
++/** A schema, for the tests. */
++static const char _test_schema[] =
++    "{ Choices = { Theme = ((Default, \"Default Colors\"), (Amber, Amber)); };"
++    "  Dockapps = { app = {"
++    "    Actions = ( { Title = Open; Command = \"run ${Cmd} --x\"; },"
++    "                { Title = Never; Command = \"${Empty}\"; } );"
++    "    Preferences = ("
++    "      { Key = Theme; Title = Theme; Choices = Theme; Default = Default; },"
++    "      { Key = Seconds; Title = Seconds; Type = Bool; Default = No; },"
++    "      { Key = Cmd; Title = Command; Default = cal;"
++    "        Choices = ((cal, Cal), (date, Date)); },"
++    "      { Key = Empty; Title = E; Default = \"\"; Choices = ((\"\", No)); },"
++    "      { Key = Dir; Title = Dir; Default = All; Choices = ((All, All));"
++    "        ChoicesFromDirectory = \"%s\"; Exclude = (lo); }"
++    "    ); }; }; }";
++
++/** Writes `content_ptr` into the file at `path_ptr`. */
++static bool _test_write(const char *path_ptr, const char *content_ptr)
++{
++    FILE *f = fopen(path_ptr, "w");
++    if (NULL == f) return false;
++    bool rv = 0 <= fputs(content_ptr, f);
++    return 0 == fclose(f) && rv;
++}
++
++/** Writes the test schema, with the directory `dir_ptr`. */
++static bool _test_write_schema(const char *path_ptr, const char *dir_ptr)
++{
++    char buf[sizeof(_test_schema) + 256];
++    snprintf(buf, sizeof(buf), _test_schema, dir_ptr);
++    return _test_write(path_ptr, buf);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Loads values and defaults, and expands commands. */
++void test_load_expand(bs_test_t *test_ptr)
++{
++    const char *schema_ptr = bs_test_temp_path(test_ptr, "Dockapps.plist");
++    const char *values_ptr = bs_test_temp_path(test_ptr, "app.plist");
++    BS_TEST_VERIFY_TRUE_OR_RETURN(
++        test_ptr, _test_write_schema(schema_ptr, "/nonexistent"));
++
++    BS_TEST_VERIFY_EQ(test_ptr, NULL, wlmaker_dockapp_prefs_load(
++                          NULL, schema_ptr, values_ptr, "other"));
++
++    // No preferences file: The defaults.
++    wlmaker_dockapp_prefs_t *p = wlmaker_dockapp_prefs_load(
++        NULL, schema_ptr, values_ptr, "app");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, p);
++    BS_TEST_VERIFY_STREQ(test_ptr, "No",
++                         wlmaker_dockapp_prefs_value(p, "Seconds"));
++    BS_TEST_VERIFY_EQ(test_ptr, NULL, wlmaker_dockapp_prefs_value(p, "X"));
++    char *c = wlmaker_dockapp_prefs_expand(p, "run ${Cmd} --x ${X}$");
++    BS_TEST_VERIFY_STREQ(test_ptr, "run cal --x $", c);
++    free(c);
++    wlmaker_dockapp_prefs_destroy(p);
++
++    BS_TEST_VERIFY_TRUE_OR_RETURN(
++        test_ptr, _test_write(values_ptr, "{ Cmd = date; Seconds = Yes; }"));
++    p = wlmaker_dockapp_prefs_load(NULL, schema_ptr, values_ptr, "app");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, p);
++    BS_TEST_VERIFY_STREQ(test_ptr, "Yes",
++                         wlmaker_dockapp_prefs_value(p, "Seconds"));
++    c = wlmaker_dockapp_prefs_expand(p, "run ${Cmd}");
++    BS_TEST_VERIFY_STREQ(test_ptr, "run date", c);
++    free(c);
++    wlmaker_dockapp_prefs_destroy(p);
++
++    unlink(values_ptr);
++    unlink(schema_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Stores values, keeping the others. */
++void test_store(bs_test_t *test_ptr)
++{
++    const char *values_ptr = bs_test_temp_path(test_ptr, "app.plist");
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapp_prefs_store(
++                            values_ptr, "A", "1"));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapp_prefs_store(
++                            values_ptr, "B", "x y"));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapp_prefs_store(
++                            values_ptr, "A", "2"));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapp_prefs_store(
++                            values_ptr, "TZ", "Asia/Tokyo"));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapp_prefs_store(
++                            values_ptr, "Cmd", "sh -c 'cal; read x' \"$@\""));
++
++    bspl_object_t *o = bspl_create_object_from_plist_file(values_ptr);
++    bspl_dict_t *d = bspl_dict_from_object(o);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++    BS_TEST_VERIFY_STREQ(test_ptr, "2", bspl_dict_get_string_value(d, "A"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "x y", bspl_dict_get_string_value(d, "B"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "Asia/Tokyo",
++                         bspl_dict_get_string_value(d, "TZ"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "sh -c 'cal; read x' \"$@\"",
++                         bspl_dict_get_string_value(d, "Cmd"));
++    bspl_dict_unref(d);
++
++    // The file is replaced; a backup may be left: Clean up both.
++    unlink(values_ptr);
++    char *b = bs_strdupf("%s.old", values_ptr);
++    if (NULL != b) {
++        unlink(b);
++        free(b);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Builds the menu, and stores a choice. */
++void test_menu(bs_test_t *test_ptr)
++{
++    const char *schema_ptr = bs_test_temp_path(test_ptr, "Dockapps.plist");
++    const char *values_ptr = bs_test_temp_path(test_ptr, "app.plist");
++    const char *dir_ptr = bs_test_temp_path(test_ptr, "dir");
++    BS_TEST_VERIFY_EQ_OR_RETURN(test_ptr, 0, mkdir(dir_ptr, 0700));
++    const char *eth_ptr = bs_test_temp_path(test_ptr, "dir/eth0");
++    const char *lo_ptr = bs_test_temp_path(test_ptr, "dir/lo");
++    BS_TEST_VERIFY_TRUE_OR_RETURN(test_ptr, _test_write(eth_ptr, ""));
++    BS_TEST_VERIFY_TRUE_OR_RETURN(test_ptr, _test_write(lo_ptr, ""));
++    BS_TEST_VERIFY_TRUE_OR_RETURN(
++        test_ptr, _test_write_schema(schema_ptr, dir_ptr));
++    BS_TEST_VERIFY_TRUE_OR_RETURN(
++        test_ptr, _test_write(values_ptr, "{ Theme = Amber; }"));
++
++    wlmaker_config_style_t style = {
++        .window_style_ptr = wlmtk_window_style_create(),
++        .menu_style_ptr = wlmtk_menu_style_create()
++    };
++    wlmaker_server_t server = { .style_ptr = &style };
++    int owner;
++    wlmaker_context_menu_t *cm_ptr = wlmaker_context_menu_create(
++        &server, &owner, "app");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, cm_ptr);
++    wlmaker_dockapp_prefs_t *p = wlmaker_dockapp_prefs_load(
++        NULL, schema_ptr, values_ptr, "app");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, p);
++
++    // The 'Never' action expands to nothing: Left out.
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapp_prefs_add_actions(
++                            p, NULL, cm_ptr));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dockapp_prefs_add_preferences(
++                            p, cm_ptr));
++    wlmtk_menu_t *m = wlmaker_context_menu_menu(cm_ptr);
++    BS_TEST_VERIFY_EQ_OR_RETURN(test_ptr, 2, wlmtk_menu_items_size(m));
++    wlmtk_menu_t *prefs_m = wlmtk_menu_item_get_submenu(
++        wlmtk_menu_item_at(m, 1));
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, prefs_m);
++    BS_TEST_VERIFY_EQ(test_ptr, 5, wlmtk_menu_items_size(prefs_m));
++
++    // Theme: Amber is checked.
++    wlmtk_menu_t *theme_m = wlmtk_menu_item_get_submenu(
++        wlmtk_menu_item_at(prefs_m, 0));
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, theme_m);
++    BS_TEST_VERIFY_EQ(test_ptr, 2, wlmtk_menu_items_size(theme_m));
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_menu_item_checked(
++                             wlmtk_menu_item_at(theme_m, 0)));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_menu_item_checked(
++                            wlmtk_menu_item_at(theme_m, 1)));
++    // Seconds: An unchecked check box.
++    BS_TEST_VERIFY_EQ(test_ptr, NULL, wlmtk_menu_item_get_submenu(
++                          wlmtk_menu_item_at(prefs_m, 1)));
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_menu_item_checked(
++                             wlmtk_menu_item_at(prefs_m, 1)));
++    // From the directory: All, and eth0. Not lo.
++    wlmtk_menu_t *dir_m = wlmtk_menu_item_get_submenu(
++        wlmtk_menu_item_at(prefs_m, 4));
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, dir_m);
++    BS_TEST_VERIFY_EQ(test_ptr, 2, wlmtk_menu_items_size(dir_m));
++
++    // Checking 'Seconds', and choosing 'eth0', stores them.
++    wlmtk_menu_item_trigger(wlmtk_menu_item_at(prefs_m, 1));
++    wlmtk_menu_item_trigger(wlmtk_menu_item_at(dir_m, 1));
++    wlmaker_dockapp_prefs_destroy(p);
++    p = wlmaker_dockapp_prefs_load(NULL, schema_ptr, values_ptr, "app");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, p);
++    BS_TEST_VERIFY_STREQ(test_ptr, "Yes",
++                         wlmaker_dockapp_prefs_value(p, "Seconds"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "eth0",
++                         wlmaker_dockapp_prefs_value(p, "Dir"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "Amber",
++                         wlmaker_dockapp_prefs_value(p, "Theme"));
++    wlmaker_dockapp_prefs_destroy(p);
++
++    wlmaker_context_menu_destroy(cm_ptr);
++    wlmtk_window_style_ref_release(
++        wlmtk_window_style_to_ref(style.window_style_ptr));
++    wlmtk_menu_style_ref_release(wlmtk_menu_style_to_ref(style.menu_style_ptr));
++    unlink(eth_ptr);
++    unlink(lo_ptr);
++    rmdir(dir_ptr);
++    unlink(schema_ptr);
++    unlink(values_ptr);
++    char *b = bs_strdupf("%s.old", values_ptr);
++    if (NULL != b) {
++        unlink(b);
++        free(b);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** The installed `Dockapps.plist` parses, and has the dock-apps. */
++void test_installed(bs_test_t *test_ptr)
++{
++    const char *fname_ptr = bs_test_data_path(
++        test_ptr, "../../share/wlmaker/Dockapps.plist");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, fname_ptr);
++    static const char *names[] = {
++        "wlmcalclock", "wlmcpugraph", "wlmmemgraph", "wlmnetgraph",
++        "wlmmixer", "wlmclock", NULL };
++    for (const char **n = names; NULL != *n; ++n) {
++        wlmaker_dockapp_prefs_t *p = wlmaker_dockapp_prefs_load(
++            NULL, fname_ptr, "/nonexistent/x.plist", *n);
++        BS_TEST_VERIFY_NEQ(test_ptr, NULL, p);
++        if (NULL == p) continue;
++        BS_TEST_VERIFY_STREQ(test_ptr, "Default",
++                             wlmaker_dockapp_prefs_value(p, "Theme"));
++        wlmaker_dockapp_prefs_destroy(p);
++    }
++}
++
++/* == End of dockapp_prefs.c =============================================== */
+diff --git a/src/dockapp_prefs.h b/src/dockapp_prefs.h
+new file mode 100644
+index 0000000..975441e
+--- /dev/null
++++ b/src/dockapp_prefs.h
+@@ -0,0 +1,126 @@
++/* ========================================================================= */
++/**
++ * @file dockapp_prefs.h
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#ifndef __WLMAKER_DOCKAPP_PREFS_H__
++#define __WLMAKER_DOCKAPP_PREFS_H__
++
++#include <stdbool.h>
++
++#include <libbase/libbase.h>
++#include <libbase/plist.h>
++
++/** Forward declaration: Preferences of a dock-app, for its menu. */
++typedef struct _wlmaker_dockapp_prefs_t wlmaker_dockapp_prefs_t;
++
++#include "context_menu.h"
++#include "server.h"
++#include "util/files.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif  // __cplusplus
++
++/**
++ * Loads what the menu of dock-app `name_ptr` offers: Its actions and
++ * preferences, from `Dockapps.plist` (in the XDG data directories, eg.
++ * /usr/share/wlmaker/Dockapps.plist). And the current values, from the
++ * dock-app's preferences file `${XDG_CONFIG_HOME}/wlmaker/<name>.plist`.
++ *
++ * @param files_ptr
++ * @param schema_fname_ptr    Path to `Dockapps.plist`, or NULL to look it up.
++ * @param prefs_fname_ptr     Path of the preferences file, or NULL for the
++ *                            default.
++ * @param name_ptr            The dock-app's name, eg. "wlmcalclock".
++ *
++ * @return The preferences, or NULL if there are none for the dock-app.
++ */
++wlmaker_dockapp_prefs_t *wlmaker_dockapp_prefs_load(
++    wlm_util_files_t *files_ptr,
++    const char *schema_fname_ptr,
++    const char *prefs_fname_ptr,
++    const char *name_ptr);
++
++/** Destroys the preferences. */
++void wlmaker_dockapp_prefs_destroy(wlmaker_dockapp_prefs_t *prefs_ptr);
++
++/**
++ * Adds the dock-app's actions to the context menu: Items running a command.
++ *
++ * @param prefs_ptr
++ * @param server_ptr          Runs the commands.
++ * @param context_menu_ptr
++ *
++ * @return true on success.
++ */
++bool wlmaker_dockapp_prefs_add_actions(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    wlmaker_server_t *server_ptr,
++    wlmaker_context_menu_t *context_menu_ptr);
++
++/**
++ * Adds the "Preferences" submenu to the context menu: Check boxes for the
++ * boolean preferences, and submenus with radio buttons for the others.
++ * Choosing one stores it in the preferences file.
++ *
++ * @param prefs_ptr
++ * @param context_menu_ptr
++ *
++ * @return true on success.
++ */
++bool wlmaker_dockapp_prefs_add_preferences(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    wlmaker_context_menu_t *context_menu_ptr);
++
++/**
++ * @return The current value of preference `key_ptr`: As stored, or its
++ *     default. NULL if unknown.
++ */
++const char *wlmaker_dockapp_prefs_value(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    const char *key_ptr);
++
++/**
++ * Expands ${Key} in `command_ptr` with the current values.
++ *
++ * @return The command, to be free()-ed. NULL on error.
++ */
++char *wlmaker_dockapp_prefs_expand(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    const char *command_ptr);
++
++/**
++ * Stores `value_ptr` for `key_ptr` in the preferences file `fname_ptr`,
++ * keeping all other values in it. The file is replaced atomically.
++ *
++ * @return true on success.
++ */
++bool wlmaker_dockapp_prefs_store(
++    const char *fname_ptr,
++    const char *key_ptr,
++    const char *value_ptr);
++
++/** Unit test cases. */
++extern const bs_test_set_t wlmaker_dockapp_prefs_test_set;
++
++#ifdef __cplusplus
++}  // extern "C"
++#endif  // __cplusplus
++
++#endif /* __WLMAKER_DOCKAPP_PREFS_H__ */
++/* == End of dockapp_prefs.h =============================================== */
+diff --git a/src/i18n.c b/src/i18n.c
+index 68f7cc8..8316e6d 100644
+--- a/src/i18n.c
++++ b/src/i18n.c
+@@ -54,6 +54,76 @@ static const wlmaker_i18n_entry_t _wlmaker_i18n_pt_br[] = {
+     { "Restore Default Launchers", "Restaurar lançadores padrão" },
+     { "Dock-app", "Dockapp" },
+     { "Workspace", "Área" },
++    { "Preferences", "Preferências" },
++    { "Theme", "Tema" },
++    { "Default Colors", "Cores padrão" },
++    { "Green LCD (Classic)", "LCD verde (clássico)" },
++    { "Amber", "Âmbar" },
++    { "Blue", "Azul" },
++    { "NeXT Grey", "Cinza NeXT" },
++    { "High Contrast", "Alto contraste" },
++    { "Every Half Second", "A cada meio segundo" },
++    { "Every Second", "A cada segundo" },
++    { "Every 2 Seconds", "A cada 2 segundos" },
++    { "Every 5 Seconds", "A cada 5 segundos" },
++    { "Filled", "Preenchido" },
++    { "Line Only", "Só a linha" },
++    { "Nothing", "Nada" },
++    { "Task Manager", "Gerenciador de tarefas" },
++    { "System Monitor", "Monitor do sistema" },
++    { "htop in a Terminal", "htop no terminal" },
++    { "Open Calendar", "Abrir calendário" },
++    { "Clock Style", "Estilo do relógio" },
++    { "Analog", "Analógico" },
++    { "12-Hour Clock (AM/PM)", "Relógio de 12 horas (AM/PM)" },
++    { "Show Seconds", "Mostrar segundos" },
++    { "Blinking Colon", "Dois-pontos piscando" },
++    { "Calendar Style", "Estilo do calendário" },
++    { "Paper Sheet", "Folha de papel" },
++    { "Digital Display", "Visor digital" },
++    { "Show the Year", "Mostrar o ano" },
++    { "Time Zone", "Fuso horário" },
++    { "Local Time", "Hora local" },
++    { "Lisbon", "Lisboa" },
++    { "London", "Londres" },
++    { "New York", "Nova York" },
++    { "Tokyo", "Tóquio" },
++    { "On Click", "Ao clicar" },
++    { "GNOME Calendar", "Calendário do GNOME" },
++    { "Thunderbird Calendar", "Calendário do Thunderbird" },
++    { "Calendar in a Terminal", "Calendário no terminal" },
++    { "Open Task Manager", "Abrir gerenciador de tarefas" },
++    { "Show", "Mostrar" },
++    { "Each Core", "Cada núcleo" },
++    { "Total Usage", "Uso total" },
++    { "Graph Style", "Estilo do gráfico" },
++    { "Show Percentage", "Mostrar porcentagem" },
++    { "Update", "Atualizar" },
++    { "Show Usage", "Mostrar uso" },
++    { "Units", "Unidades" },
++    { "Percent", "Porcentagem" },
++    { "Show Swap", "Mostrar swap" },
++    { "Open Network Settings", "Abrir configurações de rede" },
++    { "All Interfaces", "Todas as interfaces" },
++    { "Show Text", "Mostrar texto" },
++    { "Text", "Texto" },
++    { "Graph Scale", "Escala do gráfico" },
++    { "Download / Upload", "Download / upload" },
++    { "Bytes per Second", "Bytes por segundo" },
++    { "Bits per Second", "Bits por segundo" },
++    { "Network Connections", "Conexões de rede" },
++    { "Network Information", "Informações de rede" },
++    { "nmtui in a Terminal", "nmtui no terminal" },
++    { "Mute / Unmute", "Silenciar / reativar som" },
++    { "Open Volume Control", "Abrir controle de volume" },
++    { "Click Mutes", "Clique silencia" },
++    { "Wheel Changes Volume", "Roda muda o volume" },
++    { "Volume Step", "Passo do volume" },
++    { "Maximum Volume", "Volume máximo" },
++    { "Volume Control", "Controle de volume" },
++    { "PulseAudio Volume Control", "Controle de volume do PulseAudio" },
++    { "PulseAudio Volume Control (Qt)", "Controle de volume do PulseAudio (Qt)" },
++    { "PipeWire Volume Control", "Controle de volume do PipeWire" },
+     { NULL, NULL }
+ };
+ 
+@@ -117,6 +187,9 @@ void test_translate(bs_test_t *test_ptr)
+     BS_TEST_VERIFY_STREQ(test_ptr, "Restaurar lançadores padrão",
+                          wlmaker_i18n("Restore Default Launchers"));
+     BS_TEST_VERIFY_STREQ(test_ptr, "Unknown", wlmaker_i18n("Unknown"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "Preferências", wlmaker_i18n("Preferences"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "Mostrar segundos",
++                         wlmaker_i18n("Show Seconds"));
+ 
+     wlmaker_i18n_set_locale("pt");
+     BS_TEST_VERIFY_STREQ(test_ptr, "Lançar", wlmaker_i18n("Launch"));
+diff --git a/src/icon_manager.c b/src/icon_manager.c
+index beb7ab4..75300fb 100644
+--- a/src/icon_manager.c
++++ b/src/icon_manager.c
+@@ -38,6 +38,7 @@
+ 
+ #include "clip.h"
+ #include "context_menu.h"
++#include "dockapp_prefs.h"
+ #include "dockapps.h"
+ #include "i18n.h"
+ #include "input/cursor.h"
+@@ -737,8 +738,10 @@ static void _wlmaker_toplevel_icon_menu_kill(void *ud_ptr)
+ 
+ /* ------------------------------------------------------------------------- */
+ /**
+- * Opens the dock-app tile's right-click menu: Moving it within the dock (the
+- * order is stored, as when dragging it), and terminating the dock-app.
++ * Opens the dock-app tile's right-click menu: The dock-app's own actions and
++ * its preferences (see @ref wlmaker_dockapp_prefs_t), moving it within the
++ * dock (the order is stored, as when dragging it), moving the Clip, and
++ * terminating the dock-app.
+  *
+  * @param toplevel_icon_ptr
+  */
+@@ -768,10 +771,26 @@ void _wlmaker_toplevel_icon_open_menu(
+     wlmaker_context_menu_t *cm_ptr = wlmaker_context_menu_create(
+         server_ptr, toplevel_icon_ptr,
+         NULL != name_ptr ? name_ptr : wlmaker_i18n("Dock-app"));
+-    if (NULL != name_ptr) free(name_ptr);
+-    if (NULL == cm_ptr) return;
++    wlmaker_dockapp_prefs_t *prefs_ptr = NULL;
++    if (NULL != name_ptr) {
++        prefs_ptr = wlmaker_dockapp_prefs_load(
++            server_ptr->files_ptr, NULL, NULL, name_ptr);
++        free(name_ptr);
++    }
++    if (NULL == cm_ptr) {
++        if (NULL != prefs_ptr) wlmaker_dockapp_prefs_destroy(prefs_ptr);
++        return;
++    }
+     bool rv = true;
+     size_t items = 0;
++    // The dock-app's own actions, and its preferences, come first.
++    if (NULL != prefs_ptr) {
++        size_t n = wlmtk_menu_items_size(wlmaker_context_menu_menu(cm_ptr));
++        rv = wlmaker_dockapp_prefs_add_actions(prefs_ptr, server_ptr, cm_ptr) &&
++            wlmaker_dockapp_prefs_add_preferences(prefs_ptr, cm_ptr);
++        items += wlmtk_menu_items_size(wlmaker_context_menu_menu(cm_ptr)) - n;
++        wlmaker_dockapp_prefs_destroy(prefs_ptr);
++    }
+     for (size_t i = 0; i < sizeof(moves) / sizeof(moves[0]); ++i) {
+         if (0 == wlmaker_dockapps_delta_towards(
+                 server_ptr->dockapps_ptr, tile_ptr, moves[i].direction)) {
+diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
+index 73e117e..4903a3c 100644
+--- a/tests/wlmaker_test.c
++++ b/tests/wlmaker_test.c
+@@ -29,6 +29,7 @@
+ #include "context_menu.h"
+ #include "corner.h"
+ #include "dock_position.h"
++#include "dockapp_prefs.h"
+ #include "i18n.h"
+ #include "dockapps.h"
+ #include "layer_panel.h"
+@@ -62,6 +63,7 @@ int main(int argc, const char **argv)
+         &wlmaker_context_menu_test_set,
+         &wlmaker_corner_test_set,
+         &wlmaker_dock_position_test_set,
++        &wlmaker_dockapp_prefs_test_set,
+         &wlmaker_i18n_test_set,
+         &wlmaker_dockapps_test_set,
+         &wlmaker_layer_panel_test_set,
+-- 
+2.55.0
+
