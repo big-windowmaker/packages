@@ -1,0 +1,605 @@
+From 9bd76806f0b4b1a45413982f1e9075d6a00ff262 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 16:50:32 -0300
+Subject: [PATCH] dock: Launches on a double-click, with Window Maker's dots
+ and launching look.
+
+As Window Maker's docked icons:
+
+* Launchers launch on a double-click; with `SingleClickLaunch = Yes` in
+  the configuration, on a click (as before). The double-click time is
+  `Mouse.DoubleClickTime`. A double-click on the launcher of a running
+  application shows it instead: Its windows are restored, the workspace of
+  one of them becomes the current one, and it is raised and activated.
+* A launcher whose application is not running shows three dots at its
+  lower left (make3Dots), instead of the "Running" label when it runs.
+* While launching, until a window of the `AppID` shows up (at most 10 s),
+  the launcher is stippled.
+* `AutoLaunch = Yes` in a launcher starts it when `wlmdock` starts: "Start
+  when Window Maker is started".
+
+Documents `SingleClickLaunch` and `DockSettingsCommand` in Config.plist.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ etc/Config.plist              |  11 +++
+ src/dock/launcher.c           | 178 ++++++++++++++++++++++++++++------
+ src/dock/launcher.h           |  19 ++++
+ src/dock_launchers.c          |  40 ++++++++
+ src/dock_launchers.h          |   9 ++
+ src/layer_panel.c             |  56 +++++++++++
+ src/util/subprocess_monitor.c |   7 ++
+ src/util/subprocess_monitor.h |   4 +
+ src/wlmdock.c                 |  29 ++++++
+ 9 files changed, 325 insertions(+), 28 deletions(-)
+
+diff --git a/etc/Config.plist b/etc/Config.plist
+index 7acc3c0..d9b0efd 100644
+--- a/etc/Config.plist
++++ b/etc/Config.plist
+@@ -38,6 +38,17 @@
+         NaturalScrolling = Enabled;
+     };
+ 
++    // Optional, as Window Maker's SingleClickLaunch: Whether the launchers
++    // of the Dock and the Clip launch on a click. By default (No), on a
++    // double-click; a double-click on a running application's launcher then
++    // shows the application.
++    // SingleClickLaunch = No;
++
++    // Optional: Command for "Settings..." in the menu of the launchers of
++    // the Dock and the Clip. Run as `<command> launcher Dock|Clip <index>`.
++    // Without it, the item is disabled.
++    // DockSettingsCommand = "/usr/bin/my-dock-settings";
++
+     // Optional: Pointer acceleration of all pointer devices (mice and
+     // touchpads). Without this section, libinput's defaults apply.
+     // Mouse = {
+diff --git a/src/dock/launcher.c b/src/dock/launcher.c
+index 62c9556..5000cc5 100644
+--- a/src/dock/launcher.c
++++ b/src/dock/launcher.c
+@@ -31,6 +31,8 @@
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <strings.h>
++#include <wayland-server-core.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ 
+@@ -78,6 +80,14 @@ struct _wlmdock_launcher_t {
+ 
+     /** The plist dict the launcher was created from. */
+     bspl_dict_t               *dict_ptr;
++    /** Whether launching: Shown dimmed, until the application runs. */
++    bool                      launching;
++    /** Ends @ref wlmdock_launcher_t::launching, if it takes too long. */
++    struct wl_event_source    *launching_timer_ptr;
++    /** Time of the last click, for telling double-clicks. 0 if none. */
++    uint32_t                  last_click_msec;
++    /** `AutoLaunch` of the plist: Launch when starting. */
++    char                      *autolaunch_ptr;
+     /** Handler for a right-click. */
+     wlmdock_launcher_menu_handler_t menu_handler;
+     /** Argument for @ref wlmdock_launcher_t::menu_handler. */
+@@ -95,9 +105,20 @@ static const bspl_desc_t _wlmdock_launcher_plist_desc[] = {
+         "CommandLine", true, wlmdock_launcher_t, cmdline_ptr, cmdline_ptr, ""),
+     BSPL_DESC_STRING(
+         "Icon", true, wlmdock_launcher_t, icon_path_ptr, icon_path_ptr, ""),
++    // Window Maker's "Start when Window Maker is started".
++    BSPL_DESC_STRING(
++        "AutoLaunch", false, wlmdock_launcher_t, autolaunch_ptr,
++        autolaunch_ptr, "No"),
+     BSPL_DESC_SENTINEL(),
+ };
+ 
++/** Window Maker's `SingleClickLaunch`: No, launch on a double-click. */
++static bool _wlmdock_launcher_single_click = false;
++/** Maximum time between the clicks of a double-click. */
++static uint32_t _wlmdock_launcher_double_click_msec = 300;
++/** How long a launcher shows as launching, at most. */
++static const int _wlmdock_launcher_launching_msec = 10000;
++
+ static void _wlmdock_launcher_update_overlay(wlmdock_launcher_t *launcher_ptr);
+ static struct wlr_buffer *_wlmdock_launcher_create_overlay_buffer(
+     wlmdock_launcher_t *launcher_ptr);
+@@ -109,6 +130,8 @@ static bool _wlmdock_launcher_pointer_button(
+     const wlmtk_button_event_t *button_event_ptr);
+ 
+ static void _wlmdock_launcher_start(wlmdock_launcher_t *launcher_ptr);
++static int _wlmdock_launcher_handle_launching_timer(void *data_ptr);
++static void _wlmdock_launcher_draw_dots(cairo_t *cairo_ptr, int size);
+ 
+ static void _wlmdock_launcher_handle_terminated(
+     void *userdata_ptr,
+@@ -278,6 +301,14 @@ void wlmdock_launcher_destroy(wlmdock_launcher_t *launcher_ptr)
+         launcher_ptr->subprocesses_ptr = NULL;
+     }
+ 
++    if (NULL != launcher_ptr->launching_timer_ptr) {
++        wl_event_source_remove(launcher_ptr->launching_timer_ptr);
++        launcher_ptr->launching_timer_ptr = NULL;
++    }
++    if (NULL != launcher_ptr->autolaunch_ptr) {
++        free(launcher_ptr->autolaunch_ptr);
++        launcher_ptr->autolaunch_ptr = NULL;
++    }
+     if (NULL != launcher_ptr->app_id_ptr) {
+         free(launcher_ptr->app_id_ptr);
+         launcher_ptr->app_id_ptr = NULL;
+@@ -339,11 +370,58 @@ void wlmdock_launcher_set_menu_handler(
+     launcher_ptr->menu_handler_ud_ptr = ud_ptr;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmdock_launcher_set_click_mode(
++    bool single_click,
++    uint32_t double_click_msec)
++{
++    _wlmdock_launcher_single_click = single_click;
++    _wlmdock_launcher_double_click_msec =
++        0 < double_click_msec ? double_click_msec : 300;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmdock_launcher_autolaunch(wlmdock_launcher_t *launcher_ptr)
++{
++    const char *v = launcher_ptr->autolaunch_ptr;
++    if (NULL == v || (0 != strcasecmp(v, "Yes") && 0 != strcasecmp(v, "True"))) {
++        return;
++    }
++    if (launcher_ptr->running) return;
++    wlmdock_launcher_launch(launcher_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmdock_launcher_launch(wlmdock_launcher_t *launcher_ptr)
+ {
+     _wlmdock_launcher_start(launcher_ptr);
++    // Shows as launching (only with an AppID, to tell when it runs).
++    if (NULL != launcher_ptr->app_id_ptr && '\0' != *launcher_ptr->app_id_ptr &&
++        !launcher_ptr->running && NULL != launcher_ptr->monitor_ptr) {
++        launcher_ptr->launching = true;
++        if (NULL == launcher_ptr->launching_timer_ptr) {
++            launcher_ptr->launching_timer_ptr = wl_event_loop_add_timer(
++                wlm_util_subprocess_monitor_event_loop(
++                    launcher_ptr->monitor_ptr),
++                _wlmdock_launcher_handle_launching_timer,
++                launcher_ptr);
++        }
++        if (NULL != launcher_ptr->launching_timer_ptr) {
++            wl_event_source_timer_update(launcher_ptr->launching_timer_ptr,
++                                         _wlmdock_launcher_launching_msec);
++        }
++    }
++    _wlmdock_launcher_update_overlay(launcher_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Timer: Launching took too long. Shows the launcher as before. */
++int _wlmdock_launcher_handle_launching_timer(void *data_ptr)
++{
++    wlmdock_launcher_t *launcher_ptr = data_ptr;
++    launcher_ptr->launching = false;
+     _wlmdock_launcher_update_overlay(launcher_ptr);
++    return 0;
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -407,42 +485,61 @@ struct wlr_buffer *_wlmdock_launcher_create_overlay_buffer(
+         toplevel_handles = wlmdock_toplevel_tracker_app_id_handles(
+             launcher_ptr->tracker_ptr, launcher_ptr->app_id_ptr);
+     }
+-    if ((NULL == toplevel_handles || bs_dllist_empty(toplevel_handles)) &&
+-        bs_ptr_set_empty(launcher_ptr->subprocesses_ptr)) {
+-        launcher_ptr->running = false;
+-        return wlr_buffer_ptr;
+-    }
+-    launcher_ptr->running = true;
+-
++    launcher_ptr->running =
++        (NULL != toplevel_handles && !bs_dllist_empty(toplevel_handles)) ||
++        // Without an AppID: While the processes it launched are alive.
++        ((NULL == launcher_ptr->app_id_ptr || '\0' == *launcher_ptr->app_id_ptr) &&
++         !bs_ptr_set_empty(launcher_ptr->subprocesses_ptr));
++    // With an AppID, launching lasts until a window shows up.
++    if (launcher_ptr->running) launcher_ptr->launching = false;
++    if (launcher_ptr->running && !launcher_ptr->launching) return wlr_buffer_ptr;
+ 
+     cairo_t *cairo_ptr = cairo_create_from_wlr_buffer(wlr_buffer_ptr);
+     if (NULL == cairo_ptr) {
+         wlr_buffer_drop(wlr_buffer_ptr);
+         return NULL;
+     }
+-
+-    float r, g, b, alpha;
+-    bs_gfxbuf_argb8888_to_floats(0xff12905a, &r, &g, &b, &alpha);
+-    cairo_pattern_t *cairo_pattern_ptr = cairo_pattern_create_rgba(
+-        r, g, b, alpha);
+-    cairo_set_source(cairo_ptr, cairo_pattern_ptr);
+-    cairo_pattern_destroy(cairo_pattern_ptr);
+-    cairo_rectangle(cairo_ptr, 0, s - 12 * s / 64, s, 12 * s / 64);
+-    cairo_fill(cairo_ptr);
+-    cairo_stroke(cairo_ptr);
+-
+-    cairo_select_font_face(cairo_ptr, "Helvetica",
+-                           CAIRO_FONT_SLANT_NORMAL,
+-                           CAIRO_FONT_WEIGHT_NORMAL);
+-    cairo_set_font_size(cairo_ptr, 10.0 * s / 64.0);
+-    cairo_set_source_argb8888(cairo_ptr, 0xffffffff);
+-    cairo_move_to(cairo_ptr, 4 * s / 64, s - 2 * s / 64);
+-    cairo_show_text(cairo_ptr, "Running");
+-
++    // As Window Maker: Three dots while the application is not running.
++    if (!launcher_ptr->running) _wlmdock_launcher_draw_dots(cairo_ptr, s);
++    // And stippled while launching.
++    if (launcher_ptr->launching) {
++        bs_gfxbuf_t *g_ptr = bs_gfxbuf_from_wlr_buffer(wlr_buffer_ptr);
++        cairo_surface_flush(cairo_get_target(cairo_ptr));
++        for (unsigned y = 0; y < g_ptr->height; ++y) {
++            for (unsigned x = y % 2; x < g_ptr->width; x += 2) {
++                g_ptr->data_ptr[y * g_ptr->width + x] = 0xff000000;
++            }
++        }
++        cairo_surface_mark_dirty(cairo_get_target(cairo_ptr));
++    }
+     cairo_destroy(cairo_ptr);
+     return wlr_buffer_ptr;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Draws Window Maker's three dots (make3Dots) at the lower left of a tile of
++ * `size`: Each 3 by 2 pixels, black and white.
++ */
++void _wlmdock_launcher_draw_dots(cairo_t *cairo_ptr, int size)
++{
++    static const int xs[3] = { 4, 9, 14 };
++    cairo_save(cairo_ptr);
++    cairo_set_antialias(cairo_ptr, CAIRO_ANTIALIAS_NONE);
++    for (int i = 0; i < 3; ++i) {
++        int x = xs[i], y = size - 6;
++        cairo_set_source_rgb(cairo_ptr, 0, 0, 0);
++        cairo_rectangle(cairo_ptr, x, y, 2, 1);
++        cairo_rectangle(cairo_ptr, x, y + 1, 1, 1);
++        cairo_fill(cairo_ptr);
++        cairo_set_source_rgb(cairo_ptr, 1, 1, 1);
++        cairo_rectangle(cairo_ptr, x + 2, y, 1, 2);
++        cairo_rectangle(cairo_ptr, x + 1, y + 1, 1, 1);
++        cairo_fill(cairo_ptr);
++    }
++    cairo_restore(cairo_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Implements @ref wlmtk_element_vmt_t::destroy. Calls
+@@ -487,8 +584,18 @@ bool _wlmdock_launcher_pointer_button(
+     if (BTN_LEFT != button_event_ptr->button) return true;
+     if (WLMTK_BUTTON_CLICK != button_event_ptr->type) return true;
+ 
+-    _wlmdock_launcher_start(launcher_ptr);
+-    _wlmdock_launcher_update_overlay(launcher_ptr);
++    // Window Maker launches on a double-click, unless SingleClickLaunch.
++    if (!_wlmdock_launcher_single_click) {
++        uint32_t t = button_event_ptr->time_msec;
++        bool double_click = 0 != launcher_ptr->last_click_msec &&
++            t - launcher_ptr->last_click_msec <=
++            _wlmdock_launcher_double_click_msec;
++        launcher_ptr->last_click_msec = double_click ? 0 : (t ? t : 1);
++        if (!double_click) return true;
++        // Running: The compositor shows it (Window Maker: unhides it).
++        if (launcher_ptr->running) return true;
++    }
++    wlmdock_launcher_launch(launcher_ptr);
+     return true;
+ }
+ 
+@@ -659,12 +766,27 @@ void test_create_from_plist(bs_test_t *test_ptr)
+         test_ptr, "chrome-56x56.png", launcher_ptr->icon_path_ptr);
+ 
+     BS_TEST_VERIFY_FALSE(test_ptr, launcher_ptr->running);
++    // Not running: Window Maker's dots, at the lower left.
++    struct wlr_buffer *o_ptr = _wlmdock_launcher_create_overlay_buffer(
++        launcher_ptr);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, o_ptr);
++    bs_gfxbuf_t *g_ptr = bs_gfxbuf_from_wlr_buffer(o_ptr);
++    BS_TEST_VERIFY_EQ(test_ptr, 0xff000000, g_ptr->data_ptr[90 * 96 + 4]);
++    BS_TEST_VERIFY_EQ(test_ptr, 0xffffffff, g_ptr->data_ptr[90 * 96 + 6]);
++    BS_TEST_VERIFY_EQ(test_ptr, 0, g_ptr->data_ptr[40 * 96 + 40]);
++    wlr_buffer_drop(o_ptr);
+ 
+     // Toplevel with the configured app ID. Must now show running.
+     struct wlmdock_toplevel_handle *h = wlmdock_toplevel_handle_create(trk);
+     BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, h);
+     wlmdock_toplevel_handle_set_app_id(h, "id");
+     BS_TEST_VERIFY_TRUE(test_ptr, launcher_ptr->running);
++    // Running: No dots.
++    o_ptr = _wlmdock_launcher_create_overlay_buffer(launcher_ptr);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, o_ptr);
++    g_ptr = bs_gfxbuf_from_wlr_buffer(o_ptr);
++    BS_TEST_VERIFY_EQ(test_ptr, 0, g_ptr->data_ptr[90 * 96 + 4]);
++    wlr_buffer_drop(o_ptr);
+ 
+     // Toplevel changes app ID. No longer running.
+     wlmdock_toplevel_handle_set_app_id(h, "other-id");
+diff --git a/src/dock/launcher.h b/src/dock/launcher.h
+index fb3cb77..7e7bb19 100644
+--- a/src/dock/launcher.h
++++ b/src/dock/launcher.h
+@@ -92,6 +92,25 @@ void wlmdock_launcher_kill(wlmdock_launcher_t *launcher_ptr);
+ bspl_dict_t *wlmdock_launcher_dict(wlmdock_launcher_t *launcher_ptr);
+ 
+ /** Unit test set. */
++/**
++ * Sets how launchers launch, as Window Maker's `SingleClickLaunch`: By
++ * default, on a double-click (two clicks within `double_click_msec`); with
++ * `single_click`, on a click. A double-click on a launcher whose application
++ * runs launches nothing: The compositor shows the application.
++ *
++ * @param single_click
++ * @param double_click_msec   0 for the default of 300 ms.
++ */
++void wlmdock_launcher_set_click_mode(
++    bool single_click,
++    uint32_t double_click_msec);
++
++/**
++ * Launches the application if the launcher has `AutoLaunch` set: Window
++ * Maker's "Start when Window Maker is started".
++ */
++void wlmdock_launcher_autolaunch(wlmdock_launcher_t *launcher_ptr);
++
+ extern const bs_test_set_t wlmdock_launcher_test_set;
+ 
+ #ifdef __cplusplus
+diff --git a/src/dock_launchers.c b/src/dock_launchers.c
+index 5fd1b30..c2956d1 100644
+--- a/src/dock_launchers.c
++++ b/src/dock_launchers.c
+@@ -333,6 +333,46 @@ void wlmaker_dock_app_bring_here(
+     }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Finds a window, preferably on the current workspace. */
++static void _wlmaker_dock_app_pick(wlmtk_window_t *window_ptr, void *ud_ptr)
++{
++    wlmtk_window_t **picked_ptr_ptr = ud_ptr;
++    if (NULL == *picked_ptr_ptr) *picked_ptr_ptr = window_ptr;
++    wlmtk_workspace_t *w_ptr = wlmtk_window_get_workspace(window_ptr);
++    if (NULL != w_ptr && wlmtk_workspace_enabled(w_ptr)) {
++        *picked_ptr_ptr = window_ptr;
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_dock_app_activate(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr)
++{
++    wlmaker_dock_app_unhide(server_ptr, app_id_ptr);
++    wlmtk_window_t *window_ptr = NULL;
++    wlmaker_toplevel_tracker_for_each_app_window(
++        server_ptr->toplevel_tracker_ptr, app_id_ptr,
++        _wlmaker_dock_app_pick, &window_ptr);
++    if (NULL == window_ptr) return;
++    wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(window_ptr);
++    if (NULL == workspace_ptr) return;
++    if (workspace_ptr != wlmtk_desktop_get_current_workspace(
++            server_ptr->desktop_ptr)) {
++        for (size_t i = 0; ; ++i) {
++            wlmtk_workspace_t *w_ptr = wlmtk_desktop_get_workspace_at(
++                server_ptr->desktop_ptr, i);
++            if (NULL == w_ptr) break;
++            if (w_ptr != workspace_ptr) continue;
++            wlmtk_desktop_switch_to_workspace_at(server_ptr->desktop_ptr, i);
++            break;
++        }
++    }
++    wlmtk_workspace_raise_window(workspace_ptr, window_ptr);
++    wlmtk_workspace_activate_window(workspace_ptr, window_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmaker_dock_app_kill(
+     wlmaker_server_t *server_ptr,
+diff --git a/src/dock_launchers.h b/src/dock_launchers.h
+index bfde6a8..32c607c 100644
+--- a/src/dock_launchers.h
++++ b/src/dock_launchers.h
+@@ -162,6 +162,15 @@ void wlmaker_dock_app_bring_here(
+     wlmaker_server_t *server_ptr,
+     const char *app_id_ptr);
+ 
++/**
++ * Shows the application, as a double-click on a running application's docked
++ * icon does on Window Maker: Restores its windows, switches to the workspace
++ * of one of them (unless on the current one), raises and activates it.
++ */
++void wlmaker_dock_app_activate(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr);
++
+ /**
+  * Terminates the application: Sends SIGTERM to the processes of its
+  * windows. Window Maker's "Kill".
+diff --git a/src/layer_panel.c b/src/layer_panel.c
+index a9b1592..46613be 100644
+--- a/src/layer_panel.c
++++ b/src/layer_panel.c
+@@ -101,6 +101,10 @@ struct _wlmaker_layer_panel_t {
+     wlmaker_tile_drag_t       *tile_drag_ptr;
+     /** Listener for @ref wlmtk_element_events_t::pointer_leave. */
+     struct wl_listener        pointer_leave_listener;
++    /** Time of the last click on a launcher, for telling double-clicks. */
++    uint32_t                  last_click_msec;
++    /** Tile of the last click. */
++    int                       last_click_index;
+ };
+ 
+ wlmaker_layer_panel_t *_wlmaker_layer_panel_create_from_surface(
+@@ -129,6 +133,9 @@ static bool _wlmaker_layer_panel_tile_at(
+     int *index_ptr,
+     int *tile_x_ptr,
+     int *tile_y_ptr);
++static void _wlmaker_layer_panel_click(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    const wlmtk_button_event_t *button_event_ptr);
+ static void _wlmaker_layer_panel_start_tile_drag(
+     wlmaker_layer_panel_t *layer_panel_ptr,
+     double x,
+@@ -656,6 +663,13 @@ bool _wlmaker_layer_panel_element_pointer_button(
+         _wlmaker_layer_panel_end_drag(layer_panel_ptr);
+     }
+ 
++    // Window Maker: A double-click on the launcher of a running application
++    // shows it. (`wlmdock` launches it, if not running.)
++    if (docklike && BTN_LEFT == button_event_ptr->button &&
++        WLMTK_BUTTON_CLICK == button_event_ptr->type) {
++        _wlmaker_layer_panel_click(layer_panel_ptr, button_event_ptr);
++    }
++
+     bool rv = layer_panel_ptr->orig_element_vmt.pointer_button(
+         element_ptr, button_event_ptr);
+ 
+@@ -809,6 +823,48 @@ bool _wlmaker_layer_panel_tile_at(
+     return true;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** A click on a launcher: Shows its application, if double-clicked. */
++void _wlmaker_layer_panel_click(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    const wlmtk_button_event_t *button_event_ptr)
++{
++    wlmaker_server_t *server_ptr = layer_panel_ptr->server_ptr;
++    wlmtk_element_t *e = wlmtk_panel_element(&layer_panel_ptr->super_panel);
++    int index;
++    if (!_wlmaker_layer_panel_tile_at(layer_panel_ptr,
++                                      e->last_pointer_motion_event.x,
++                                      e->last_pointer_motion_event.y,
++                                      &index, NULL, NULL)) return;
++    uint64_t msec = 0;
++    const char *msec_ptr = bspl_dict_get_string_value(
++        bspl_dict_get_dict(server_ptr->config_dict_ptr, "Mouse"),
++        "DoubleClickTime");
++    if (NULL == msec_ptr || !bs_strconvert_uint64(msec_ptr, &msec, 10) ||
++        0 == msec) msec = 300;
++    uint32_t t = button_event_ptr->time_msec;
++    bool double_click = 0 != layer_panel_ptr->last_click_msec &&
++        index == layer_panel_ptr->last_click_index &&
++        t - layer_panel_ptr->last_click_msec <= msec;
++    layer_panel_ptr->last_click_msec = double_click ? 0 : (t ? t : 1);
++    layer_panel_ptr->last_click_index = index;
++    if (!double_click) return;
++
++    int launcher = layer_panel_ptr->is_dock ? index - 1 : index;
++    if (0 > launcher) return;
++    bspl_array_t *a = wlmaker_dock_launchers_load(
++        server_ptr, layer_panel_ptr->is_dock ? "Dock" : "Clip");
++    if (NULL == a) return;
++    if ((size_t)launcher < bspl_array_size(a)) {
++        const char *app_id_ptr = wlmaker_dock_launcher_value(
++            bspl_dict_from_object(bspl_array_at(a, launcher)), "AppID");
++        if (0 < wlmaker_dock_app_windows(server_ptr, app_id_ptr, NULL)) {
++            wlmaker_dock_app_activate(server_ptr, app_id_ptr);
++        }
++    }
++    bspl_array_unref(a);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Starts dragging the launcher the button was pressed on. */
+ void _wlmaker_layer_panel_start_tile_drag(
+diff --git a/src/util/subprocess_monitor.c b/src/util/subprocess_monitor.c
+index 2ea152d..cf2c882 100644
+--- a/src/util/subprocess_monitor.c
++++ b/src/util/subprocess_monitor.c
+@@ -126,6 +126,13 @@ void wlm_util_subprocess_monitor_destroy(
+     free(monitor_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++struct wl_event_loop *wlm_util_subprocess_monitor_event_loop(
++    wlm_util_subprocess_monitor_t *monitor_ptr)
++{
++    return monitor_ptr->wl_event_loop_ptr;
++}
++
+ /* ------------------------------------------------------------------------- */
+ struct wlm_util_subprocess *wlm_util_subprocess_monitor_entrust(
+     wlm_util_subprocess_monitor_t *monitor_ptr,
+diff --git a/src/util/subprocess_monitor.h b/src/util/subprocess_monitor.h
+index a177b76..78a9859 100644
+--- a/src/util/subprocess_monitor.h
++++ b/src/util/subprocess_monitor.h
+@@ -130,6 +130,10 @@ bool wlm_util_subprocess_monitor_run(
+     wlm_util_subprocess_monitor_t *monitor_ptr,
+     bs_subprocess_t *subprocess_ptr);
+ 
++/** @return The event loop the monitor runs on. */
++struct wl_event_loop *wlm_util_subprocess_monitor_event_loop(
++    wlm_util_subprocess_monitor_t *monitor_ptr);
++
+ #ifdef __cplusplus
+ }  // extern "C"
+ #endif  // __cplusplus
+diff --git a/src/wlmdock.c b/src/wlmdock.c
+index 14448dc..ed25177 100644
+--- a/src/wlmdock.c
++++ b/src/wlmdock.c
+@@ -31,6 +31,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <strings.h>
+ #include <signal.h>
+ #include <sys/signalfd.h>
+ #include <sys/socket.h>
+@@ -376,6 +377,20 @@ int main(int argc, const char **argv)
+     }
+     wlmaker_config_style_t style = {};
+     bool theme_loaded = wlmaker_theme_load(files_ptr, theme_file_ptr, &style);
++    // As Window Maker's SingleClickLaunch: Launch on a double-click, unless.
++    const char *single_ptr = bspl_dict_get_string_value(
++        config_dict_ptr, "SingleClickLaunch");
++    uint64_t msec = 0;
++    const char *msec_ptr = bspl_dict_get_string_value(
++        bspl_dict_get_dict(config_dict_ptr, "Mouse"), "DoubleClickTime");
++    if (NULL != msec_ptr && !bs_strconvert_uint64(msec_ptr, &msec, 10)) {
++        msec = 0;
++    }
++    wlmdock_launcher_set_click_mode(
++        NULL != single_ptr &&
++        (0 == strcasecmp(single_ptr, "Yes") ||
++         0 == strcasecmp(single_ptr, "True")),
++        msec);
+     bspl_dict_unref(config_dict_ptr);
+     if (!theme_loaded) {
+         fprintf(stderr, "Failed to load & initialize theme.\n");
+@@ -435,6 +450,20 @@ int main(int argc, const char **argv)
+ 
+     _wlmdock_set_launchers(dock_ptr, state.launchers_array_ptr);
+     if (state.launchers_array_ptr) bspl_array_unref(state.launchers_array_ptr);
++    // Window Maker's "Start when Window Maker is started": Once, at start.
++    if (0 > wl_display_roundtrip(dock_ptr->remote_display_ptr)) {
++        bs_log(BS_WARNING, "Failed parent wl_display_roundtrip.");
++    }
++    size_t n = wlmdock_tilebox_tiles(dock_ptr->tilebox_ptr, NULL, 0);
++    wlmtk_tile_t **tiles_ptr = 0 < n ? logged_calloc(n, sizeof(*tiles_ptr)) : NULL;
++    if (NULL != tiles_ptr) {
++        wlmdock_tilebox_tiles(dock_ptr->tilebox_ptr, tiles_ptr, n);
++        for (size_t i = 0; i < n; ++i) {
++            wlmdock_launcher_t *l_ptr = wlmdock_launcher_from_tile(tiles_ptr[i]);
++            if (NULL != l_ptr) wlmdock_launcher_autolaunch(l_ptr);
++        }
++        free(tiles_ptr);
++    }
+ 
+     if (0 > wl_display_roundtrip(dock_ptr->remote_display_ptr)) {
+         bs_log(BS_ERROR, "Failed parent wl_display_roundtrip.");
+-- 
+2.55.0
+

@@ -1,0 +1,4643 @@
+From 3fb1c81c62522ed70c5d02b4617987233f991be9 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 16:47:28 -0300
+Subject: [PATCH] dock: Docked icons behave as on Window Maker: Drag, ghost,
+ kaboom, menu, balloons.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The Dock (`wlmdock`), the Clip's launchers (`wlmdock --clip`) and the
+dock-apps now behave like Window Maker's docked icons. The compositor
+handles them for `wlmdock`, from its surfaces' positions and the state.
+
+* Dock-apps can be attached to the Dock as well as to the Clip: A dock of
+  the compositor, over the Dock's column, right after its launchers. Their
+  order there is stored as "Dock" in Dockapps.plist (the Clip's stays
+  "Order"); started again, a dock-app returns to its dock. The number of
+  them is stored as `DockappTiles` in the state's `Dock` section, for
+  others placing tiles after them (eg. a system tray).
+* Dragging a launcher, or a dock-app (by its border or with the move
+  modifier), moves it along with the pointer, as wHandleAppIconMove. The
+  ghost (see dock_fx) shows the slot it attaches to: On its own dock until
+  3 tiles away from it, on the other one when right over it
+  (wDockSnapIcon). Launchers go to the launchers of the Dock or the Clip,
+  dock-apps to the dock-apps of either. Dropped, the icon slides into its
+  slot. The Dock's main tile still drags the whole Dock.
+* Dropped off the docks, a launcher is removed with Window Maker's kaboom;
+  a running application's launcher stays, unless the move modifier is held
+  (then without kaboom), and a locked one ("Lock = Yes") always stays. A
+  dock-app explodes and is terminated: There are no free icons to leave it
+  at. It is added to "Removed" in Dockapps.plist, for the session not to
+  start it again; started again, it is taken off that list.
+* The right button opens Window Maker's menu of the dock: "Dock position"
+  (Normal, Auto raise & lower, Keep on Top) and "Add a drawer" (disabled:
+  no drawers yet) for the Dock, "Clip Options" (Keep on Top, Autoraise) for
+  the Clip; then "Launch", "Bring Here" (or "Unhide Here"), "Hide" (or
+  "Unhide"), "Settings..." and "Kill", disabled where they don't apply. The
+  Clip's launchers also have "Remove Icon"; the Dock's main tile moving
+  the Dock and restoring its launchers. For dock-apps, "Settings..." holds
+  their preferences, with their own actions before it. Launchers'
+  "Settings..." runs `DockSettingsCommand` of the configuration, as
+  `<command> launcher Dock|Clip <index>`. "Bring Here", "Hide" and "Kill"
+  act on the windows with the launcher's `AppID`.
+* The Dock's and the Clip's level, stored as Window Maker's `Lowered` and
+  `AutoRaiseLower`: Below the windows (Normal), above (Keep on Top, the
+  default), or raised after 600 ms on the dock and lowered 1 s after
+  leaving it. Also for the surfaces of `wlmdock`.
+* Balloons, as Window Maker's for docked icons: The name (AppID, or the
+  program) and the command, for launchers and dock-apps; the workspace's
+  name on the Clip, when longer than 5 characters.
+* pt_BR: Window Maker's translations for the menu ("Executar", "Trazer
+  aqui", "Esconder", "Configurações...", "Terminar", ...).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/CMakeLists.txt   |   6 +
+ src/clip.c           | 671 +++++++++++++++++++++++++++++++++++++++++-
+ src/clip.h           | 140 +++++++++
+ src/dock_launchers.c | 512 ++++++++++++++++++++++++++++++++
+ src/dock_launchers.h | 181 ++++++++++++
+ src/dock_menu.c      | 579 +++++++++++++++++++++++++++++++++++++
+ src/dock_menu.h      |  97 +++++++
+ src/dockapp_prefs.c  |  20 +-
+ src/dockapp_prefs.h  |  15 +
+ src/i18n.c           |  22 +-
+ src/icon_manager.c   | 410 +++++++++++++++++++++-----
+ src/layer_panel.c    | 385 +++++++++++++++++++++++-
+ src/layer_panel.h    |  18 ++
+ src/server.h         |   8 +
+ src/tile_drag.c      | 674 +++++++++++++++++++++++++++++++++++++++++++
+ src/tile_drag.h      | 174 +++++++++++
+ tests/wlmaker_test.c |   6 +
+ 17 files changed, 3819 insertions(+), 99 deletions(-)
+ create mode 100644 src/dock_launchers.c
+ create mode 100644 src/dock_launchers.h
+ create mode 100644 src/dock_menu.c
+ create mode 100644 src/dock_menu.h
+ create mode 100644 src/tile_drag.c
+ create mode 100644 src/tile_drag.h
+
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 233fa28..d2cefc0 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -34,6 +34,8 @@ set(public_header_files
+   context_menu.h
+   corner.h
+   dock_fx.h
++  dock_launchers.h
++  dock_menu.h
+   dock_position.h
+   dockapp_prefs.h
+   i18n.h
+@@ -48,6 +50,7 @@ set(public_header_files
+   root_menu.h
+   server.h
+   task_list.h
++  tile_drag.h
+   toplevel_tracker.h
+   tl_menu.h
+   xdg_decoration.h
+@@ -65,6 +68,8 @@ target_sources(wlmaker_lib PRIVATE
+   context_menu.c
+   corner.c
+   dock_fx.c
++  dock_launchers.c
++  dock_menu.c
+   dock_position.c
+   dockapp_prefs.c
+   i18n.c
+@@ -79,6 +84,7 @@ target_sources(wlmaker_lib PRIVATE
+   root_menu.c
+   server.c
+   task_list.c
++  tile_drag.c
+   toplevel_tracker.c
+   tl_menu.c
+   x11_cursor.xpm
+diff --git a/src/clip.c b/src/clip.c
+index 0d84fda..52cfc95 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -47,8 +47,11 @@
+ #include "action.h"
+ #include "backend/output_config.h"
+ #include "context_menu.h"
++#include "dock_fx.h"
++#include "dock_launchers.h"
+ #include "dockapps.h"
+ #include "dock_position.h"
++#include "layer_panel.h"
+ #include "i18n.h"
+ #include "input/manager.h"
+ #include "toolkit/toolkit.h"
+@@ -132,6 +135,29 @@ struct _wlmaker_clip_t {
+ 
+     /** The clip's style. */
+     wlmaker_config_clip_style_t style;
++
++    /** Path of the dock-apps state file. May be NULL. */
++    char                      *dockapps_fname_ptr;
++    /**
++     * Dock-apps attached to the Dock: A dock after the Dock's launchers,
++     * positioned over the Dock's column. NULL without a Dock.
++     */
++    wlmtk_dock_t              *dock_side_ptr;
++    /** Placement of the dock-apps attached to the Dock. */
++    wlmaker_dockapps_t        *dock_dockapps_ptr;
++    /** Where the Dock is. */
++    wlmaker_dock_place_t      dock_place;
++    /** Number of the Dock's launchers, after its main tile. */
++    size_t                    dock_launchers;
++    /** Number of dock-apps on the Dock last stored as `DockappTiles`. */
++    long                      published_dock_tiles;
++
++    /** Levels of the Clip [0] and the Dock [1]. */
++    wlmaker_dock_level_t      level[2];
++    /** Whether the Clip [0] or the Dock [1] is raised, by auto-raising. */
++    bool                      raised[2];
++    /** Timers for auto-raising and lowering the Clip [0] and Dock [1]. */
++    struct wl_event_source    *level_timer_ptr[2];
+ };
+ 
+ static bool _wlmaker_clip_pointer_axis(
+@@ -157,6 +183,24 @@ static bool _wlmaker_clip_set_spacers(
+     size_t spacers,
+     const struct wlmtk_tile_style *tile_style_ptr);
+ static void _wlmaker_clip_atfork_child(void);
++static bool _wlmaker_clip_create_dock_side(
++    wlmaker_clip_t *clip_ptr,
++    bspl_dict_t *state_dict_ptr,
++    const wlmaker_config_style_t *style_ptr,
++    struct wlr_output *wlr_output_ptr);
++static void _wlmaker_clip_reload_launchers(wlmaker_clip_t *clip_ptr);
++static void _wlmaker_clip_update_dock_side(wlmaker_clip_t *clip_ptr);
++static void _wlmaker_clip_publish_dock_tiles(wlmaker_clip_t *clip_ptr);
++static wlmaker_dock_level_t _wlmaker_clip_decode_level(bspl_dict_t *dict_ptr);
++static void _wlmaker_clip_balloon(wlmaker_clip_t *clip_ptr);
++static void _wlmaker_clip_apply_level(wlmaker_clip_t *clip_ptr, bool dock);
++static void _wlmaker_clip_move_panel(
++    wlmaker_clip_t *clip_ptr,
++    wlmtk_panel_t *panel_ptr,
++    wlmtk_desktop_layer_t layer);
++static bool _wlmaker_clip_pointer_on(wlmaker_clip_t *clip_ptr, bool dock);
++static int _wlmaker_clip_handle_level_timer_clip(void *data_ptr);
++static int _wlmaker_clip_handle_level_timer_dock(void *data_ptr);
+ static bool _wlmaker_clip_place_at_cursor(
+     wlmaker_clip_t *clip_ptr,
+     wlmaker_dock_place_t *place_ptr);
+@@ -402,19 +446,29 @@ wlmaker_clip_t *wlmaker_clip_create(
+ 
+     // Dock-apps are placed in the order of the `Dockapps` array, or as
+     // re-arranged by the user (stored in `Dockapps.plist`).
+-    char *fname_ptr = wlm_util_files_xdg_config_fname(
++    clip_ptr->dockapps_fname_ptr = wlm_util_files_xdg_config_fname(
+         server_ptr->files_ptr, "Dockapps.plist");
+     clip_ptr->dockapps_ptr = wlmaker_dockapps_create(
+         clip_ptr->wlmtk_dock_ptr,
+         bspl_dict_get_array(dict_ptr, "Dockapps"),
+-        fname_ptr);
+-    if (NULL != fname_ptr) free(fname_ptr);
++        clip_ptr->dockapps_fname_ptr);
+     if (NULL == clip_ptr->dockapps_ptr) {
+         wlmaker_clip_destroy(clip_ptr);
+         return NULL;
+     }
+     server_ptr->dockapps_ptr = clip_ptr->dockapps_ptr;
+ 
++    // Dock-apps can also be attached to the Dock, as on Window Maker.
++    clip_ptr->published_dock_tiles = -1;
++    clip_ptr->level[0] = _wlmaker_clip_decode_level(dict_ptr);
++    clip_ptr->level[1] = _wlmaker_clip_decode_level(
++        bspl_dict_get_dict(state_dict_ptr, "Dock"));
++    if (!_wlmaker_clip_create_dock_side(
++            clip_ptr, state_dict_ptr, style_ptr, wlr_output_ptr)) {
++        wlmaker_clip_destroy(clip_ptr);
++        return NULL;
++    }
++
+     // `wlmdock --clip` signals when the Clip's launchers were changed. The
+     // signal is blocked for regular delivery: Not for launched programs.
+     clip_ptr->sigusr1_event_source_ptr = wl_event_loop_add_signal(
+@@ -429,6 +483,9 @@ wlmaker_clip_t *wlmaker_clip_create(
+     }
+ 
+     server_ptr->clip_dock_ptr = clip_ptr->wlmtk_dock_ptr;
++    server_ptr->clip_ptr = clip_ptr;
++    _wlmaker_clip_apply_level(clip_ptr, false);
++    _wlmaker_clip_apply_level(clip_ptr, true);
+     bs_log(BS_INFO, "Created clip %p", clip_ptr);
+     return clip_ptr;
+ }
+@@ -443,6 +500,12 @@ void wlmaker_clip_destroy(wlmaker_clip_t *clip_ptr)
+         wl_event_source_remove(clip_ptr->preview_event_source_ptr);
+         clip_ptr->preview_event_source_ptr = NULL;
+     }
++    for (int i = 0; i < 2; ++i) {
++        if (NULL != clip_ptr->level_timer_ptr[i]) {
++            wl_event_source_remove(clip_ptr->level_timer_ptr[i]);
++            clip_ptr->level_timer_ptr[i] = NULL;
++        }
++    }
+     if (NULL != clip_ptr->sigusr1_event_source_ptr) {
+         wl_event_source_remove(clip_ptr->sigusr1_event_source_ptr);
+         clip_ptr->sigusr1_event_source_ptr = NULL;
+@@ -450,11 +513,32 @@ void wlmaker_clip_destroy(wlmaker_clip_t *clip_ptr)
+     if (NULL != clip_ptr->server_ptr) {
+         clip_ptr->server_ptr->clip_dock_ptr = NULL;
+         clip_ptr->server_ptr->dockapps_ptr = NULL;
++        if (clip_ptr->server_ptr->clip_ptr == clip_ptr) {
++            clip_ptr->server_ptr->clip_ptr = NULL;
++        }
+     }
+     if (NULL != clip_ptr->dockapps_ptr) {
+         wlmaker_dockapps_destroy(clip_ptr->dockapps_ptr);
+         clip_ptr->dockapps_ptr = NULL;
+     }
++    if (NULL != clip_ptr->dock_dockapps_ptr) {
++        wlmaker_dockapps_destroy(clip_ptr->dock_dockapps_ptr);
++        clip_ptr->dock_dockapps_ptr = NULL;
++    }
++    if (NULL != clip_ptr->dock_side_ptr) {
++        wlmtk_layer_t *l_ptr = wlmtk_panel_get_layer(
++            wlmtk_dock_panel(clip_ptr->dock_side_ptr));
++        if (NULL != l_ptr) {
++            wlmtk_layer_remove_panel(
++                l_ptr, wlmtk_dock_panel(clip_ptr->dock_side_ptr));
++        }
++        wlmtk_dock_destroy(clip_ptr->dock_side_ptr);
++        clip_ptr->dock_side_ptr = NULL;
++    }
++    if (NULL != clip_ptr->dockapps_fname_ptr) {
++        free(clip_ptr->dockapps_fname_ptr);
++        clip_ptr->dockapps_fname_ptr = NULL;
++    }
+     for (size_t i = 0; i < clip_ptr->spacer_tiles; ++i) {
+         wlmtk_tile_t *t_ptr = &clip_ptr->spacer_tiles_ptr[i];
+         if (NULL != wlmtk_tile_element(t_ptr)->parent_container_ptr) {
+@@ -601,10 +685,291 @@ void wlmaker_clip_move_dock(
+             _wlmaker_clip_set_place(server_ptr->clip_dock_ptr, other);
+         }
+     }
++    // The Dock's dock-apps go along with the Dock.
++    if (NULL != server_ptr->clip_ptr) {
++        _wlmaker_clip_reload_launchers(server_ptr->clip_ptr);
++    }
+ 
+     _wlmaker_clip_signal_wlmdock(server_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmaker_clip_launchers_changed(wlmaker_server_t *server_ptr)
++{
++    if (NULL != server_ptr->clip_ptr) {
++        _wlmaker_clip_reload_launchers(server_ptr->clip_ptr);
++    }
++    _wlmaker_clip_signal_wlmdock(server_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_clip_dock_surface_changed(wlmaker_server_t *server_ptr)
++{
++    if (NULL != server_ptr->clip_ptr) {
++        _wlmaker_clip_update_dock_side(server_ptr->clip_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_clip_add_dockapp(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr,
++    const char *name_ptr)
++{
++    wlmaker_clip_t *clip_ptr = server_ptr->clip_ptr;
++    if (NULL == clip_ptr) return false;
++    // Started (again) by the user: No longer removed.
++    if (NULL != name_ptr &&
++        wlmaker_dockapps_is_removed(clip_ptr->dockapps_fname_ptr, name_ptr)) {
++        wlmaker_dockapps_set_removed(
++            clip_ptr->dockapps_fname_ptr, name_ptr, false);
++    }
++    if (NULL != clip_ptr->dock_dockapps_ptr &&
++        wlmaker_dockapps_has_name(clip_ptr->dock_dockapps_ptr, name_ptr)) {
++        bool rv = wlmaker_dockapps_add(
++            clip_ptr->dock_dockapps_ptr, tile_ptr, name_ptr);
++        _wlmaker_clip_publish_dock_tiles(clip_ptr);
++        return rv;
++    }
++    return wlmaker_dockapps_add(clip_ptr->dockapps_ptr, tile_ptr, name_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_clip_remove_dockapp(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr)
++{
++    wlmaker_dockapps_t *d_ptr = wlmaker_clip_dockapps_of(server_ptr, tile_ptr);
++    if (NULL == d_ptr) return;
++    wlmaker_dockapps_remove(d_ptr, tile_ptr);
++    if (d_ptr == server_ptr->clip_ptr->dock_dockapps_ptr) {
++        _wlmaker_clip_publish_dock_tiles(server_ptr->clip_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++wlmaker_dockapps_t *wlmaker_clip_dockapps_of(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr)
++{
++    wlmaker_clip_t *clip_ptr = server_ptr->clip_ptr;
++    if (NULL == clip_ptr) return NULL;
++    if (0 <= wlmaker_dockapps_index(clip_ptr->dockapps_ptr, tile_ptr)) {
++        return clip_ptr->dockapps_ptr;
++    }
++    if (NULL != clip_ptr->dock_dockapps_ptr &&
++        0 <= wlmaker_dockapps_index(clip_ptr->dock_dockapps_ptr, tile_ptr)) {
++        return clip_ptr->dock_dockapps_ptr;
++    }
++    return NULL;
++}
++
++/* ------------------------------------------------------------------------- */
++wlmaker_dockapps_t *wlmaker_clip_dockapps(
++    wlmaker_server_t *server_ptr,
++    bool dock)
++{
++    if (NULL == server_ptr->clip_ptr) return NULL;
++    return dock ? server_ptr->clip_ptr->dock_dockapps_ptr :
++        server_ptr->clip_ptr->dockapps_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_clip_move_dockapp(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr,
++    bool to_dock,
++    size_t index)
++{
++    wlmaker_dockapps_t *from_ptr = wlmaker_clip_dockapps_of(
++        server_ptr, tile_ptr);
++    wlmaker_dockapps_t *to_ptr = wlmaker_clip_dockapps(server_ptr, to_dock);
++    if (NULL == from_ptr || NULL == to_ptr) return;
++    if (from_ptr == to_ptr) {
++        wlmaker_dockapps_move_to(to_ptr, tile_ptr, index);
++        return;
++    }
++    const char *n_ptr = wlmaker_dockapps_name(from_ptr, tile_ptr);
++    char *name_ptr = NULL != n_ptr ? logged_strdup(n_ptr) : NULL;
++    wlmaker_dockapps_detach(from_ptr, tile_ptr);
++    wlmaker_dockapps_insert(to_ptr, tile_ptr, name_ptr, index);
++    if (NULL != name_ptr) free(name_ptr);
++    _wlmaker_clip_publish_dock_tiles(server_ptr->clip_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_clip_column(
++    wlmaker_server_t *server_ptr,
++    bool dock,
++    wlmaker_dock_column_t *column_ptr)
++{
++    wlmaker_clip_t *clip_ptr = server_ptr->clip_ptr;
++    if (NULL == clip_ptr) return false;
++    const struct wlmtk_tile_style *ts_ptr = &clip_ptr->super_tile.style;
++    *column_ptr = (wlmaker_dock_column_t){
++        .size = ts_ptr->size,
++        .pitch = ts_ptr->size + server_ptr->style_ptr->dock.margin.width };
++
++    struct wlr_output *wlr_output_ptr = wlmbe_primary_output(
++        server_ptr->wlr_output_layout_ptr);
++    if (NULL == wlr_output_ptr) return false;
++    wlr_output_layout_get_box(server_ptr->wlr_output_layout_ptr,
++                              wlr_output_ptr, &column_ptr->output);
++
++    if (!dock) {
++        const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
++            clip_ptr->wlmtk_dock_ptr);
++        column_ptr->place = (wlmaker_dock_place_t){
++            pos_ptr->edge, pos_ptr->anchor };
++        wlmtk_element_get_absolute_position(
++            wlmtk_tile_element(&clip_ptr->super_tile),
++            &column_ptr->x, &column_ptr->y);
++        column_ptr->launchers = clip_ptr->spacer_tiles;
++        column_ptr->dockapps = wlmaker_dockapps_size(clip_ptr->dockapps_ptr);
++        return true;
++    }
++
++    if (NULL == clip_ptr->dock_side_ptr) return false;
++    column_ptr->place = clip_ptr->dock_place;
++    column_ptr->launchers = clip_ptr->dock_launchers;
++    column_ptr->dockapps = wlmaker_dockapps_size(clip_ptr->dock_dockapps_ptr);
++    struct wlr_box b;
++    if (NULL != server_ptr->dock_layer_panel_ptr &&
++        wlmaker_layer_panel_get_box(server_ptr->dock_layer_panel_ptr, &b)) {
++        column_ptr->x = b.x;
++        column_ptr->y = b.y;
++        if (WLR_EDGE_BOTTOM == column_ptr->place.anchor) {
++            column_ptr->y = b.y + b.height - column_ptr->size;
++        }
++        if (WLR_EDGE_RIGHT == column_ptr->place.anchor) {
++            column_ptr->x = b.x + b.width - column_ptr->size;
++        }
++        return true;
++    }
++    // No Dock surface (yet): Its corner of the output.
++    const struct wlr_box *o_ptr = &column_ptr->output;
++    uint32_t corner = wlmaker_dock_place_corner(column_ptr->place);
++    column_ptr->x = (corner & WLR_EDGE_RIGHT) ?
++        o_ptr->x + o_ptr->width - column_ptr->size : o_ptr->x;
++    column_ptr->y = (corner & WLR_EDGE_BOTTOM) ?
++        o_ptr->y + o_ptr->height - column_ptr->size : o_ptr->y;
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++wlmaker_dock_level_t wlmaker_clip_get_level(
++    wlmaker_server_t *server_ptr,
++    bool dock)
++{
++    if (NULL == server_ptr->clip_ptr) return WLMAKER_DOCK_LEVEL_KEEP_ON_TOP;
++    return server_ptr->clip_ptr->level[dock ? 1 : 0];
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_clip_set_level(
++    wlmaker_server_t *server_ptr,
++    bool dock,
++    wlmaker_dock_level_t level)
++{
++    wlmaker_clip_t *clip_ptr = server_ptr->clip_ptr;
++    if (NULL == clip_ptr) return;
++    int i = dock ? 1 : 0;
++    clip_ptr->level[i] = level;
++    clip_ptr->raised[i] = false;
++
++    // As Window Maker's WMState: `Lowered` and `AutoRaiseLower`.
++    bspl_dict_t *d = bspl_dict_create();
++    bspl_string_t *lowered_ptr = bspl_string_create(
++        WLMAKER_DOCK_LEVEL_KEEP_ON_TOP == level ? "No" : "Yes");
++    bspl_string_t *auto_ptr = bspl_string_create(
++        WLMAKER_DOCK_LEVEL_AUTO_RAISE_LOWER == level ? "Yes" : "No");
++    if (NULL != d && NULL != lowered_ptr && NULL != auto_ptr &&
++        bspl_dict_add(d, "Lowered", bspl_object_from_string(lowered_ptr)) &&
++        bspl_dict_add(d, "AutoRaiseLower", bspl_object_from_string(auto_ptr))) {
++        wlmaker_state_store_section(server_ptr->files_ptr,
++                                    server_ptr->state_fname_ptr,
++                                    dock ? "Dock" : "Clip", d);
++    }
++    if (NULL != auto_ptr) bspl_string_unref(auto_ptr);
++    if (NULL != lowered_ptr) bspl_string_unref(lowered_ptr);
++    if (NULL != d) bspl_dict_unref(d);
++    _wlmaker_clip_apply_level(clip_ptr, dock);
++}
++
++/* ------------------------------------------------------------------------- */
++wlmtk_desktop_layer_t wlmaker_clip_layer(
++    wlmaker_server_t *server_ptr,
++    bool dock)
++{
++    wlmaker_clip_t *clip_ptr = server_ptr->clip_ptr;
++    if (NULL == clip_ptr) return WLMTK_DESKTOP_LAYER_TOP;
++    int i = dock ? 1 : 0;
++    if (WLMAKER_DOCK_LEVEL_KEEP_ON_TOP == clip_ptr->level[i] ||
++        clip_ptr->raised[i]) return WLMTK_DESKTOP_LAYER_TOP;
++    return WLMTK_DESKTOP_LAYER_BOTTOM;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_clip_dock_hovered(
++    wlmaker_server_t *server_ptr,
++    bool dock)
++{
++    wlmaker_clip_t *clip_ptr = server_ptr->clip_ptr;
++    int i = dock ? 1 : 0;
++    if (NULL == clip_ptr ||
++        WLMAKER_DOCK_LEVEL_AUTO_RAISE_LOWER != clip_ptr->level[i]) return;
++    if (clip_ptr->raised[i]) {
++        // Stays raised.
++        if (NULL != clip_ptr->level_timer_ptr[i]) {
++            wl_event_source_timer_update(clip_ptr->level_timer_ptr[i], 0);
++        }
++        return;
++    }
++    if (NULL == clip_ptr->level_timer_ptr[i]) {
++        clip_ptr->level_timer_ptr[i] = wl_event_loop_add_timer(
++            wl_display_get_event_loop(server_ptr->wl_display_ptr),
++            dock ? _wlmaker_clip_handle_level_timer_dock :
++            _wlmaker_clip_handle_level_timer_clip,
++            clip_ptr);
++        if (NULL == clip_ptr->level_timer_ptr[i]) return;
++        // Window Maker's ClipAutoraiseDelay.
++        wl_event_source_timer_update(clip_ptr->level_timer_ptr[i], 600);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_clip_dock_left(
++    wlmaker_server_t *server_ptr,
++    bool dock)
++{
++    wlmaker_clip_t *clip_ptr = server_ptr->clip_ptr;
++    int i = dock ? 1 : 0;
++    if (NULL == clip_ptr ||
++        WLMAKER_DOCK_LEVEL_AUTO_RAISE_LOWER != clip_ptr->level[i]) return;
++    if (NULL == clip_ptr->level_timer_ptr[i]) {
++        clip_ptr->level_timer_ptr[i] = wl_event_loop_add_timer(
++            wl_display_get_event_loop(server_ptr->wl_display_ptr),
++            dock ? _wlmaker_clip_handle_level_timer_dock :
++            _wlmaker_clip_handle_level_timer_clip,
++            clip_ptr);
++        if (NULL == clip_ptr->level_timer_ptr[i]) return;
++    }
++    // Not yet raised: Nothing to lower. Else after ClipAutolowerDelay.
++    wl_event_source_timer_update(clip_ptr->level_timer_ptr[i],
++                                 clip_ptr->raised[i] ? 1000 : 0);
++    if (!clip_ptr->raised[i]) {
++        wl_event_source_remove(clip_ptr->level_timer_ptr[i]);
++        clip_ptr->level_timer_ptr[i] = NULL;
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++const char *wlmaker_clip_dockapps_fname(wlmaker_server_t *server_ptr)
++{
++    if (NULL == server_ptr->clip_ptr) return NULL;
++    return server_ptr->clip_ptr->dockapps_fname_ptr;
++}
++
+ /* == Local (static) methods =============================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -1340,6 +1705,11 @@ void _wlmaker_clip_handle_pointer_leave(
+     clip_ptr->pointer_inside_prev_button = false;
+     clip_ptr->pointer_inside_next_button = false;
+     _wlmaker_clip_apply_button_state(clip_ptr);
++    wlmaker_clip_dock_left(clip_ptr->server_ptr, false);
++    if (NULL != clip_ptr->server_ptr->dock_fx_ptr) {
++        wlmaker_dock_fx_balloon_leave(clip_ptr->server_ptr->dock_fx_ptr,
++                                      clip_ptr);
++    }
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -1372,6 +1742,45 @@ void _wlmaker_clip_handle_pointer_motion(
+     }
+ 
+     _wlmaker_clip_apply_button_state(clip_ptr);
++    wlmaker_clip_dock_hovered(clip_ptr->server_ptr, false);
++    _wlmaker_clip_balloon(clip_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Shows the Clip's balloon, as Window Maker: The workspace's name, when it
++ * is longer than 5 characters (and so may not fit on the Clip).
++ */
++void _wlmaker_clip_balloon(wlmaker_clip_t *clip_ptr)
++{
++    wlmaker_server_t *server_ptr = clip_ptr->server_ptr;
++    if (NULL == server_ptr->dock_fx_ptr) return;
++    const char *name_ptr = NULL;
++    int index = 0;
++    wlmtk_workspace_get_details(
++        wlmtk_desktop_get_current_workspace(server_ptr->desktop_ptr),
++        &name_ptr, &index);
++    if (NULL == name_ptr || 5 >= strlen(name_ptr) ||
++        clip_ptr->drag_pending) {
++        wlmaker_dock_fx_balloon_leave(server_ptr->dock_fx_ptr, clip_ptr);
++        return;
++    }
++    wlmtk_element_t *e = wlmtk_tile_element(&clip_ptr->super_tile);
++    struct wlr_box box = wlmtk_element_get_dimensions_box(e);
++    int x, y;
++    wlmtk_element_get_absolute_position(e, &x, &y);
++    box.x += x;
++    box.y += y;
++    box.height -= 2;
++    struct wlr_box area = {};
++    struct wlr_output *wlr_output_ptr = wlr_output_layout_output_at(
++        server_ptr->wlr_output_layout_ptr, box.x + 1, box.y + 1);
++    if (NULL != wlr_output_ptr) {
++        wlr_output_layout_get_box(server_ptr->wlr_output_layout_ptr,
++                                  wlr_output_ptr, &area);
++    }
++    wlmaker_dock_fx_balloon_enter(server_ptr->dock_fx_ptr, clip_ptr,
++                                  name_ptr, &box, &area);
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -1571,20 +1980,274 @@ void _wlmaker_clip_atfork_child(void)
+  */
+ int _wlmaker_clip_handle_sigusr1(__UNUSED__ int signal_number, void *data_ptr)
+ {
+-    wlmaker_clip_t *clip_ptr = data_ptr;
++    _wlmaker_clip_reload_launchers(data_ptr);
++    return 0;
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Re-reads the launchers of the Clip and the Dock, and the Dock's place, from
++ * the state: Updates the room the Clip leaves for its launchers, and where the
++ * Dock's dock-apps start.
++ */
++void _wlmaker_clip_reload_launchers(wlmaker_clip_t *clip_ptr)
++{
+     wlmaker_server_t *server_ptr = clip_ptr->server_ptr;
+     bspl_dict_t *state_dict_ptr = wlmaker_state_load(
+         server_ptr->files_ptr, server_ptr->state_fname_ptr);
++    if (NULL == state_dict_ptr) return;
+     bspl_array_t *launchers_ptr = bspl_dict_get_array(
+         bspl_dict_get_dict(state_dict_ptr, "Clip"), "Launchers");
+     size_t spacers = NULL != launchers_ptr ? bspl_array_size(launchers_ptr) : 0;
++    wlmaker_dock_place_t place;
++    if (wlmaker_dock_place_decode(
++            bspl_dict_get_dict(state_dict_ptr, "Dock"), &place)) {
++        clip_ptr->dock_place = place;
++    }
+     bspl_dict_unref(state_dict_ptr);
+ 
+     bs_log(BS_INFO, "Clip %p: Room for %zu launchers.", clip_ptr, spacers);
+     _wlmaker_clip_set_spacers(clip_ptr, spacers, &server_ptr->style_ptr->tile);
++
++    bspl_array_t *a = wlmaker_dock_launchers_load(server_ptr, "Dock");
++    if (NULL != a) {
++        clip_ptr->dock_launchers = bspl_array_size(a);
++        bspl_array_unref(a);
++    }
++    _wlmaker_clip_update_dock_side(clip_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Creates the dock for the dock-apps attached to the Dock: Placed over the
++ * Dock's column, after its launchers. Without a Dock in the state, there is
++ * none.
++ */
++bool _wlmaker_clip_create_dock_side(
++    wlmaker_clip_t *clip_ptr,
++    bspl_dict_t *state_dict_ptr,
++    const wlmaker_config_style_t *style_ptr,
++    struct wlr_output *wlr_output_ptr)
++{
++    if (!wlmaker_dock_place_decode(
++            bspl_dict_get_dict(state_dict_ptr, "Dock"),
++            &clip_ptr->dock_place)) return true;
++
++    wlmtk_dock_positioning_t pos = {
++        .edge = clip_ptr->dock_place.edge,
++        .anchor = clip_ptr->dock_place.anchor,
++        .overlay = true };
++    clip_ptr->dock_side_ptr = wlmtk_dock_create(&pos, &style_ptr->dock);
++    if (NULL == clip_ptr->dock_side_ptr) return false;
++    wlmtk_element_set_visible(
++        wlmtk_dock_element(clip_ptr->dock_side_ptr), true);
++    clip_ptr->dock_dockapps_ptr = wlmaker_dockapps_create_with_key(
++        clip_ptr->dock_side_ptr, NULL, clip_ptr->dockapps_fname_ptr, "Dock");
++    if (NULL == clip_ptr->dock_dockapps_ptr) return false;
++
++    wlmtk_layer_t *layer_ptr = wlmtk_desktop_get_layer(
++        clip_ptr->server_ptr->desktop_ptr, WLMTK_DESKTOP_LAYER_TOP);
++    if (NULL != wlr_output_ptr &&
++        !wlmtk_layer_add_panel(layer_ptr,
++                               wlmtk_dock_panel(clip_ptr->dock_side_ptr),
++                               wlr_output_ptr)) return false;
++
++    bspl_array_t *a = wlmaker_dock_launchers_load(
++        clip_ptr->server_ptr, "Dock");
++    if (NULL != a) {
++        clip_ptr->dock_launchers = bspl_array_size(a);
++        bspl_array_unref(a);
++    }
++    _wlmaker_clip_update_dock_side(clip_ptr);
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Places the Dock's dock-apps right after the Dock's launchers: At the
++ * Dock's corner, one tile further than the Dock's main tile and launchers.
++ */
++void _wlmaker_clip_update_dock_side(wlmaker_clip_t *clip_ptr)
++{
++    if (NULL == clip_ptr->dock_side_ptr) return;
++    wlmaker_server_t *server_ptr = clip_ptr->server_ptr;
++    int pitch = server_ptr->style_ptr->tile.size +
++        server_ptr->style_ptr->dock.margin.width;
++    wlmtk_dock_positioning_t pos = *wlmtk_dock_get_positioning(
++        clip_ptr->dock_side_ptr);
++    pos.edge = clip_ptr->dock_place.edge;
++    pos.anchor = clip_ptr->dock_place.anchor;
++    pos.margin = (1 + clip_ptr->dock_launchers) * pitch;
++
++    // Where the Dock is: It may be pushed away from the corner by others.
++    struct wlr_box b, o;
++    struct wlr_output *wlr_output_ptr = wlmbe_primary_output(
++        server_ptr->wlr_output_layout_ptr);
++    if (NULL != server_ptr->dock_layer_panel_ptr && NULL != wlr_output_ptr &&
++        wlmaker_layer_panel_get_box(server_ptr->dock_layer_panel_ptr, &b)) {
++        wlr_output_layout_get_box(
++            server_ptr->wlr_output_layout_ptr, wlr_output_ptr, &o);
++        switch (pos.anchor) {
++        case WLR_EDGE_TOP: pos.margin += b.y - o.y; break;
++        case WLR_EDGE_BOTTOM:
++            pos.margin += o.y + o.height - (b.y + b.height); break;
++        case WLR_EDGE_LEFT: pos.margin += b.x - o.x; break;
++        case WLR_EDGE_RIGHT:
++            pos.margin += o.x + o.width - (b.x + b.width); break;
++        default: break;
++        }
++        if (0 > pos.margin) pos.margin = 0;
++    }
++
++    const wlmtk_dock_positioning_t *cur_ptr = wlmtk_dock_get_positioning(
++        clip_ptr->dock_side_ptr);
++    if (cur_ptr->edge == pos.edge && cur_ptr->anchor == pos.anchor &&
++        cur_ptr->margin == pos.margin) return;
++    if (!wlmtk_dock_set_positioning(clip_ptr->dock_side_ptr, &pos)) {
++        bs_log(BS_WARNING, "Failed to place the Dock's dock-apps at edge "
++               "0x%"PRIx32", anchor 0x%"PRIx32, pos.edge, pos.anchor);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Decodes Window Maker's `Lowered` and `AutoRaiseLower` of a dock. */
++wlmaker_dock_level_t _wlmaker_clip_decode_level(bspl_dict_t *dict_ptr)
++{
++    if (wlmaker_dock_launcher_flag(dict_ptr, "AutoRaiseLower")) {
++        return WLMAKER_DOCK_LEVEL_AUTO_RAISE_LOWER;
++    }
++    if (wlmaker_dock_launcher_flag(dict_ptr, "Lowered")) {
++        return WLMAKER_DOCK_LEVEL_NORMAL;
++    }
++    return WLMAKER_DOCK_LEVEL_KEEP_ON_TOP;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Puts the Dock's (or the Clip's) surfaces in the layer of its level. */
++void _wlmaker_clip_apply_level(wlmaker_clip_t *clip_ptr, bool dock)
++{
++    wlmaker_server_t *server_ptr = clip_ptr->server_ptr;
++    wlmtk_desktop_layer_t layer = wlmaker_clip_layer(server_ptr, dock);
++    if (dock) {
++        if (NULL != clip_ptr->dock_side_ptr) {
++            _wlmaker_clip_move_panel(
++                clip_ptr, wlmtk_dock_panel(clip_ptr->dock_side_ptr), layer);
++        }
++        if (NULL != server_ptr->dock_layer_panel_ptr) {
++            wlmaker_layer_panel_update_layer(server_ptr->dock_layer_panel_ptr);
++        }
++    } else {
++        _wlmaker_clip_move_panel(
++            clip_ptr, wlmtk_dock_panel(clip_ptr->wlmtk_dock_ptr), layer);
++        if (NULL != server_ptr->clip_layer_panel_ptr) {
++            wlmaker_layer_panel_update_layer(server_ptr->clip_layer_panel_ptr);
++        }
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Moves the panel to `layer`, on the output it is on. */
++void _wlmaker_clip_move_panel(
++    wlmaker_clip_t *clip_ptr,
++    wlmtk_panel_t *panel_ptr,
++    wlmtk_desktop_layer_t layer)
++{
++    wlmtk_layer_t *layer_ptr = wlmtk_desktop_get_layer(
++        clip_ptr->server_ptr->desktop_ptr, layer);
++    wlmtk_layer_t *current_ptr = wlmtk_panel_get_layer(panel_ptr);
++    if (layer_ptr == current_ptr || NULL == layer_ptr) return;
++    struct wlr_output *wlr_output_ptr = wlmbe_output_description_first_fnmatch(
++        &clip_ptr->output_description,
++        clip_ptr->server_ptr->wlr_output_layout_ptr);
++    if (NULL == wlr_output_ptr) {
++        wlr_output_ptr = wlmbe_primary_output(
++            clip_ptr->server_ptr->wlr_output_layout_ptr);
++    }
++    if (NULL != current_ptr) wlmtk_layer_remove_panel(current_ptr, panel_ptr);
++    if (NULL != wlr_output_ptr) {
++        wlmtk_layer_add_panel(layer_ptr, panel_ptr, wlr_output_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** @return Whether the pointer is on the Dock (or the Clip). */
++bool _wlmaker_clip_pointer_on(wlmaker_clip_t *clip_ptr, bool dock)
++{
++    wlmaker_server_t *server_ptr = clip_ptr->server_ptr;
++    if (NULL == server_ptr->input_manager_ptr) return false;
++    struct wlr_cursor *c = wlmim_wlr_cursor(server_ptr->input_manager_ptr);
++    wlmaker_dock_column_t column;
++    if (!wlmaker_clip_column(server_ptr, dock, &column)) return false;
++    size_t n = 1 + column.launchers + column.dockapps;
++    struct wlr_box box = { .x = column.x, .y = column.y,
++                           .width = column.size, .height = column.size };
++    int length = (n - 1) * column.pitch;
++    switch (column.place.anchor) {
++    case WLR_EDGE_TOP: box.height += length; break;
++    case WLR_EDGE_BOTTOM: box.y -= length; box.height += length; break;
++    case WLR_EDGE_LEFT: box.width += length; break;
++    case WLR_EDGE_RIGHT: box.x -= length; box.width += length; break;
++    default: break;
++    }
++    return wlr_box_contains_point(&box, c->x, c->y);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Raises or lowers the dock, when auto-raising. */
++static void _wlmaker_clip_level_timer(wlmaker_clip_t *clip_ptr, bool dock)
++{
++    int i = dock ? 1 : 0;
++    if (NULL != clip_ptr->level_timer_ptr[i]) {
++        wl_event_source_remove(clip_ptr->level_timer_ptr[i]);
++        clip_ptr->level_timer_ptr[i] = NULL;
++    }
++    if (WLMAKER_DOCK_LEVEL_AUTO_RAISE_LOWER != clip_ptr->level[i]) return;
++    bool on = _wlmaker_clip_pointer_on(clip_ptr, dock);
++    if (on == clip_ptr->raised[i]) return;
++    clip_ptr->raised[i] = on;
++    _wlmaker_clip_apply_level(clip_ptr, dock);
++}
++
++/** Timer callback: Auto-raise or lower the Clip. */
++int _wlmaker_clip_handle_level_timer_clip(void *data_ptr)
++{
++    _wlmaker_clip_level_timer(data_ptr, false);
+     return 0;
+ }
+ 
++/** Timer callback: Auto-raise or lower the Dock. */
++int _wlmaker_clip_handle_level_timer_dock(void *data_ptr)
++{
++    _wlmaker_clip_level_timer(data_ptr, true);
++    return 0;
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Stores the number of dock-apps attached to the Dock as `DockappTiles` in
++ * the state's `Dock` section: For others placing tiles after them, eg. a
++ * system tray.
++ */
++void _wlmaker_clip_publish_dock_tiles(wlmaker_clip_t *clip_ptr)
++{
++    if (NULL == clip_ptr->dock_dockapps_ptr) return;
++    long n = wlmaker_dockapps_size(clip_ptr->dock_dockapps_ptr);
++    if (n == clip_ptr->published_dock_tiles) return;
++    char buf[32];
++    snprintf(buf, sizeof(buf), "%ld", n);
++    bspl_dict_t *d = bspl_dict_create();
++    bspl_string_t *s = bspl_string_create(buf);
++    if (NULL != d && NULL != s &&
++        bspl_dict_add(d, "DockappTiles", bspl_object_from_string(s)) &&
++        wlmaker_state_store_section(clip_ptr->server_ptr->files_ptr,
++                                    clip_ptr->server_ptr->state_fname_ptr,
++                                    "Dock", d)) {
++        clip_ptr->published_dock_tiles = n;
++    }
++    if (NULL != s) bspl_string_unref(s);
++    if (NULL != d) bspl_dict_unref(d);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Sets the number of empty tiles after the Clip, for its launchers. */
+ bool _wlmaker_clip_set_spacers(
+diff --git a/src/clip.h b/src/clip.h
+index a11e0ee..e66ec74 100644
+--- a/src/clip.h
++++ b/src/clip.h
+@@ -35,9 +35,44 @@ typedef struct _wlmaker_clip_t wlmaker_clip_t;
+ 
+ #include "config.h"
+ #include "dock_position.h"
++#include "dockapps.h"
+ #include "context_menu.h"
+ #include "server.h"
+ 
++/** Stacking of the Dock or the Clip: Window Maker's "Dock position". */
++typedef enum {
++    /** Above the windows ("Keep on Top"). The default. */
++    WLMAKER_DOCK_LEVEL_KEEP_ON_TOP,
++    /** Below the windows ("Normal"). */
++    WLMAKER_DOCK_LEVEL_NORMAL,
++    /** Below, raised while the pointer is on it ("Auto raise & lower"). */
++    WLMAKER_DOCK_LEVEL_AUTO_RAISE_LOWER,
++} wlmaker_dock_level_t;
++
++/**
++ * A column of tiles: The Dock (its main tile, then its launchers, then the
++ * dock-apps attached to it), or the Clip (the Clip, its launchers, then its
++ * dock-apps). For placing tiles dragged onto the Dock or the Clip.
++ */
++typedef struct {
++    /** Where the dock is. */
++    wlmaker_dock_place_t      place;
++    /** Position of the tile nearest the anchor, in layout coordinates. */
++    int                       x;
++    /** Position of the tile nearest the anchor, in layout coordinates. */
++    int                       y;
++    /** Size of a tile. */
++    int                       size;
++    /** Distance from one tile to the next. */
++    int                       pitch;
++    /** Number of launchers, after the first tile. */
++    size_t                    launchers;
++    /** Number of dock-apps, after the launchers. */
++    size_t                    dockapps;
++    /** The output. */
++    struct wlr_box            output;
++} wlmaker_dock_column_t;
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif  // __cplusplus
+@@ -92,6 +127,111 @@ bool wlmaker_clip_add_move_items(
+     wlmaker_server_t *server_ptr,
+     wlmaker_context_menu_t *context_menu_ptr);
+ 
++/**
++ * The launchers of the Dock or the Clip changed (eg. in the state file):
++ * Updates the room the Clip leaves for its launchers, where the Dock's
++ * dock-apps start, and tells `wlmdock` to re-read them.
++ *
++ * @param server_ptr
++ */
++void wlmaker_clip_launchers_changed(wlmaker_server_t *server_ptr);
++
++/**
++ * The Dock's surface (`wlmdock`) moved or changed: Places the dock-apps
++ * attached to the Dock after its launchers.
++ *
++ * @param server_ptr
++ */
++void wlmaker_clip_dock_surface_changed(wlmaker_server_t *server_ptr);
++
++/**
++ * Places a dock-app's tile: On the Dock, if it was attached there before
++ * (it is in the Dock's order), else on the Clip.
++ *
++ * @param server_ptr
++ * @param tile_ptr
++ * @param name_ptr            Name of the dock-app. May be NULL.
++ *
++ * @return true on success.
++ */
++bool wlmaker_clip_add_dockapp(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr,
++    const char *name_ptr);
++
++/** Removes the dock-app's tile from the Dock or the Clip, if there. */
++void wlmaker_clip_remove_dockapp(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr);
++
++/** @return The placement holding `tile_ptr`: The Clip's, Dock's, or NULL. */
++wlmaker_dockapps_t *wlmaker_clip_dockapps_of(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr);
++
++/** @return The placement of the dock-apps of the Dock (or the Clip). */
++wlmaker_dockapps_t *wlmaker_clip_dockapps(
++    wlmaker_server_t *server_ptr,
++    bool dock);
++
++/**
++ * Attaches a dock-app to the Dock (or the Clip) at `index`, counted from
++ * the anchor among the dock-apps there. Moves it within, or from the other.
++ * The order is stored.
++ */
++void wlmaker_clip_move_dockapp(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr,
++    bool to_dock,
++    size_t index);
++
++/**
++ * Fills `column_ptr` with the geometry of the Dock's (or the Clip's)
++ * column of tiles.
++ *
++ * @return false if there is no such dock.
++ */
++bool wlmaker_clip_column(
++    wlmaker_server_t *server_ptr,
++    bool dock,
++    wlmaker_dock_column_t *column_ptr);
++
++/** @return The level of the Dock (or the Clip). */
++wlmaker_dock_level_t wlmaker_clip_get_level(
++    wlmaker_server_t *server_ptr,
++    bool dock);
++
++/**
++ * Sets the level of the Dock (or the Clip): Stores it in the state, as
++ * Window Maker's `Lowered` and `AutoRaiseLower`, and moves the dock (and its
++ * launchers' and dock-apps' surfaces) to the layer.
++ */
++void wlmaker_clip_set_level(
++    wlmaker_server_t *server_ptr,
++    bool dock,
++    wlmaker_dock_level_t level);
++
++/**
++ * @return The layer the Dock's (or the Clip's) surfaces belong in now: The
++ *     top layer, unless lowered.
++ */
++wlmtk_desktop_layer_t wlmaker_clip_layer(
++    wlmaker_server_t *server_ptr,
++    bool dock);
++
++/** The pointer is on the Dock (or the Clip): Raises it, if auto-raising. */
++void wlmaker_clip_dock_hovered(
++    wlmaker_server_t *server_ptr,
++    bool dock);
++
++/** The pointer left the Dock (or the Clip): Lowers it, if auto-raising. */
++void wlmaker_clip_dock_left(
++    wlmaker_server_t *server_ptr,
++    bool dock);
++
++/** @return Path of the dock-apps state file (`Dockapps.plist`), or NULL. */
++const char *wlmaker_clip_dockapps_fname(wlmaker_server_t *server_ptr);
++
+ /** Unit test set. */
+ extern const bs_test_set_t wlmaker_clip_test_set;
+ 
+diff --git a/src/dock_launchers.c b/src/dock_launchers.c
+new file mode 100644
+index 0000000..5fd1b30
+--- /dev/null
++++ b/src/dock_launchers.c
+@@ -0,0 +1,512 @@
++/* ========================================================================= */
++/**
++ * @file dock_launchers.c
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "dock_launchers.h"
++
++#include <cairo.h>
++#include <inttypes.h>
++#include <signal.h>
++#include <stdlib.h>
++#include <string.h>
++#include <strings.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <unistd.h>
++#define WLR_USE_UNSTABLE
++#include <wlr/interfaces/wlr_buffer.h>
++#include <wlr/types/wlr_buffer.h>
++#include <wlr/util/edges.h>
++#undef WLR_USE_UNSTABLE
++
++#include "clip.h"
++#include "config.h"
++#include "toplevel_tracker.h"
++
++/* == Declarations ========================================================= */
++
++static void _wlmaker_dock_app_count(wlmtk_window_t *window_ptr, void *ud_ptr);
++static void _wlmaker_dock_app_hide(wlmtk_window_t *window_ptr, void *ud_ptr);
++static void _wlmaker_dock_app_unhide(wlmtk_window_t *window_ptr, void *ud_ptr);
++static void _wlmaker_dock_app_bring_here(
++    wlmtk_window_t *window_ptr,
++    void *ud_ptr);
++static void _wlmaker_dock_app_collect_pid(
++    wlmtk_window_t *window_ptr,
++    void *ud_ptr);
++
++/** Counts windows, and minimized ones. */
++typedef struct {
++    /** Windows. */
++    size_t                    windows;
++    /** Minimized windows. */
++    size_t                    hidden;
++} _wlmaker_dock_app_count_t;
++
++/** Arguments for @ref _wlmaker_dock_app_bring_here. */
++typedef struct {
++    /** The current workspace. */
++    wlmtk_workspace_t         *workspace_ptr;
++    /** The last window brought here: Activated. */
++    wlmtk_window_t            *last_window_ptr;
++} _wlmaker_dock_app_bring_here_t;
++
++/** Process IDs of an application's windows. */
++typedef struct {
++    /** The PIDs. */
++    pid_t                     pids[32];
++    /** Number of PIDs. */
++    size_t                    n;
++} _wlmaker_dock_app_pids_t;
++
++/* == Exported methods ===================================================== */
++
++/* ------------------------------------------------------------------------- */
++bspl_array_t *wlmaker_dock_launchers_load(
++    wlmaker_server_t *server_ptr,
++    const char *section_ptr)
++{
++    bspl_dict_t *state_dict_ptr = wlmaker_state_load(
++        server_ptr->files_ptr, server_ptr->state_fname_ptr);
++    if (NULL == state_dict_ptr) return NULL;
++    bspl_array_t *launchers_ptr = bspl_dict_get_array(
++        bspl_dict_get_dict(state_dict_ptr, section_ptr), "Launchers");
++    bspl_array_t *array_ptr = bspl_array_create();
++    for (size_t i = 0;
++         NULL != array_ptr && NULL != launchers_ptr &&
++             i < bspl_array_size(launchers_ptr);
++         ++i) {
++        bspl_object_t *o = bspl_array_at(launchers_ptr, i);
++        bspl_dict_t *d = bspl_dict_from_object(o);
++        if (NULL == d) continue;
++        // wlmdock leaves out launchers without icon.
++        char *p = wlmaker_dock_launcher_icon_path(
++            server_ptr->files_ptr, wlmaker_dock_launcher_value(d, "Icon"));
++        if (NULL == p) continue;
++        free(p);
++        if (!bspl_array_push_back(array_ptr, o)) {
++            bspl_array_unref(array_ptr);
++            array_ptr = NULL;
++        }
++    }
++    bspl_dict_unref(state_dict_ptr);
++    return array_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dock_launchers_store(
++    wlmaker_server_t *server_ptr,
++    const char *section_ptr,
++    bspl_array_t *array_ptr)
++{
++    bspl_dict_t *d = bspl_dict_create();
++    bool rv = NULL != d &&
++        bspl_dict_add(d, "Launchers", bspl_object_from_array(array_ptr)) &&
++        wlmaker_state_store_section(server_ptr->files_ptr,
++                                    server_ptr->state_fname_ptr,
++                                    section_ptr, d);
++    if (NULL != d) bspl_dict_unref(d);
++    if (!rv) {
++        bs_log(BS_WARNING, "Failed to store the launchers of '%s'",
++               section_ptr);
++        return false;
++    }
++    wlmaker_clip_launchers_changed(server_ptr);
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++const char *wlmaker_dock_launcher_value(
++    bspl_dict_t *dict_ptr,
++    const char *key_ptr)
++{
++    if (NULL == dict_ptr) return NULL;
++    return bspl_dict_get_string_value(dict_ptr, key_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dock_launcher_flag(
++    bspl_dict_t *dict_ptr,
++    const char *key_ptr)
++{
++    const char *v = wlmaker_dock_launcher_value(dict_ptr, key_ptr);
++    if (NULL == v) return false;
++    return 0 == strcasecmp(v, "Yes") || 0 == strcasecmp(v, "True") ||
++        0 == strcasecmp(v, "On") || 0 == strcmp(v, "1");
++}
++
++/* ------------------------------------------------------------------------- */
++char *wlmaker_dock_launcher_balloon_text(bspl_dict_t *dict_ptr)
++{
++    const char *app_id_ptr = wlmaker_dock_launcher_value(dict_ptr, "AppID");
++    const char *cmd_ptr = wlmaker_dock_launcher_value(dict_ptr, "CommandLine");
++    if (NULL != app_id_ptr && '\0' != *app_id_ptr) {
++        if (NULL == cmd_ptr || '\0' == *cmd_ptr) return logged_strdup(app_id_ptr);
++        return bs_strdupf("%s\n(%s)", app_id_ptr, cmd_ptr);
++    }
++    if (NULL == cmd_ptr || '\0' == *cmd_ptr) return NULL;
++
++    // The program: The first word, without its path.
++    size_t len = strcspn(cmd_ptr, " \t");
++    const char *name_ptr = cmd_ptr;
++    for (size_t i = 0; i < len; ++i) {
++        if ('/' == cmd_ptr[i]) name_ptr = &cmd_ptr[i + 1];
++    }
++    int name_len = (int)(cmd_ptr + len - name_ptr);
++    if (0 >= name_len) return logged_strdup(cmd_ptr);
++    return bs_strdupf("%.*s\n(%s)", name_len, name_ptr, cmd_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++char *wlmaker_dock_launcher_icon_path(
++    wlm_util_files_t *files_ptr,
++    const char *icon_ptr)
++{
++    if (NULL == icon_ptr || '\0' == *icon_ptr) return NULL;
++    char *path_ptr = NULL;
++    if ('/' == icon_ptr[0] || '~' == icon_ptr[0]) {
++        path_ptr = bs_file_resolve_path(icon_ptr, NULL);
++    } else {
++        char *p = bs_strdupf("icons/%s", icon_ptr);
++        if (NULL != p && NULL != files_ptr) {
++            path_ptr = wlm_util_files_xdg_data_find(files_ptr, p, S_IFREG);
++        }
++        if (NULL != p) free(p);
++#ifdef WLMAKER_SOURCE_DIR
++        if (NULL == path_ptr) {
++            path_ptr = bs_strdupf(
++                WLMAKER_SOURCE_DIR "/share/wlmaker/icons/%s", icon_ptr);
++        }
++#endif
++    }
++    if (NULL != path_ptr && !bs_file_realpath_is(path_ptr, S_IFREG)) {
++        free(path_ptr);
++        path_ptr = NULL;
++    }
++    return path_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++struct wlr_buffer *wlmaker_dock_tile_buffer(
++    const struct wlmtk_tile_style *style_ptr,
++    const char *image_path_ptr,
++    struct wlr_buffer *image_ptr)
++{
++    int size = style_ptr->size;
++    struct wlr_buffer *wlr_buffer_ptr = bs_gfxbuf_create_wlr_buffer(
++        size, size);
++    if (NULL == wlr_buffer_ptr) return NULL;
++    cairo_t *cairo_ptr = cairo_create_from_wlr_buffer(wlr_buffer_ptr);
++    if (NULL == cairo_ptr) {
++        wlr_buffer_drop(wlr_buffer_ptr);
++        return NULL;
++    }
++    wlmaker_primitives_cairo_fill(cairo_ptr, &style_ptr->fill);
++    wlmaker_primitives_draw_bezel(cairo_ptr, style_ptr->bezel_width, true);
++
++    cairo_surface_t *s_ptr = NULL;
++    void *data_ptr = NULL;
++    if (NULL != image_path_ptr) {
++        s_ptr = cairo_image_surface_create_from_png(image_path_ptr);
++    } else if (NULL != image_ptr) {
++        uint32_t format;
++        size_t stride;
++        if (wlr_buffer_begin_data_ptr_access(
++                image_ptr, WLR_BUFFER_DATA_PTR_ACCESS_READ,
++                &data_ptr, &format, &stride)) {
++            s_ptr = cairo_image_surface_create_for_data(
++                data_ptr, CAIRO_FORMAT_ARGB32,
++                image_ptr->width, image_ptr->height, stride);
++        } else {
++            data_ptr = NULL;
++        }
++    }
++    if (NULL != s_ptr && CAIRO_STATUS_SUCCESS == cairo_surface_status(s_ptr)) {
++        int w = cairo_image_surface_get_width(s_ptr);
++        int h = cairo_image_surface_get_height(s_ptr);
++        int content = style_ptr->content_size;
++        if (0 < w && 0 < h) {
++            double scale = BS_MIN((double)content / w, (double)content / h);
++            // Images from a buffer (eg. a dock-app) are shown as they are.
++            if (NULL != image_ptr && NULL == image_path_ptr) scale = 1.0;
++            cairo_save(cairo_ptr);
++            cairo_translate(cairo_ptr,
++                            (size - w * scale) / 2.0,
++                            (size - h * scale) / 2.0);
++            cairo_scale(cairo_ptr, scale, scale);
++            cairo_set_source_surface(cairo_ptr, s_ptr, 0, 0);
++            cairo_paint(cairo_ptr);
++            cairo_restore(cairo_ptr);
++        }
++    }
++    if (NULL != s_ptr) cairo_surface_destroy(s_ptr);
++    if (NULL != data_ptr) wlr_buffer_end_data_ptr_access(image_ptr);
++    cairo_destroy(cairo_ptr);
++    return wlr_buffer_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++int wlmaker_dock_tile_index_at(
++    wlmaker_dock_place_t place,
++    int width,
++    int height,
++    double x,
++    double y,
++    int pitch)
++{
++    if (0 >= pitch || x < 0 || y < 0 || x >= width || y >= height) return -1;
++    double d;
++    if (wlmaker_dock_place_vertical(place)) {
++        d = (WLR_EDGE_BOTTOM == place.anchor) ? height - y : y;
++    } else {
++        d = (WLR_EDGE_RIGHT == place.anchor) ? width - x : x;
++    }
++    if (0 > d) return -1;
++    return (int)(d / pitch);
++}
++
++/* ------------------------------------------------------------------------- */
++size_t wlmaker_dock_app_windows(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr,
++    size_t *hidden_ptr)
++{
++    _wlmaker_dock_app_count_t count = {};
++    wlmaker_toplevel_tracker_for_each_app_window(
++        server_ptr->toplevel_tracker_ptr, app_id_ptr,
++        _wlmaker_dock_app_count, &count);
++    if (NULL != hidden_ptr) *hidden_ptr = count.hidden;
++    return count.windows;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_dock_app_hide(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr)
++{
++    wlmaker_toplevel_tracker_for_each_app_window(
++        server_ptr->toplevel_tracker_ptr, app_id_ptr,
++        _wlmaker_dock_app_hide, NULL);
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_dock_app_unhide(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr)
++{
++    wlmaker_toplevel_tracker_for_each_app_window(
++        server_ptr->toplevel_tracker_ptr, app_id_ptr,
++        _wlmaker_dock_app_unhide, NULL);
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_dock_app_bring_here(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr)
++{
++    _wlmaker_dock_app_bring_here_t arg = {
++        .workspace_ptr = wlmtk_desktop_get_current_workspace(
++            server_ptr->desktop_ptr) };
++    if (NULL == arg.workspace_ptr) return;
++    wlmaker_toplevel_tracker_for_each_app_window(
++        server_ptr->toplevel_tracker_ptr, app_id_ptr,
++        _wlmaker_dock_app_bring_here, &arg);
++    if (NULL != arg.last_window_ptr) {
++        wlmtk_workspace_activate_window(arg.workspace_ptr,
++                                        arg.last_window_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_dock_app_kill(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr)
++{
++    _wlmaker_dock_app_pids_t pids = {};
++    wlmaker_toplevel_tracker_for_each_app_window(
++        server_ptr->toplevel_tracker_ptr, app_id_ptr,
++        _wlmaker_dock_app_collect_pid, &pids);
++    for (size_t i = 0; i < pids.n; ++i) {
++        bs_log(BS_INFO, "Terminating \"%s\", PID %"PRIdMAX,
++               app_id_ptr, (intmax_t)pids.pids[i]);
++        if (0 != kill(pids.pids[i], SIGTERM)) {
++            bs_log(BS_WARNING | BS_ERRNO, "Failed kill(%"PRIdMAX", SIGTERM)",
++                   (intmax_t)pids.pids[i]);
++        }
++    }
++}
++
++/* == Local (static) methods =============================================== */
++
++/* ------------------------------------------------------------------------- */
++/** Counts the window, and whether it is minimized. */
++void _wlmaker_dock_app_count(wlmtk_window_t *window_ptr, void *ud_ptr)
++{
++    _wlmaker_dock_app_count_t *count_ptr = ud_ptr;
++    ++count_ptr->windows;
++    if (wlmtk_window_is_minimized(window_ptr)) ++count_ptr->hidden;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Minimizes the window. */
++void _wlmaker_dock_app_hide(wlmtk_window_t *window_ptr,
++                            __UNUSED__ void *ud_ptr)
++{
++    wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(window_ptr);
++    if (NULL == workspace_ptr) return;
++    wlmtk_workspace_minimize_window(workspace_ptr, window_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Restores the window, where it is. */
++void _wlmaker_dock_app_unhide(wlmtk_window_t *window_ptr,
++                              __UNUSED__ void *ud_ptr)
++{
++    wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(window_ptr);
++    if (NULL == workspace_ptr || !wlmtk_window_is_minimized(window_ptr)) {
++        return;
++    }
++    wlmtk_workspace_raise_window(workspace_ptr, window_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Moves the window to the current workspace, restores and raises it. */
++void _wlmaker_dock_app_bring_here(wlmtk_window_t *window_ptr, void *ud_ptr)
++{
++    _wlmaker_dock_app_bring_here_t *arg_ptr = ud_ptr;
++    wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(window_ptr);
++    if (NULL == workspace_ptr) return;
++    if (workspace_ptr != arg_ptr->workspace_ptr) {
++        wlmtk_workspace_unmap_window(workspace_ptr, window_ptr);
++        wlmtk_workspace_map_window(arg_ptr->workspace_ptr, window_ptr);
++    }
++    wlmtk_workspace_raise_window(arg_ptr->workspace_ptr, window_ptr);
++    arg_ptr->last_window_ptr = window_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Collects the process ID of the window's client, once. */
++void _wlmaker_dock_app_collect_pid(wlmtk_window_t *window_ptr, void *ud_ptr)
++{
++    _wlmaker_dock_app_pids_t *pids_ptr = ud_ptr;
++    const wlmtk_util_client_t *client_ptr = wlmtk_window_get_client_ptr(
++        window_ptr);
++    if (NULL == client_ptr) return;
++    pid_t pid = client_ptr->pid;
++    // Never ourselves, nor a process group.
++    if (pid <= 1 || pid == getpid()) return;
++    for (size_t i = 0; i < pids_ptr->n; ++i) {
++        if (pids_ptr->pids[i] == pid) return;
++    }
++    if (pids_ptr->n < sizeof(pids_ptr->pids) / sizeof(pid_t)) {
++        pids_ptr->pids[pids_ptr->n++] = pid;
++    }
++}
++
++/* == Unit tests =========================================================== */
++
++static void test_balloon_text(bs_test_t *test_ptr);
++static void test_index_at(bs_test_t *test_ptr);
++static void test_tile_buffer(bs_test_t *test_ptr);
++
++/** Unit test cases. */
++static const bs_test_case_t _wlmaker_dock_launchers_test_cases[] = {
++    { true, "balloon_text", test_balloon_text },
++    { true, "index_at", test_index_at },
++    { true, "tile_buffer", test_tile_buffer },
++    BS_TEST_CASE_SENTINEL()
++};
++
++const bs_test_set_t wlmaker_dock_launchers_test_set = BS_TEST_SET(
++    true, "dock_launchers", _wlmaker_dock_launchers_test_cases);
++
++/* ------------------------------------------------------------------------- */
++/** Tests the balloon text, as Window Maker's: Name, and (command). */
++void test_balloon_text(bs_test_t *test_ptr)
++{
++    bspl_object_t *o = bspl_create_object_from_plist_string(
++        "{AppID = firefox; CommandLine = \"/usr/bin/big-wm-open browser\";}");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, o);
++    char *t = wlmaker_dock_launcher_balloon_text(bspl_dict_from_object(o));
++    BS_TEST_VERIFY_STREQ(test_ptr, "firefox\n(/usr/bin/big-wm-open browser)", t);
++    free(t);
++    bspl_object_unref(o);
++
++    o = bspl_create_object_from_plist_string(
++        "{CommandLine = \"/usr/bin/thunar --daemon\"; Lock = Yes;}");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, o);
++    t = wlmaker_dock_launcher_balloon_text(bspl_dict_from_object(o));
++    BS_TEST_VERIFY_STREQ(test_ptr, "thunar\n(/usr/bin/thunar --daemon)", t);
++    free(t);
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dock_launcher_flag(
++                            bspl_dict_from_object(o), "Lock"));
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmaker_dock_launcher_flag(
++                             bspl_dict_from_object(o), "AutoLaunch"));
++    bspl_object_unref(o);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Tests finding the tile at a position, counted from the anchor. */
++void test_index_at(bs_test_t *test_ptr)
++{
++    wlmaker_dock_place_t p = { WLR_EDGE_RIGHT, WLR_EDGE_TOP };
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlmaker_dock_tile_index_at(
++                          p, 64, 194, 10, 10, 65));
++    BS_TEST_VERIFY_EQ(test_ptr, 2, wlmaker_dock_tile_index_at(
++                          p, 64, 194, 10, 140, 65));
++    BS_TEST_VERIFY_EQ(test_ptr, -1, wlmaker_dock_tile_index_at(
++                          p, 64, 194, 10, 200, 65));
++    p = (wlmaker_dock_place_t){ WLR_EDGE_LEFT, WLR_EDGE_BOTTOM };
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlmaker_dock_tile_index_at(
++                          p, 64, 194, 10, 190, 65));
++    BS_TEST_VERIFY_EQ(test_ptr, 2, wlmaker_dock_tile_index_at(
++                          p, 64, 194, 10, 10, 65));
++    p = (wlmaker_dock_place_t){ WLR_EDGE_BOTTOM, WLR_EDGE_RIGHT };
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlmaker_dock_tile_index_at(
++                          p, 129, 64, 10, 10, 65));
++}
++
++/* ------------------------------------------------------------------------- */
++/** Tests drawing a tile with an image. */
++void test_tile_buffer(bs_test_t *test_ptr)
++{
++    struct wlmtk_tile_style style = {
++        .fill = { .type = WLMTK_STYLE_COLOR_SOLID,
++                  .param = { .solid = { .color = 0xff808080 } } },
++        .bezel_width = 2, .size = 64, .content_size = 48 };
++    struct wlr_buffer *image_ptr = bs_gfxbuf_create_wlr_buffer(48, 48);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, image_ptr);
++    bs_gfxbuf_clear(bs_gfxbuf_from_wlr_buffer(image_ptr), 0xffff0000);
++    struct wlr_buffer *t = wlmaker_dock_tile_buffer(&style, NULL, image_ptr);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, t);
++    bs_gfxbuf_t *g = bs_gfxbuf_from_wlr_buffer(t);
++    BS_TEST_VERIFY_EQ(test_ptr, 0xffff0000, g->data_ptr[32 * 64 + 32]);
++    BS_TEST_VERIFY_EQ(test_ptr, 0xff808080, g->data_ptr[4 * 64 + 4]);
++    wlr_buffer_drop(t);
++    wlr_buffer_drop(image_ptr);
++
++    // An icon file.
++    t = wlmaker_dock_tile_buffer(
++        &style, WLMAKER_SOURCE_DIR "/share/wlmaker/icons/chrome-56x56.png",
++        NULL);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, t);
++    wlr_buffer_drop(t);
++}
++
++/* == End of dock_launchers.c ============================================== */
+diff --git a/src/dock_launchers.h b/src/dock_launchers.h
+new file mode 100644
+index 0000000..bfde6a8
+--- /dev/null
++++ b/src/dock_launchers.h
+@@ -0,0 +1,181 @@
++/* ========================================================================= */
++/**
++ * @file dock_launchers.h
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#ifndef __WLMAKER_DOCK_LAUNCHERS_H__
++#define __WLMAKER_DOCK_LAUNCHERS_H__
++
++#include <stdbool.h>
++#include <stddef.h>
++
++#include <libbase/libbase.h>
++#include <libbase/plist.h>
++
++#include "dock_position.h"
++#include "server.h"
++#include "toolkit/toolkit.h"
++#include "util/files.h"
++
++struct wlr_buffer;
++
++#ifdef __cplusplus
++extern "C" {
++#endif  // __cplusplus
++
++/**
++ * The compositor's view of the launchers that `wlmdock` shows: Those of the
++ * Dock (`wlmdock`, after its main tile) and those of the Clip
++ * (`wlmdock --clip`), as stored in the state's `Launchers` of the `Dock`
++ * and `Clip` sections. Used for Window Maker's menus, balloons, and for
++ * dragging launchers, which the compositor handles for `wlmdock`.
++ */
++
++/**
++ * Loads the `Launchers` of `section_ptr` from the state, as `wlmdock` shows
++ * them: Leaves out those it can't show (not a dict, or no icon found).
++ *
++ * @param server_ptr
++ * @param section_ptr         "Dock" or "Clip".
++ *
++ * @return An array of dicts, or NULL on error. Unref with bspl_array_unref.
++ */
++bspl_array_t *wlmaker_dock_launchers_load(
++    wlmaker_server_t *server_ptr,
++    const char *section_ptr);
++
++/**
++ * Stores `array_ptr` as the `Launchers` of `section_ptr`, and tells
++ * `wlmdock` (and the Clip, which leaves room for its launchers).
++ *
++ * @return true on success.
++ */
++bool wlmaker_dock_launchers_store(
++    wlmaker_server_t *server_ptr,
++    const char *section_ptr,
++    bspl_array_t *array_ptr);
++
++/** @return The string value of `key_ptr` in the launcher, or NULL. */
++const char *wlmaker_dock_launcher_value(
++    bspl_dict_t *dict_ptr,
++    const char *key_ptr);
++
++/** @return Whether the launcher's boolean `key_ptr` (eg. "Lock") is set. */
++bool wlmaker_dock_launcher_flag(
++    bspl_dict_t *dict_ptr,
++    const char *key_ptr);
++
++/**
++ * Text of the launcher's balloon, as Window Maker's for docked icons: The
++ * application's name (its `AppID`, else the program of its `CommandLine`),
++ * and the command in parentheses on the next line.
++ *
++ * @return The text, to be free()-ed. NULL on error.
++ */
++char *wlmaker_dock_launcher_balloon_text(bspl_dict_t *dict_ptr);
++
++/**
++ * Resolves the launcher's `Icon`, as `wlmdock` does: A path starting with
++ * '/' or '~', or a name in `${XDG_DATA_DIRS}/wlmaker/icons`.
++ *
++ * @return The path, to be free()-ed. NULL if not found.
++ */
++char *wlmaker_dock_launcher_icon_path(
++    wlm_util_files_t *files_ptr,
++    const char *icon_ptr);
++
++/**
++ * Draws a tile as the docks show it: The tile's background, and an image
++ * (PNG at `image_path_ptr`, or a buffer) scaled to the content size and
++ * centered.
++ *
++ * @param style_ptr
++ * @param image_path_ptr      PNG file, or NULL.
++ * @param image_ptr           Image buffer, or NULL.
++ *
++ * @return The tile, or NULL on error. Drop with wlr_buffer_drop.
++ */
++struct wlr_buffer *wlmaker_dock_tile_buffer(
++    const struct wlmtk_tile_style *style_ptr,
++    const char *image_path_ptr,
++    struct wlr_buffer *image_ptr);
++
++/**
++ * Index of the tile at `x`, `y` within a dock of `width` x `height` at
++ * `place`, counted from the dock's anchor.
++ *
++ * @param place
++ * @param width
++ * @param height
++ * @param x
++ * @param y
++ * @param pitch               Tile size plus the dock's margin.
++ *
++ * @return The index, or -1 if outside.
++ */
++int wlmaker_dock_tile_index_at(
++    wlmaker_dock_place_t place,
++    int width,
++    int height,
++    double x,
++    double y,
++    int pitch);
++
++/**
++ * Number of windows of the application `app_id_ptr`, and of those
++ * minimized (hidden). Window Maker's application, for a docked icon.
++ */
++size_t wlmaker_dock_app_windows(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr,
++    size_t *hidden_ptr);
++
++/** Hides the application: Minimizes its windows. Window Maker's "Hide". */
++void wlmaker_dock_app_hide(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr);
++
++/** Shows the application's windows again. Window Maker's "Unhide". */
++void wlmaker_dock_app_unhide(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr);
++
++/**
++ * Moves the application's windows to the current workspace, restores and
++ * raises them, and activates one. Window Maker's "Bring Here".
++ */
++void wlmaker_dock_app_bring_here(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr);
++
++/**
++ * Terminates the application: Sends SIGTERM to the processes of its
++ * windows. Window Maker's "Kill".
++ */
++void wlmaker_dock_app_kill(
++    wlmaker_server_t *server_ptr,
++    const char *app_id_ptr);
++
++/** Unit test cases. */
++extern const bs_test_set_t wlmaker_dock_launchers_test_set;
++
++#ifdef __cplusplus
++}  // extern "C"
++#endif  // __cplusplus
++
++#endif /* __WLMAKER_DOCK_LAUNCHERS_H__ */
++/* == End of dock_launchers.h ============================================== */
+diff --git a/src/dock_menu.c b/src/dock_menu.c
+new file mode 100644
+index 0000000..03aa9f9
+--- /dev/null
++++ b/src/dock_menu.c
+@@ -0,0 +1,579 @@
++/* ========================================================================= */
++/**
++ * @file dock_menu.c
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "dock_menu.h"
++
++#include <inttypes.h>
++#include <signal.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#define WLR_USE_UNSTABLE
++#include <wlr/util/edges.h>
++#undef WLR_USE_UNSTABLE
++
++#include "action.h"
++#include "clip.h"
++#include "config.h"
++#include "dock_launchers.h"
++#include "dock_position.h"
++#include "i18n.h"
++#include "util/subprocess_monitor.h"
++
++/* == Declarations ========================================================= */
++
++/** Argument of the menu's callbacks. */
++typedef struct {
++    /** Back-link. */
++    wlmaker_server_t          *server_ptr;
++    /** Whether for the Dock (else the Clip). */
++    bool                      dock;
++    /** Index of the launcher, -1 for the main tile or a dock-app. */
++    int                       index;
++    /** Application ID. May be NULL. */
++    char                      *app_id_ptr;
++    /** Command. May be NULL. */
++    char                      *command_ptr;
++    /** Dock-app's name. May be NULL. */
++    char                      *dockapp_name_ptr;
++    /** Dock-app's process. */
++    pid_t                     pid;
++    /** A level, or corners to flip to. */
++    uint32_t                  value;
++} _wlmaker_dock_menu_arg_t;
++
++static _wlmaker_dock_menu_arg_t *_wlmaker_dock_menu_arg_create(
++    wlmaker_server_t *server_ptr,
++    const wlmaker_dock_menu_icon_t *icon_ptr,
++    bool dock,
++    uint32_t value);
++static void _wlmaker_dock_menu_arg_destroy(void *ud_ptr);
++static bool _wlmaker_dock_menu_add(
++    wlmaker_context_menu_t *context_menu_ptr,
++    wlmtk_menu_t *parent_ptr,
++    const char *text_ptr,
++    wlmtk_menu_item_indicator_t indicator,
++    bool checked,
++    bool enabled,
++    wlmaker_context_menu_callback_t callback,
++    _wlmaker_dock_menu_arg_t *arg_ptr);
++static const char *_wlmaker_dock_menu_settings_command(
++    wlmaker_server_t *server_ptr);
++
++static void _wlmaker_dock_menu_level(void *ud_ptr);
++static void _wlmaker_dock_menu_clip_keep_on_top(void *ud_ptr);
++static void _wlmaker_dock_menu_clip_autoraise(void *ud_ptr);
++static void _wlmaker_dock_menu_launch(void *ud_ptr);
++static void _wlmaker_dock_menu_bring_here(void *ud_ptr);
++static void _wlmaker_dock_menu_hide(void *ud_ptr);
++static void _wlmaker_dock_menu_settings(void *ud_ptr);
++static void _wlmaker_dock_menu_kill(void *ud_ptr);
++static void _wlmaker_dock_menu_remove(void *ud_ptr);
++static void _wlmaker_dock_menu_flip(void *ud_ptr);
++static void _wlmaker_dock_menu_restore(void *ud_ptr);
++
++/* == Exported methods ===================================================== */
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_dock_menu_open_launcher(
++    wlmaker_server_t *server_ptr,
++    bool dock,
++    int index)
++{
++    if (NULL == server_ptr->style_ptr ||
++        NULL == server_ptr->style_ptr->menu_style_ptr) return;
++    bspl_array_t *a = wlmaker_dock_launchers_load(
++        server_ptr, dock ? "Dock" : "Clip");
++    bspl_dict_t *dict_ptr = NULL;
++    if (NULL != a && 0 <= index && (size_t)index < bspl_array_size(a)) {
++        dict_ptr = bspl_dict_from_object(bspl_array_at(a, index));
++    }
++    if (0 <= index && NULL == dict_ptr) {
++        if (NULL != a) bspl_array_unref(a);
++        return;
++    }
++    wlmaker_dock_menu_icon_t icon = {
++        .app_id_ptr = wlmaker_dock_launcher_value(dict_ptr, "AppID"),
++        .command_ptr = wlmaker_dock_launcher_value(dict_ptr, "CommandLine"),
++        .dock = dock,
++        .launcher_index = index };
++
++    const char *title_ptr = icon.app_id_ptr;
++    if (NULL == title_ptr || '\0' == *title_ptr) {
++        title_ptr = dock ? "Dock" : "Clip";
++    }
++    wlmaker_context_menu_t *cm_ptr = wlmaker_context_menu_create(
++        server_ptr, server_ptr, title_ptr);
++    if (NULL == cm_ptr) {
++        if (NULL != a) bspl_array_unref(a);
++        return;
++    }
++
++    bool rv = wlmaker_dock_menu_add_dock_items(server_ptr, cm_ptr, dock);
++    // Window Maker's Clip: Its icons can be removed from the menu.
++    if (rv && !dock) {
++        rv = _wlmaker_dock_menu_add(
++            cm_ptr, NULL, wlmaker_i18n("Remove Icon"),
++            WLMTK_MENU_ITEM_INDICATOR_NONE, false,
++            !wlmaker_dock_launcher_flag(dict_ptr, "Lock"),
++            _wlmaker_dock_menu_remove,
++            _wlmaker_dock_menu_arg_create(server_ptr, &icon, dock, 0));
++    }
++    rv = rv && wlmaker_dock_menu_add_icon_items(server_ptr, cm_ptr, &icon);
++
++    // Beyond Window Maker's: Moving the Dock, restoring its launchers.
++    if (rv && dock && 0 > index) {
++        wlmaker_dock_column_t column, clip;
++        if (wlmaker_clip_column(server_ptr, true, &column)) {
++            uint32_t corner = wlmaker_dock_place_corner(column.place);
++            uint32_t clip_corner = 0;
++            if (wlmaker_clip_column(server_ptr, false, &clip)) {
++                clip_corner = wlmaker_dock_place_corner(clip.place);
++            }
++            static const struct { uint32_t flip; } flips[] = {
++                { WLR_EDGE_LEFT | WLR_EDGE_RIGHT },
++                { WLR_EDGE_TOP | WLR_EDGE_BOTTOM } };
++            for (size_t i = 0; rv && i < 2; ++i) {
++                uint32_t to = corner ^ flips[i].flip;
++                if (to == clip_corner) continue;
++                const char *t_ptr;
++                if (0 == i) {
++                    t_ptr = (corner & WLR_EDGE_LEFT) ?
++                        "Move to Right Side" : "Move to Left Side";
++                } else {
++                    t_ptr = (corner & WLR_EDGE_TOP) ?
++                        "Move to Bottom" : "Move to Top";
++                }
++                rv = _wlmaker_dock_menu_add(
++                    cm_ptr, NULL, wlmaker_i18n(t_ptr),
++                    WLMTK_MENU_ITEM_INDICATOR_NONE, false, true,
++                    _wlmaker_dock_menu_flip,
++                    _wlmaker_dock_menu_arg_create(
++                        server_ptr, &icon, true, flips[i].flip));
++            }
++        }
++        bspl_dict_t *d = wlmaker_state_load_defaults(server_ptr->files_ptr, NULL);
++        bspl_array_t *defaults_ptr = bspl_dict_get_array(
++            bspl_dict_get_dict(d, "Dock"), "Launchers");
++        if (rv && NULL != defaults_ptr && 0 < bspl_array_size(defaults_ptr)) {
++            rv = _wlmaker_dock_menu_add(
++                cm_ptr, NULL, wlmaker_i18n("Restore Default Launchers"),
++                WLMTK_MENU_ITEM_INDICATOR_NONE, false, true,
++                _wlmaker_dock_menu_restore,
++                _wlmaker_dock_menu_arg_create(server_ptr, &icon, true, 0));
++        }
++        if (NULL != d) bspl_dict_unref(d);
++    }
++    if (!dock && rv) rv = wlmaker_clip_add_move_items(server_ptr, cm_ptr);
++    if (NULL != a) bspl_array_unref(a);
++
++    if (!rv) {
++        wlmaker_context_menu_destroy(cm_ptr);
++        return;
++    }
++    wlmaker_context_menu_open(cm_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dock_menu_add_dock_items(
++    wlmaker_server_t *server_ptr,
++    wlmaker_context_menu_t *context_menu_ptr,
++    bool dock)
++{
++    wlmaker_dock_menu_icon_t icon = { .dock = dock, .launcher_index = -1 };
++    wlmaker_dock_level_t level = wlmaker_clip_get_level(server_ptr, dock);
++    if (dock) {
++        // Window Maker's "Dock position": The Dock's stacking.
++        wlmtk_menu_t *menu_ptr = wlmaker_context_menu_add_submenu(
++            context_menu_ptr, NULL, wlmaker_i18n("Dock position"));
++        if (NULL == menu_ptr) return false;
++        static const struct {
++            const char *text_ptr;
++            wlmaker_dock_level_t level;
++        } levels[] = {
++            { "Normal", WLMAKER_DOCK_LEVEL_NORMAL },
++            { "Auto raise & lower", WLMAKER_DOCK_LEVEL_AUTO_RAISE_LOWER },
++            { "Keep on Top", WLMAKER_DOCK_LEVEL_KEEP_ON_TOP },
++        };
++        for (size_t i = 0; i < sizeof(levels) / sizeof(levels[0]); ++i) {
++            if (!_wlmaker_dock_menu_add(
++                    context_menu_ptr, menu_ptr,
++                    wlmaker_i18n(levels[i].text_ptr),
++                    WLMTK_MENU_ITEM_INDICATOR_RADIO,
++                    level == levels[i].level, true,
++                    _wlmaker_dock_menu_level,
++                    _wlmaker_dock_menu_arg_create(
++                        server_ptr, &icon, true, levels[i].level))) {
++                return false;
++            }
++        }
++        // Drawers are not available (yet): Shown, as on Window Maker, but
++        // disabled.
++        return _wlmaker_dock_menu_add(
++            context_menu_ptr, NULL, wlmaker_i18n("Add a drawer"),
++            WLMTK_MENU_ITEM_INDICATOR_NONE, false, false, NULL, NULL);
++    }
++
++    // Window Maker's "Clip Options": Those that apply.
++    wlmtk_menu_t *menu_ptr = wlmaker_context_menu_add_submenu(
++        context_menu_ptr, NULL, wlmaker_i18n("Clip Options"));
++    if (NULL == menu_ptr) return false;
++    return _wlmaker_dock_menu_add(
++        context_menu_ptr, menu_ptr, wlmaker_i18n("Keep on Top"),
++        WLMTK_MENU_ITEM_INDICATOR_CHECK,
++        WLMAKER_DOCK_LEVEL_KEEP_ON_TOP == level, true,
++        _wlmaker_dock_menu_clip_keep_on_top,
++        _wlmaker_dock_menu_arg_create(server_ptr, &icon, false, 0)) &&
++        _wlmaker_dock_menu_add(
++            context_menu_ptr, menu_ptr, wlmaker_i18n("Autoraise"),
++            WLMTK_MENU_ITEM_INDICATOR_CHECK,
++            WLMAKER_DOCK_LEVEL_AUTO_RAISE_LOWER == level, true,
++            _wlmaker_dock_menu_clip_autoraise,
++            _wlmaker_dock_menu_arg_create(server_ptr, &icon, false, 0));
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dock_menu_add_icon_items(
++    wlmaker_server_t *server_ptr,
++    wlmaker_context_menu_t *context_menu_ptr,
++    const wlmaker_dock_menu_icon_t *icon_ptr)
++{
++    size_t hidden = 0;
++    size_t windows = wlmaker_dock_app_windows(
++        server_ptr, icon_ptr->app_id_ptr, &hidden);
++    bool all_hidden = 0 < windows && hidden == windows;
++    bool has_command = NULL != icon_ptr->command_ptr &&
++        '\0' != *icon_ptr->command_ptr;
++    bool settings = NULL != _wlmaker_dock_menu_settings_command(server_ptr) &&
++        (0 <= icon_ptr->launcher_index || NULL != icon_ptr->dockapp_name_ptr);
++    bool killable = 0 < windows || 1 < icon_ptr->pid;
++
++    return _wlmaker_dock_menu_add(
++        context_menu_ptr, NULL, wlmaker_i18n("Launch"),
++        WLMTK_MENU_ITEM_INDICATOR_NONE, false, has_command,
++        _wlmaker_dock_menu_launch,
++        _wlmaker_dock_menu_arg_create(server_ptr, icon_ptr, icon_ptr->dock, 0)) &&
++        _wlmaker_dock_menu_add(
++            context_menu_ptr, NULL,
++            wlmaker_i18n(all_hidden ? "Unhide Here" : "Bring Here"),
++            WLMTK_MENU_ITEM_INDICATOR_NONE, false, 0 < windows,
++            _wlmaker_dock_menu_bring_here,
++            _wlmaker_dock_menu_arg_create(
++                server_ptr, icon_ptr, icon_ptr->dock, 0)) &&
++        _wlmaker_dock_menu_add(
++            context_menu_ptr, NULL,
++            wlmaker_i18n(all_hidden ? "Unhide" : "Hide"),
++            WLMTK_MENU_ITEM_INDICATOR_NONE, false, 0 < windows,
++            _wlmaker_dock_menu_hide,
++            _wlmaker_dock_menu_arg_create(
++                server_ptr, icon_ptr, icon_ptr->dock, all_hidden)) &&
++        (NULL != icon_ptr->prefs_ptr &&
++         wlmaker_dockapp_prefs_has_preferences(icon_ptr->prefs_ptr) ?
++         // A dock-app's own preferences: Its settings.
++         wlmaker_dockapp_prefs_add_preferences_titled(
++             icon_ptr->prefs_ptr, context_menu_ptr,
++             wlmaker_i18n("Settings...")) :
++         _wlmaker_dock_menu_add(
++             context_menu_ptr, NULL, wlmaker_i18n("Settings..."),
++             WLMTK_MENU_ITEM_INDICATOR_NONE, false, settings,
++             _wlmaker_dock_menu_settings,
++             _wlmaker_dock_menu_arg_create(
++                 server_ptr, icon_ptr, icon_ptr->dock, 0))) &&
++        _wlmaker_dock_menu_add(
++            context_menu_ptr, NULL, wlmaker_i18n("Kill"),
++            WLMTK_MENU_ITEM_INDICATOR_NONE, false, killable,
++            _wlmaker_dock_menu_kill,
++            _wlmaker_dock_menu_arg_create(
++                server_ptr, icon_ptr, icon_ptr->dock, 0));
++}
++
++/* == Local (static) methods =============================================== */
++
++/* ------------------------------------------------------------------------- */
++/** Creates the argument for a callback. */
++_wlmaker_dock_menu_arg_t *_wlmaker_dock_menu_arg_create(
++    wlmaker_server_t *server_ptr,
++    const wlmaker_dock_menu_icon_t *icon_ptr,
++    bool dock,
++    uint32_t value)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = logged_calloc(1, sizeof(*arg_ptr));
++    if (NULL == arg_ptr) return NULL;
++    arg_ptr->server_ptr = server_ptr;
++    arg_ptr->dock = dock;
++    arg_ptr->value = value;
++    arg_ptr->index = icon_ptr->launcher_index;
++    arg_ptr->pid = icon_ptr->pid;
++    if (NULL != icon_ptr->app_id_ptr) {
++        arg_ptr->app_id_ptr = logged_strdup(icon_ptr->app_id_ptr);
++    }
++    if (NULL != icon_ptr->command_ptr) {
++        arg_ptr->command_ptr = logged_strdup(icon_ptr->command_ptr);
++    }
++    if (NULL != icon_ptr->dockapp_name_ptr) {
++        arg_ptr->dockapp_name_ptr = logged_strdup(icon_ptr->dockapp_name_ptr);
++    }
++    return arg_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Destroys the argument of a callback. */
++void _wlmaker_dock_menu_arg_destroy(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    if (NULL == arg_ptr) return;
++    if (NULL != arg_ptr->app_id_ptr) free(arg_ptr->app_id_ptr);
++    if (NULL != arg_ptr->command_ptr) free(arg_ptr->command_ptr);
++    if (NULL != arg_ptr->dockapp_name_ptr) free(arg_ptr->dockapp_name_ptr);
++    free(arg_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Adds an item, possibly disabled. Takes ownership of `arg_ptr`. */
++bool _wlmaker_dock_menu_add(
++    wlmaker_context_menu_t *context_menu_ptr,
++    wlmtk_menu_t *parent_ptr,
++    const char *text_ptr,
++    wlmtk_menu_item_indicator_t indicator,
++    bool checked,
++    bool enabled,
++    wlmaker_context_menu_callback_t callback,
++    _wlmaker_dock_menu_arg_t *arg_ptr)
++{
++    if (NULL != callback && NULL == arg_ptr) return false;
++    if (!wlmaker_context_menu_add_option(
++            context_menu_ptr, parent_ptr, text_ptr, indicator, checked,
++            callback, arg_ptr, _wlmaker_dock_menu_arg_destroy)) return false;
++    if (!enabled) {
++        wlmtk_menu_t *m_ptr = NULL != parent_ptr ? parent_ptr :
++            wlmaker_context_menu_menu(context_menu_ptr);
++        size_t n = wlmtk_menu_items_size(m_ptr);
++        if (0 < n) wlmtk_menu_item_set_enabled(wlmtk_menu_item_at(m_ptr, n - 1),
++                                               false);
++    }
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++/** @return The configured `DockSettingsCommand`, or NULL. */
++const char *_wlmaker_dock_menu_settings_command(wlmaker_server_t *server_ptr)
++{
++    if (NULL == server_ptr->config_dict_ptr) return NULL;
++    const char *c = bspl_dict_get_string_value(
++        server_ptr->config_dict_ptr, "DockSettingsCommand");
++    if (NULL == c || '\0' == *c) return NULL;
++    return c;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Callback: Sets the level ("Dock position"). */
++void _wlmaker_dock_menu_level(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    wlmaker_clip_set_level(arg_ptr->server_ptr, arg_ptr->dock, arg_ptr->value);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Callback: Toggles the Clip's "Keep on Top". */
++void _wlmaker_dock_menu_clip_keep_on_top(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    bool on = WLMAKER_DOCK_LEVEL_KEEP_ON_TOP ==
++        wlmaker_clip_get_level(arg_ptr->server_ptr, false);
++    wlmaker_clip_set_level(arg_ptr->server_ptr, false,
++                           on ? WLMAKER_DOCK_LEVEL_NORMAL :
++                           WLMAKER_DOCK_LEVEL_KEEP_ON_TOP);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Callback: Toggles the Clip's "Autoraise". */
++void _wlmaker_dock_menu_clip_autoraise(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    bool on = WLMAKER_DOCK_LEVEL_AUTO_RAISE_LOWER ==
++        wlmaker_clip_get_level(arg_ptr->server_ptr, false);
++    wlmaker_clip_set_level(arg_ptr->server_ptr, false,
++                           on ? WLMAKER_DOCK_LEVEL_NORMAL :
++                           WLMAKER_DOCK_LEVEL_AUTO_RAISE_LOWER);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Callback: Launches the command ("Launch"). */
++void _wlmaker_dock_menu_launch(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    if (NULL == arg_ptr->command_ptr) return;
++    wlmaker_action_execute(arg_ptr->server_ptr, WLMAKER_ACTION_EXECUTE,
++                           arg_ptr->command_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Callback: "Bring Here", or "Unhide Here". */
++void _wlmaker_dock_menu_bring_here(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    wlmaker_dock_app_bring_here(arg_ptr->server_ptr, arg_ptr->app_id_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Callback: "Hide", or "Unhide". */
++void _wlmaker_dock_menu_hide(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    if (arg_ptr->value) {
++        wlmaker_dock_app_unhide(arg_ptr->server_ptr, arg_ptr->app_id_ptr);
++    } else {
++        wlmaker_dock_app_hide(arg_ptr->server_ptr, arg_ptr->app_id_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Callback: "Settings...". Runs the `DockSettingsCommand`, as
++ * `<command> launcher Dock|Clip <index>` or `<command> dockapp <name>`.
++ */
++void _wlmaker_dock_menu_settings(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    const char *cmd_ptr = _wlmaker_dock_menu_settings_command(
++        arg_ptr->server_ptr);
++    if (NULL == cmd_ptr) return;
++    char index[16];
++    snprintf(index, sizeof(index), "%d", arg_ptr->index);
++    const char *argv[5] = { cmd_ptr, NULL, NULL, NULL, NULL };
++    if (NULL != arg_ptr->dockapp_name_ptr) {
++        argv[1] = "dockapp";
++        argv[2] = arg_ptr->dockapp_name_ptr;
++    } else if (0 <= arg_ptr->index) {
++        argv[1] = "launcher";
++        argv[2] = arg_ptr->dock ? "Dock" : "Clip";
++        argv[3] = index;
++    } else {
++        return;
++    }
++    wlm_util_subprocess_monitor_run(
++        arg_ptr->server_ptr->monitor_ptr,
++        bs_subprocess_create(argv[0], argv, NULL));
++}
++
++/* ------------------------------------------------------------------------- */
++/** Callback: "Kill". The application's windows' processes, or dock-app. */
++void _wlmaker_dock_menu_kill(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    if (1 < arg_ptr->pid && getpid() != arg_ptr->pid) {
++        bs_log(BS_INFO, "Terminating dock-app with PID %"PRIdMAX,
++               (intmax_t)arg_ptr->pid);
++        if (0 != kill(arg_ptr->pid, SIGTERM)) {
++            bs_log(BS_WARNING | BS_ERRNO, "Failed kill(%"PRIdMAX", SIGTERM)",
++                   (intmax_t)arg_ptr->pid);
++        }
++        return;
++    }
++    wlmaker_dock_app_kill(arg_ptr->server_ptr, arg_ptr->app_id_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Callback: "Remove Icon": Removes the launcher from the Clip. */
++void _wlmaker_dock_menu_remove(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    const char *section_ptr = arg_ptr->dock ? "Dock" : "Clip";
++    bspl_array_t *a = wlmaker_dock_launchers_load(
++        arg_ptr->server_ptr, section_ptr);
++    bspl_array_t *n = bspl_array_create();
++    bool rv = NULL != a && NULL != n;
++    for (size_t i = 0; rv && i < bspl_array_size(a); ++i) {
++        if ((int)i == arg_ptr->index) continue;
++        rv = bspl_array_push_back(n, bspl_array_at(a, i));
++    }
++    if (rv) wlmaker_dock_launchers_store(arg_ptr->server_ptr, section_ptr, n);
++    if (NULL != n) bspl_array_unref(n);
++    if (NULL != a) bspl_array_unref(a);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Callback: Moves the Dock to the other side or end. */
++void _wlmaker_dock_menu_flip(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    wlmaker_dock_column_t column;
++    if (!wlmaker_clip_column(arg_ptr->server_ptr, true, &column)) return;
++    wlmaker_dock_place_t place = wlmaker_dock_place_from_corner(
++        wlmaker_dock_place_corner(column.place) ^ arg_ptr->value,
++        wlmaker_dock_place_vertical(column.place));
++    wlmaker_clip_move_dock(arg_ptr->server_ptr, "Dock", place);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Callback: Restores the Dock's default launchers. */
++void _wlmaker_dock_menu_restore(void *ud_ptr)
++{
++    _wlmaker_dock_menu_arg_t *arg_ptr = ud_ptr;
++    bspl_dict_t *d = wlmaker_state_load_defaults(
++        arg_ptr->server_ptr->files_ptr, NULL);
++    bspl_array_t *a = bspl_dict_get_array(
++        bspl_dict_get_dict(d, "Dock"), "Launchers");
++    if (NULL != a) wlmaker_dock_launchers_store(arg_ptr->server_ptr, "Dock", a);
++    if (NULL != d) bspl_dict_unref(d);
++}
++
++/* == Unit tests =========================================================== */
++
++static void test_settings_command(bs_test_t *test_ptr);
++
++/** Unit test cases. */
++static const bs_test_case_t _wlmaker_dock_menu_test_cases[] = {
++    { true, "settings_command", test_settings_command },
++    BS_TEST_CASE_SENTINEL()
++};
++
++const bs_test_set_t wlmaker_dock_menu_test_set = BS_TEST_SET(
++    true, "dock_menu", _wlmaker_dock_menu_test_cases);
++
++/* ------------------------------------------------------------------------- */
++/** Tests reading the settings command from the configuration. */
++void test_settings_command(bs_test_t *test_ptr)
++{
++    wlmaker_server_t server = {};
++    BS_TEST_VERIFY_EQ(test_ptr, NULL,
++                      _wlmaker_dock_menu_settings_command(&server));
++    bspl_object_t *o = bspl_create_object_from_plist_string(
++        "{DockSettingsCommand = \"/usr/bin/settings\";}");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, o);
++    server.config_dict_ptr = bspl_dict_from_object(o);
++    BS_TEST_VERIFY_STREQ(test_ptr, "/usr/bin/settings",
++                         _wlmaker_dock_menu_settings_command(&server));
++    bspl_object_unref(o);
++
++    // The argument holds copies.
++    wlmaker_dock_menu_icon_t icon = {
++        .app_id_ptr = "firefox", .command_ptr = "firefox", .dock = true,
++        .launcher_index = 2 };
++    _wlmaker_dock_menu_arg_t *arg_ptr = _wlmaker_dock_menu_arg_create(
++        &server, &icon, true, 0);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, arg_ptr);
++    BS_TEST_VERIFY_STREQ(test_ptr, "firefox", arg_ptr->app_id_ptr);
++    BS_TEST_VERIFY_EQ(test_ptr, 2, arg_ptr->index);
++    _wlmaker_dock_menu_arg_destroy(arg_ptr);
++}
++
++/* == End of dock_menu.c =================================================== */
+diff --git a/src/dock_menu.h b/src/dock_menu.h
+new file mode 100644
+index 0000000..0fd093f
+--- /dev/null
++++ b/src/dock_menu.h
+@@ -0,0 +1,97 @@
++/* ========================================================================= */
++/**
++ * @file dock_menu.h
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#ifndef __WLMAKER_DOCK_MENU_H__
++#define __WLMAKER_DOCK_MENU_H__
++
++#include <stdbool.h>
++#include <sys/types.h>
++
++#include <libbase/libbase.h>
++
++#include "context_menu.h"
++#include "dockapp_prefs.h"
++#include "server.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif  // __cplusplus
++
++/** What a docked icon is, for the items of its menu. */
++typedef struct {
++    /** Application ID: Its windows are hidden, brought here or killed. */
++    const char                *app_id_ptr;
++    /** Command, for "Launch". May be NULL. */
++    const char                *command_ptr;
++    /** Process of a dock-app, for "Kill". 0 if not a dock-app. */
++    pid_t                     pid;
++    /** Name of the dock-app, for "Settings...". NULL if not a dock-app. */
++    const char                *dockapp_name_ptr;
++    /** Whether on the Dock (else on the Clip). */
++    bool                      dock;
++    /** Index of the launcher: -1 for the Dock's main tile, or a dock-app. */
++    int                       launcher_index;
++    /** A dock-app's preferences: Its "Settings..." submenu. May be NULL. */
++    wlmaker_dockapp_prefs_t   *prefs_ptr;
++} wlmaker_dock_menu_icon_t;
++
++/**
++ * Opens Window Maker's menu for a launcher of the Dock or the Clip (shown
++ * by `wlmdock`), or for the Dock's main tile.
++ *
++ * @param server_ptr
++ * @param dock                Whether on the Dock (else on the Clip).
++ * @param index               Index of the launcher. -1 for the main tile.
++ */
++void wlmaker_dock_menu_open_launcher(
++    wlmaker_server_t *server_ptr,
++    bool dock,
++    int index);
++
++/**
++ * Adds Window Maker's first items of the Dock's menu ("Dock position", "Add
++ * a drawer") or the Clip's ("Clip Options").
++ *
++ * @return true on success.
++ */
++bool wlmaker_dock_menu_add_dock_items(
++    wlmaker_server_t *server_ptr,
++    wlmaker_context_menu_t *context_menu_ptr,
++    bool dock);
++
++/**
++ * Adds Window Maker's items for a docked icon: "Launch", "Bring Here",
++ * "Hide", "Settings..." and "Kill". Those that don't apply are disabled.
++ *
++ * @return true on success.
++ */
++bool wlmaker_dock_menu_add_icon_items(
++    wlmaker_server_t *server_ptr,
++    wlmaker_context_menu_t *context_menu_ptr,
++    const wlmaker_dock_menu_icon_t *icon_ptr);
++
++/** Unit test cases. */
++extern const bs_test_set_t wlmaker_dock_menu_test_set;
++
++#ifdef __cplusplus
++}  // extern "C"
++#endif  // __cplusplus
++
++#endif /* __WLMAKER_DOCK_MENU_H__ */
++/* == End of dock_menu.h =================================================== */
+diff --git a/src/dockapp_prefs.c b/src/dockapp_prefs.c
+index e6b7493..9ec4fae 100644
+--- a/src/dockapp_prefs.c
++++ b/src/dockapp_prefs.c
+@@ -222,13 +222,31 @@ bool wlmaker_dockapp_prefs_add_actions(
+ bool wlmaker_dockapp_prefs_add_preferences(
+     wlmaker_dockapp_prefs_t *prefs_ptr,
+     wlmaker_context_menu_t *context_menu_ptr)
++{
++    return wlmaker_dockapp_prefs_add_preferences_titled(
++        prefs_ptr, context_menu_ptr, wlmaker_i18n("Preferences"));
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dockapp_prefs_has_preferences(wlmaker_dockapp_prefs_t *prefs_ptr)
++{
++    bspl_array_t *list_ptr = bspl_dict_get_array(
++        prefs_ptr->app_dict_ptr, "Preferences");
++    return NULL != list_ptr && 0 < bspl_array_size(list_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dockapp_prefs_add_preferences_titled(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    wlmaker_context_menu_t *context_menu_ptr,
++    const char *title_ptr)
+ {
+     bspl_array_t *list_ptr = bspl_dict_get_array(
+         prefs_ptr->app_dict_ptr, "Preferences");
+     if (NULL == list_ptr || 0 == bspl_array_size(list_ptr)) return true;
+ 
+     wlmtk_menu_t *menu_ptr = wlmaker_context_menu_add_submenu(
+-        context_menu_ptr, NULL, wlmaker_i18n("Preferences"));
++        context_menu_ptr, NULL, title_ptr);
+     if (NULL == menu_ptr) return false;
+ 
+     for (size_t i = 0; i < bspl_array_size(list_ptr); ++i) {
+diff --git a/src/dockapp_prefs.h b/src/dockapp_prefs.h
+index 975441e..6a6987d 100644
+--- a/src/dockapp_prefs.h
++++ b/src/dockapp_prefs.h
+@@ -87,6 +87,21 @@ bool wlmaker_dockapp_prefs_add_preferences(
+     wlmaker_dockapp_prefs_t *prefs_ptr,
+     wlmaker_context_menu_t *context_menu_ptr);
+ 
++/**
++ * Adds the dock-app's preferences, as @ref
++ * wlmaker_dockapp_prefs_add_preferences does, as a submenu titled
++ * `title_ptr` (eg. Window Maker's "Settings...").
++ *
++ * @return true on success.
++ */
++bool wlmaker_dockapp_prefs_add_preferences_titled(
++    wlmaker_dockapp_prefs_t *prefs_ptr,
++    wlmaker_context_menu_t *context_menu_ptr,
++    const char *title_ptr);
++
++/** @return Whether the dock-app has preferences. */
++bool wlmaker_dockapp_prefs_has_preferences(wlmaker_dockapp_prefs_t *prefs_ptr);
++
+ /**
+  * @return The current value of preference `key_ptr`: As stored, or its
+  *     default. NULL if unknown.
+diff --git a/src/i18n.c b/src/i18n.c
+index 8316e6d..508a475 100644
+--- a/src/i18n.c
++++ b/src/i18n.c
+@@ -48,9 +48,20 @@ static const wlmaker_i18n_entry_t _wlmaker_i18n_pt_br[] = {
+     { "Move to Right Side", "Mover para o lado direito" },
+     { "Move to Top", "Mover para o topo" },
+     { "Move to Bottom", "Mover para a base" },
+-    { "Launch", "Lançar" },
+-    { "Kill", "Encerrar" },
++    { "Launch", "Executar" },
++    { "Kill", "Terminar" },
+     { "Remove", "Remover" },
++    // Window Maker's menu of docked icons, as its Portuguese catalog (pt.po)
++    // has them. "Dock position", "Normal", "Auto raise & lower", "Add a
++    // drawer" and "Autoraise" are untranslated there, and stay so.
++    { "Bring Here", "Trazer aqui" },
++    { "Unhide Here", "Mostrar Aqui" },
++    { "Hide", "Esconder" },
++    { "Unhide", "Mostrar" },
++    { "Settings...", "Configurações..." },
++    { "Keep on Top", "Manter sobre outros" },
++    { "Clip Options", "Opções do Clip" },
++    { "Remove Icon", "Remover Ícone" },
+     { "Restore Default Launchers", "Restaurar lançadores padrão" },
+     { "Dock-app", "Dockapp" },
+     { "Workspace", "Área" },
+@@ -192,7 +203,10 @@ void test_translate(bs_test_t *test_ptr)
+                          wlmaker_i18n("Show Seconds"));
+ 
+     wlmaker_i18n_set_locale("pt");
+-    BS_TEST_VERIFY_STREQ(test_ptr, "Lançar", wlmaker_i18n("Launch"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "Executar", wlmaker_i18n("Launch"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "Trazer aqui", wlmaker_i18n("Bring Here"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "Dock position",
++                         wlmaker_i18n("Dock position"));
+ 
+     wlmaker_i18n_set_locale("en_US.UTF-8");
+     BS_TEST_VERIFY_STREQ(test_ptr, "Move Up", wlmaker_i18n("Move Up"));
+@@ -205,7 +219,7 @@ void test_translate(bs_test_t *test_ptr)
+     bs_test_setenv(test_ptr, "LC_ALL", "%s", "");
+     bs_test_setenv(test_ptr, "LC_MESSAGES", "pt_BR.UTF-8");
+     bs_test_setenv(test_ptr, "LANG", "en_US.UTF-8");
+-    BS_TEST_VERIFY_STREQ(test_ptr, "Encerrar", wlmaker_i18n("Kill"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "Terminar", wlmaker_i18n("Kill"));
+     bs_test_setenv(test_ptr, "LC_ALL", "C");
+     BS_TEST_VERIFY_STREQ(test_ptr, "Kill", wlmaker_i18n("Kill"));
+ }
+diff --git a/src/icon_manager.c b/src/icon_manager.c
+index 75300fb..0df7683 100644
+--- a/src/icon_manager.c
++++ b/src/icon_manager.c
+@@ -26,12 +26,17 @@
+ #include <linux/input-event-codes.h>
+ #include <signal.h>
+ #include <stdbool.h>
++#include <stdio.h>
+ #include <stdlib.h>
+ #include <sys/types.h>
+ #include <unistd.h>
+ #include <wayland-server-core.h>
+ #define WLR_USE_UNSTABLE
++#include <drm_fourcc.h>
++#include <wlr/render/wlr_texture.h>
+ #include <wlr/types/wlr_compositor.h>
++#include <wlr/types/wlr_cursor.h>
++#include <wlr/types/wlr_output_layout.h>
+ #include <wlr/util/edges.h>
+ #include <wlr/types/wlr_xdg_shell.h>
+ #undef WLR_USE_UNSTABLE
+@@ -46,6 +51,10 @@
+ #include "toolkit/toolkit.h"
+ #include "wlmaker-icon-unstable-v1-server-protocol.h"
+ #include "server.h"
++#include "dock_fx.h"
++#include "dock_launchers.h"
++#include "dock_menu.h"
++#include "tile_drag.h"
+ #include "xdg_shell.h"
+ 
+ struct wl_client;
+@@ -102,16 +111,22 @@ struct _wlmaker_toplevel_icon_t {
+ 
+     /** The superclass' original element virtual method table. */
+     wlmtk_element_vmt_t       orig_element_vmt;
+-    /** Whether the icon is being dragged to another place in the dock. */
++    /** Whether the left button is held for dragging: May become a drag. */
+     bool                      dragging;
+-    /** Pointer position where the drag started, in tile coordinates. */
++    /** Pointer position where the button was pressed, in tile coordinates. */
+     double                    drag_start_x;
+-    /** Pointer position where the drag started, in tile coordinates. */
++    /** Pointer position where the button was pressed, in tile coordinates. */
+     double                    drag_start_y;
+-    /** Latest pointer position during the drag, in tile coordinates. */
+-    double                    drag_x;
+-    /** Latest pointer position during the drag, in tile coordinates. */
+-    double                    drag_y;
++    /** Pointer position where the button was pressed, in layout coords. */
++    double                    drag_start_lx;
++    /** Pointer position where the button was pressed, in layout coords. */
++    double                    drag_start_ly;
++    /** The drag of the tile on or off the docks, once started. */
++    wlmaker_tile_drag_t       *tile_drag_ptr;
++    /** Whether the tile is lifted off its slot, while dragged. */
++    bool                      lifted;
++    /** Listener for @ref wlmtk_element_events_t::pointer_leave. */
++    struct wl_listener        pointer_leave_listener;
+ };
+ 
+ static wlmaker_icon_manager_t *icon_manager_from_resource(
+@@ -170,6 +185,15 @@ static bool _wlmaker_toplevel_icon_element_pointer_accepts_motion(
+     wlmtk_pointer_motion_event_t *motion_event_ptr);
+ static void _wlmaker_toplevel_icon_element_pointer_grab_cancel(
+     wlmtk_element_t *element_ptr);
++static void _wlmaker_toplevel_icon_balloon(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr,
++    wlmtk_pointer_motion_event_t *motion_event_ptr);
++static char *_wlmaker_toplevel_icon_balloon_text(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr);
++static char *_wlmaker_toplevel_icon_cmdline(pid_t pid);
++static void _wlmaker_toplevel_icon_handle_pointer_leave(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
+ static void _wlmaker_toplevel_icon_remove_from_dock(
+     wlmaker_toplevel_icon_t *toplevel_icon_ptr);
+ static void _wlmaker_toplevel_icon_element_destroy(
+@@ -438,6 +462,10 @@ wlmaker_toplevel_icon_t *wlmaker_toplevel_icon_create(
+     wlmtk_element_set_visible(
+         wlmtk_tile_element(&toplevel_icon_ptr->super_tile),
+         true);
++    wlmtk_util_connect_listener_signal(
++        &wlmtk_tile_element(&toplevel_icon_ptr->super_tile)->events.pointer_leave,
++        &toplevel_icon_ptr->pointer_leave_listener,
++        _wlmaker_toplevel_icon_handle_pointer_leave);
+     if (NULL != icon_manager_ptr->server_ptr->dockapps_ptr) {
+         char *name_ptr = wlmaker_dockapps_client_name(wl_client_ptr);
+         if (NULL == name_ptr) {
+@@ -445,8 +473,9 @@ wlmaker_toplevel_icon_t *wlmaker_toplevel_icon_create(
+                    "dock-app's name, it will be placed last.",
+                    toplevel_icon_ptr);
+         }
+-        bool added = wlmaker_dockapps_add(
+-            icon_manager_ptr->server_ptr->dockapps_ptr,
++        // On the Dock or the Clip, where it was attached before.
++        bool added = wlmaker_clip_add_dockapp(
++            icon_manager_ptr->server_ptr,
+             &toplevel_icon_ptr->super_tile,
+             name_ptr);
+         if (NULL != name_ptr) free(name_ptr);
+@@ -509,6 +538,7 @@ void wlmaker_toplevel_icon_destroy(
+ 
+     _wlmaker_toplevel_icon_element_destroy(
+         wlmtk_tile_element(&toplevel_icon_ptr->super_tile));
++    wlmtk_util_disconnect_listener(&toplevel_icon_ptr->pointer_leave_listener);
+     wlmtk_tile_fini(&toplevel_icon_ptr->super_tile);
+ 
+     // Note: Not destroying toplevel_icon_ptr->resource, since that causes
+@@ -667,10 +697,12 @@ void _wlmaker_toplevel_icon_remove_from_dock(
+             element_ptr->parent_container_ptr, element_ptr);
+         toplevel_icon_ptr->dragging = false;
+     }
+-    if (NULL != server_ptr->dockapps_ptr) {
+-        wlmaker_dockapps_remove(
+-            server_ptr->dockapps_ptr, &toplevel_icon_ptr->super_tile);
++    toplevel_icon_ptr->tile_drag_ptr = NULL;
++    wlmaker_tile_drag_forget_tile(server_ptr, &toplevel_icon_ptr->super_tile);
++    if (NULL != server_ptr->dock_fx_ptr) {
++        wlmaker_dock_fx_balloon_leave(server_ptr->dock_fx_ptr, toplevel_icon_ptr);
+     }
++    wlmaker_clip_remove_dockapp(server_ptr, &toplevel_icon_ptr->super_tile);
+     if (NULL != element_ptr->parent_container_ptr &&
+         NULL != server_ptr->clip_dock_ptr) {
+         wlmtk_dock_remove_tile(
+@@ -684,14 +716,14 @@ static void _wlmaker_toplevel_icon_move(
+     wlmaker_toplevel_icon_t *toplevel_icon_ptr, uint32_t direction)
+ {
+     wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
+-    if (NULL == server_ptr->dockapps_ptr) return;
++    wlmaker_dockapps_t *d_ptr = wlmaker_clip_dockapps_of(
++        server_ptr, &toplevel_icon_ptr->super_tile);
++    if (NULL == d_ptr) return;
+     wlmaker_dockapps_move(
+-        server_ptr->dockapps_ptr,
++        d_ptr,
+         &toplevel_icon_ptr->super_tile,
+         wlmaker_dockapps_delta_towards(
+-            server_ptr->dockapps_ptr,
+-            &toplevel_icon_ptr->super_tile,
+-            direction));
++            d_ptr, &toplevel_icon_ptr->super_tile, direction));
+ }
+ 
+ /** Menu callback: Moves the icon up. */
+@@ -724,24 +756,15 @@ static pid_t _wlmaker_toplevel_icon_pid(
+     return pid;
+ }
+ 
+-/** Menu callback: Terminates the dock-app. */
+-static void _wlmaker_toplevel_icon_menu_kill(void *ud_ptr)
+-{
+-    pid_t pid = _wlmaker_toplevel_icon_pid(ud_ptr);
+-    if (0 == pid) return;
+-    bs_log(BS_INFO, "Terminating dock-app with PID %"PRIdMAX, (intmax_t)pid);
+-    if (0 != kill(pid, SIGTERM)) {
+-        bs_log(BS_WARNING | BS_ERRNO, "Failed kill(%"PRIdMAX", SIGTERM)",
+-               (intmax_t)pid);
+-    }
+-}
+-
+ /* ------------------------------------------------------------------------- */
+ /**
+- * Opens the dock-app tile's right-click menu: The dock-app's own actions and
+- * its preferences (see @ref wlmaker_dockapp_prefs_t), moving it within the
+- * dock (the order is stored, as when dragging it), moving the Clip, and
+- * terminating the dock-app.
++ * Opens the dock-app tile's right-click menu, as Window Maker's menu of the
++ * dock it is on: "Dock position" and "Add a drawer" (Dock), or "Clip
++ * Options" (Clip). The dock-app's own actions. "Launch", "Bring Here",
++ * "Hide" (disabled: dock-apps have no windows), "Settings..." (the
++ * dock-app's preferences, see @ref wlmaker_dockapp_prefs_t) and "Kill".
++ * Then, moving it within the dock (stored, as when dragging it), and moving
++ * the Clip.
+  *
+  * @param toplevel_icon_ptr
+  */
+@@ -764,6 +787,8 @@ void _wlmaker_toplevel_icon_open_menu(
+         { WLR_EDGE_RIGHT, "Move Right", _wlmaker_toplevel_icon_menu_right },
+     };
+ 
++    wlmaker_dockapps_t *d_ptr = wlmaker_clip_dockapps_of(server_ptr, tile_ptr);
++    bool dock = NULL != d_ptr && d_ptr == wlmaker_clip_dockapps(server_ptr, true);
+     char *name_ptr = NULL;
+     if (NULL != toplevel_icon_ptr->wl_client_ptr) {
+         name_ptr = wlmaker_dockapps_client_name(toplevel_icon_ptr->wl_client_ptr);
+@@ -775,56 +800,153 @@ void _wlmaker_toplevel_icon_open_menu(
+     if (NULL != name_ptr) {
+         prefs_ptr = wlmaker_dockapp_prefs_load(
+             server_ptr->files_ptr, NULL, NULL, name_ptr);
+-        free(name_ptr);
+     }
+     if (NULL == cm_ptr) {
+         if (NULL != prefs_ptr) wlmaker_dockapp_prefs_destroy(prefs_ptr);
++        if (NULL != name_ptr) free(name_ptr);
+         return;
+     }
+-    bool rv = true;
+-    size_t items = 0;
+-    // The dock-app's own actions, and its preferences, come first.
+-    if (NULL != prefs_ptr) {
+-        size_t n = wlmtk_menu_items_size(wlmaker_context_menu_menu(cm_ptr));
+-        rv = wlmaker_dockapp_prefs_add_actions(prefs_ptr, server_ptr, cm_ptr) &&
+-            wlmaker_dockapp_prefs_add_preferences(prefs_ptr, cm_ptr);
+-        items += wlmtk_menu_items_size(wlmaker_context_menu_menu(cm_ptr)) - n;
+-        wlmaker_dockapp_prefs_destroy(prefs_ptr);
+-    }
+-    for (size_t i = 0; i < sizeof(moves) / sizeof(moves[0]); ++i) {
++
++    pid_t pid = _wlmaker_toplevel_icon_pid(toplevel_icon_ptr);
++    char *cmdline_ptr = _wlmaker_toplevel_icon_cmdline(pid);
++    wlmaker_dock_menu_icon_t icon = {
++        .command_ptr = cmdline_ptr,
++        .pid = pid,
++        .dockapp_name_ptr = name_ptr,
++        .dock = dock,
++        .launcher_index = -1,
++        .prefs_ptr = prefs_ptr };
++
++    bool rv = wlmaker_dock_menu_add_dock_items(server_ptr, cm_ptr, dock);
++    // The dock-app's own actions.
++    if (rv && NULL != prefs_ptr) {
++        rv = wlmaker_dockapp_prefs_add_actions(prefs_ptr, server_ptr, cm_ptr);
++    }
++    rv = rv && wlmaker_dock_menu_add_icon_items(server_ptr, cm_ptr, &icon);
++    for (size_t i = 0; rv && NULL != d_ptr &&
++             i < sizeof(moves) / sizeof(moves[0]); ++i) {
+         if (0 == wlmaker_dockapps_delta_towards(
+-                server_ptr->dockapps_ptr, tile_ptr, moves[i].direction)) {
+-            continue;
+-        }
+-        rv = rv && wlmaker_context_menu_add_item(
++                d_ptr, tile_ptr, moves[i].direction)) continue;
++        rv = wlmaker_context_menu_add_item(
+             cm_ptr, wlmaker_i18n(moves[i].text_ptr), moves[i].callback,
+             toplevel_icon_ptr);
+-        ++items;
+     }
+     // Moves the Clip, which the dock-app is part of.
+-    rv = rv && wlmaker_clip_add_move_items(server_ptr, cm_ptr);
+-    if (NULL != server_ptr->clip_dock_ptr) items += 2;
+-    if (0 != _wlmaker_toplevel_icon_pid(toplevel_icon_ptr)) {
+-        rv = rv && wlmaker_context_menu_add_item(
+-            cm_ptr, wlmaker_i18n("Kill"), _wlmaker_toplevel_icon_menu_kill,
+-            toplevel_icon_ptr);
+-        ++items;
+-    }
+-    if (!rv || 0 == items) {
++    if (rv && !dock) rv = wlmaker_clip_add_move_items(server_ptr, cm_ptr);
++
++    if (NULL != prefs_ptr) wlmaker_dockapp_prefs_destroy(prefs_ptr);
++    if (NULL != cmdline_ptr) free(cmdline_ptr);
++    if (NULL != name_ptr) free(name_ptr);
++    if (!rv) {
+         wlmaker_context_menu_destroy(cm_ptr);
+         return;
+     }
+     wlmaker_context_menu_open(cm_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Lifts the dock-app's tile off its slot while it is dragged, like Window
++ * Maker: The slot shows empty. Or puts it back.
++ */
++static void _wlmaker_toplevel_icon_lift(void *ud_ptr, bool lifted)
++{
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr = ud_ptr;
++    if (lifted == toplevel_icon_ptr->lifted) return;
++    toplevel_icon_ptr->lifted = lifted;
++    wlmtk_tile_t *tile_ptr = &toplevel_icon_ptr->super_tile;
++    if (NULL != toplevel_icon_ptr->content_surface_ptr) {
++        wlmtk_element_set_visible(
++            wlmtk_surface_element(toplevel_icon_ptr->content_surface_ptr),
++            !lifted);
++    }
++    struct wlr_buffer *wlr_buffer_ptr = lifted ?
++        bs_gfxbuf_create_wlr_buffer(tile_ptr->style.size, tile_ptr->style.size) :
++        wlmaker_dock_tile_buffer(&tile_ptr->style, NULL, NULL);
++    if (NULL == wlr_buffer_ptr) return;
++    wlmtk_tile_set_background_buffer(tile_ptr, wlr_buffer_ptr);
++    wlr_buffer_drop(wlr_buffer_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Draws the dock-app's tile as it is shown: The tile, and the dock-app's
++ * current image. For dragging it, and its kaboom.
++ *
++ * @return The image, or NULL on error.
++ */
++static struct wlr_buffer *_wlmaker_toplevel_icon_snapshot(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr)
++{
++    struct wlr_buffer *content_ptr = NULL;
++    struct wlr_texture *wlr_texture_ptr = NULL;
++    if (NULL != toplevel_icon_ptr->wlr_surface_ptr) {
++        wlr_texture_ptr = wlr_surface_get_texture(
++            toplevel_icon_ptr->wlr_surface_ptr);
++    }
++    if (NULL != wlr_texture_ptr) {
++        content_ptr = bs_gfxbuf_create_wlr_buffer(
++            wlr_texture_ptr->width, wlr_texture_ptr->height);
++    }
++    if (NULL != content_ptr) {
++        bs_gfxbuf_t *g_ptr = bs_gfxbuf_from_wlr_buffer(content_ptr);
++        struct wlr_texture_read_pixels_options options = {
++            .data = g_ptr->data_ptr,
++            .format = DRM_FORMAT_ARGB8888,
++            .stride = g_ptr->width * sizeof(uint32_t) };
++        if (!wlr_texture_read_pixels(wlr_texture_ptr, &options)) {
++            bs_log(BS_WARNING, "Failed wlr_texture_read_pixels for %p",
++                   toplevel_icon_ptr);
++            wlr_buffer_drop(content_ptr);
++            content_ptr = NULL;
++        }
++    }
++    struct wlr_buffer *tile_ptr = wlmaker_dock_tile_buffer(
++        &toplevel_icon_ptr->super_tile.style, NULL, content_ptr);
++    if (NULL != content_ptr) wlr_buffer_drop(content_ptr);
++    return tile_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Starts dragging the dock-app's tile on or off the docks. */
++static void _wlmaker_toplevel_icon_start_drag(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr,
++    double x,
++    double y)
++{
++    wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
++    wlmtk_tile_t *tile_ptr = &toplevel_icon_ptr->super_tile;
++    wlmaker_dockapps_t *d_ptr = wlmaker_clip_dockapps_of(server_ptr, tile_ptr);
++    if (NULL == d_ptr) return;
++    struct wlr_buffer *image_ptr = _wlmaker_toplevel_icon_snapshot(
++        toplevel_icon_ptr);
++    if (NULL == image_ptr) return;
++    wlmaker_tile_drag_source_t source = {
++        .kind = WLMAKER_TILE_DRAG_DOCKAPP,
++        .from_dock = d_ptr == wlmaker_clip_dockapps(server_ptr, true),
++        .index = wlmaker_dockapps_index(d_ptr, tile_ptr),
++        .tile_ptr = tile_ptr,
++        .pid = _wlmaker_toplevel_icon_pid(toplevel_icon_ptr),
++        .name_ptr = wlmaker_dockapps_name(d_ptr, tile_ptr),
++        .image_ptr = image_ptr,
++        .grab_x = toplevel_icon_ptr->drag_start_x,
++        .grab_y = toplevel_icon_ptr->drag_start_y,
++        .running = true,
++        .lift = _wlmaker_toplevel_icon_lift,
++        .lift_ud_ptr = toplevel_icon_ptr };
++    toplevel_icon_ptr->tile_drag_ptr = wlmaker_tile_drag_start(
++        server_ptr, &source, x, y);
++    wlr_buffer_drop(image_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Implements @ref wlmtk_element_vmt_t::pointer_button.
+  *
+  * Dragging the icon with the left button and the window-move modifier held
+- * (the same as for moving windows), or on the tile's border, moves it to
+- * another place in the dock. The right button there opens the tile's menu.
+- * Other button events go to the dock-app.
++ * (the same as for moving windows), or on the tile's border, moves it on or
++ * off the docks, like on Window Maker. The right button opens the tile's
++ * menu. Other button events go to the dock-app.
+  *
+  * @param element_ptr
+  * @param button_event_ptr
+@@ -840,6 +962,10 @@ bool _wlmaker_toplevel_icon_element_pointer_button(
+         super_tile.super_container.super_element);
+     wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
+ 
++    if (NULL != server_ptr->dock_fx_ptr) {
++        wlmaker_dock_fx_balloon_leave(server_ptr->dock_fx_ptr, NULL);
++    }
++
+     if (toplevel_icon_ptr->dragging) {
+         if (BTN_LEFT == button_event_ptr->button &&
+             WLMTK_BUTTON_UP == button_event_ptr->type) {
+@@ -848,16 +974,15 @@ bool _wlmaker_toplevel_icon_element_pointer_button(
+                 wlmtk_container_pointer_grab_release(
+                     element_ptr->parent_container_ptr, element_ptr);
+             }
+-            const wlmaker_config_style_t *style_ptr = server_ptr->style_ptr;
+-            int delta = wlmaker_dockapps_drag_delta(
+-                server_ptr->dockapps_ptr,
+-                toplevel_icon_ptr->drag_x - toplevel_icon_ptr->drag_start_x,
+-                toplevel_icon_ptr->drag_y - toplevel_icon_ptr->drag_start_y,
+-                style_ptr->tile.size + style_ptr->dock.margin.width);
+-            wlmaker_dockapps_move(
+-                server_ptr->dockapps_ptr,
+-                &toplevel_icon_ptr->super_tile,
+-                delta);
++            wlmaker_tile_drag_t *tile_drag_ptr =
++                toplevel_icon_ptr->tile_drag_ptr;
++            toplevel_icon_ptr->tile_drag_ptr = NULL;
++            if (NULL != tile_drag_ptr &&
++                tile_drag_ptr == server_ptr->tile_drag_ptr) {
++                struct wlr_cursor *c = wlmim_wlr_cursor(
++                    server_ptr->input_manager_ptr);
++                wlmaker_tile_drag_drop(tile_drag_ptr, c->x, c->y);
++            }
+         }
+         return true;
+     }
+@@ -876,7 +1001,7 @@ bool _wlmaker_toplevel_icon_element_pointer_button(
+     }
+ 
+     // Dragging with the move modifier held, or on the tile's border (not
+-    // on the dock-app itself), moves it to another place in the dock.
++    // on the dock-app itself), moves it on or off the docks.
+     if (NULL != server_ptr->dockapps_ptr &&
+         BTN_LEFT == button_event_ptr->button &&
+         WLMTK_BUTTON_DOWN == button_event_ptr->type &&
+@@ -886,11 +1011,13 @@ bool _wlmaker_toplevel_icon_element_pointer_button(
+          !wlmtk_surface_element(
+              toplevel_icon_ptr->content_surface_ptr)->pointer_inside) &&
+         NULL != element_ptr->parent_container_ptr) {
++        struct wlr_cursor *c = wlmim_wlr_cursor(server_ptr->input_manager_ptr);
+         toplevel_icon_ptr->dragging = true;
++        toplevel_icon_ptr->tile_drag_ptr = NULL;
+         toplevel_icon_ptr->drag_start_x = element_ptr->last_pointer_motion_event.x;
+         toplevel_icon_ptr->drag_start_y = element_ptr->last_pointer_motion_event.y;
+-        toplevel_icon_ptr->drag_x = toplevel_icon_ptr->drag_start_x;
+-        toplevel_icon_ptr->drag_y = toplevel_icon_ptr->drag_start_y;
++        toplevel_icon_ptr->drag_start_lx = c->x;
++        toplevel_icon_ptr->drag_start_ly = c->y;
+         wlmtk_container_pointer_grab(
+             element_ptr->parent_container_ptr, element_ptr);
+         return true;
+@@ -901,7 +1028,11 @@ bool _wlmaker_toplevel_icon_element_pointer_button(
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+-/** Implements @ref wlmtk_element_vmt_t::pointer_accepts_motion. Tracks drag. */
++/**
++ * Implements @ref wlmtk_element_vmt_t::pointer_accepts_motion. Drags the
++ * tile, once moved beyond a threshold with the button held. Shows the
++ * balloon, with the dock-app's name.
++ */
+ bool _wlmaker_toplevel_icon_element_pointer_accepts_motion(
+     wlmtk_element_t *element_ptr,
+     wlmtk_pointer_motion_event_t *motion_event_ptr)
+@@ -909,9 +1040,26 @@ bool _wlmaker_toplevel_icon_element_pointer_accepts_motion(
+     wlmaker_toplevel_icon_t *toplevel_icon_ptr = BS_CONTAINER_OF(
+         element_ptr, wlmaker_toplevel_icon_t,
+         super_tile.super_container.super_element);
++    wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
+     if (toplevel_icon_ptr->dragging) {
+-        toplevel_icon_ptr->drag_x = motion_event_ptr->x;
+-        toplevel_icon_ptr->drag_y = motion_event_ptr->y;
++        struct wlr_cursor *c = wlmim_wlr_cursor(server_ptr->input_manager_ptr);
++        if (NULL == toplevel_icon_ptr->tile_drag_ptr) {
++            double dx = c->x - toplevel_icon_ptr->drag_start_lx;
++            double dy = c->y - toplevel_icon_ptr->drag_start_ly;
++            // Window Maker's MOVE_THRESHOLD.
++            if (dx * dx + dy * dy >= 5 * 5) {
++                _wlmaker_toplevel_icon_start_drag(toplevel_icon_ptr, c->x, c->y);
++            }
++        } else if (toplevel_icon_ptr->tile_drag_ptr == server_ptr->tile_drag_ptr) {
++            wlmaker_tile_drag_motion(toplevel_icon_ptr->tile_drag_ptr,
++                                     c->x, c->y);
++        }
++    } else {
++        _wlmaker_toplevel_icon_balloon(toplevel_icon_ptr, motion_event_ptr);
++        wlmaker_clip_dock_hovered(
++            server_ptr,
++            wlmaker_clip_dockapps_of(server_ptr, &toplevel_icon_ptr->super_tile) ==
++            wlmaker_clip_dockapps(server_ptr, true));
+     }
+     return toplevel_icon_ptr->orig_element_vmt.pointer_accepts_motion(
+         element_ptr, motion_event_ptr);
+@@ -925,7 +1073,113 @@ void _wlmaker_toplevel_icon_element_pointer_grab_cancel(
+     wlmaker_toplevel_icon_t *toplevel_icon_ptr = BS_CONTAINER_OF(
+         element_ptr, wlmaker_toplevel_icon_t,
+         super_tile.super_container.super_element);
++    wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
+     toplevel_icon_ptr->dragging = false;
++    if (NULL != toplevel_icon_ptr->tile_drag_ptr &&
++        toplevel_icon_ptr->tile_drag_ptr == server_ptr->tile_drag_ptr) {
++        wlmaker_tile_drag_cancel(toplevel_icon_ptr->tile_drag_ptr);
++    }
++    toplevel_icon_ptr->tile_drag_ptr = NULL;
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Shows the dock-app's balloon, as Window Maker's for docked icons: Its name,
++ * and its command in parentheses. Hides it when the pointer leaves the tile.
++ */
++void _wlmaker_toplevel_icon_balloon(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr,
++    wlmtk_pointer_motion_event_t *motion_event_ptr)
++{
++    wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
++    wlmtk_element_t *element_ptr = wlmtk_tile_element(
++        &toplevel_icon_ptr->super_tile);
++    if (NULL == server_ptr->dock_fx_ptr) return;
++    struct wlr_box box = wlmtk_element_get_dimensions_box(element_ptr);
++    if (motion_event_ptr->x < box.x || motion_event_ptr->y < box.y ||
++        motion_event_ptr->x >= box.x + box.width ||
++        motion_event_ptr->y >= box.y + box.height ||
++        NULL != server_ptr->tile_drag_ptr) {
++        wlmaker_dock_fx_balloon_leave(server_ptr->dock_fx_ptr, toplevel_icon_ptr);
++        return;
++    }
++    int x, y;
++    wlmtk_element_get_absolute_position(element_ptr, &x, &y);
++    box.x += x;
++    box.y += y;
++    // As for Window Maker's appicons: The pointer goes 2 pixels in.
++    box.height -= 2;
++
++    char *text_ptr = _wlmaker_toplevel_icon_balloon_text(toplevel_icon_ptr);
++    struct wlr_box area = {};
++    struct wlr_output *wlr_output_ptr = wlr_output_layout_output_at(
++        server_ptr->wlr_output_layout_ptr, box.x + box.width / 2,
++        box.y + box.height / 2);
++    if (NULL != wlr_output_ptr) {
++        wlr_output_layout_get_box(server_ptr->wlr_output_layout_ptr,
++                                  wlr_output_ptr, &area);
++    }
++    wlmaker_dock_fx_balloon_enter(server_ptr->dock_fx_ptr, toplevel_icon_ptr,
++                                  text_ptr, &box, &area);
++    if (NULL != text_ptr) free(text_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles @ref wlmtk_element_events_t::pointer_leave: Hides the balloon. */
++void _wlmaker_toplevel_icon_handle_pointer_leave(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_toplevel_icon_t, pointer_leave_listener);
++    wlmaker_server_t *server_ptr = toplevel_icon_ptr->server_ptr;
++    if (NULL == server_ptr || NULL == server_ptr->dock_fx_ptr) return;
++    wlmaker_dock_fx_balloon_leave(server_ptr->dock_fx_ptr, toplevel_icon_ptr);
++    wlmaker_dockapps_t *d_ptr = wlmaker_clip_dockapps_of(
++        server_ptr, &toplevel_icon_ptr->super_tile);
++    if (NULL != d_ptr) {
++        wlmaker_clip_dock_left(
++            server_ptr, d_ptr == wlmaker_clip_dockapps(server_ptr, true));
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** @return The balloon's text: The dock-app's name, and (its command). */
++char *_wlmaker_toplevel_icon_balloon_text(
++    wlmaker_toplevel_icon_t *toplevel_icon_ptr)
++{
++    pid_t pid = _wlmaker_toplevel_icon_pid(toplevel_icon_ptr);
++    char *name_ptr = NULL;
++    if (NULL != toplevel_icon_ptr->wl_client_ptr) {
++        name_ptr = wlmaker_dockapps_client_name(toplevel_icon_ptr->wl_client_ptr);
++    }
++    if (NULL == name_ptr) return NULL;
++    char *cmdline_ptr = _wlmaker_toplevel_icon_cmdline(pid);
++    char *text_ptr = (NULL != cmdline_ptr) ?
++        bs_strdupf("%s\n(%s)", name_ptr, cmdline_ptr) : logged_strdup(name_ptr);
++    if (NULL != cmdline_ptr) free(cmdline_ptr);
++    free(name_ptr);
++    return text_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++/** @return The command line of process `pid`, with spaces. NULL if unknown. */
++char *_wlmaker_toplevel_icon_cmdline(pid_t pid)
++{
++    if (0 >= pid) return NULL;
++    char path[64];
++    snprintf(path, sizeof(path), "/proc/%"PRIdMAX"/cmdline", (intmax_t)pid);
++    FILE *f = fopen(path, "r");
++    if (NULL == f) return NULL;
++    char buf[512];
++    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
++    fclose(f);
++    if (0 == n) return NULL;
++    buf[n] = '\0';
++    // Arguments are separated by NUL; the last one ends with it.
++    while (0 < n && '\0' == buf[n - 1]) --n;
++    for (size_t i = 0; i < n; ++i) if ('\0' == buf[i]) buf[i] = ' ';
++    return logged_strdup(buf);
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/layer_panel.c b/src/layer_panel.c
+index 385eab8..a9b1592 100644
+--- a/src/layer_panel.c
++++ b/src/layer_panel.c
+@@ -42,7 +42,11 @@
+ #include "wlr-layer-shell-unstable-v1-protocol.h"
+ #include "xdg_popup.h"
+ #include "clip.h"
++#include "dock_fx.h"
++#include "dock_launchers.h"
++#include "dock_menu.h"
+ #include "dock_position.h"
++#include "tile_drag.h"
+ #include "input/manager.h"
+ #include "server.h"
+ 
+@@ -77,6 +81,8 @@ struct _wlmaker_layer_panel_t {
+     wlmtk_element_vmt_t       orig_element_vmt;
+     /** Whether this is the Dock (namespace "wlmdock"): It can be dragged. */
+     bool                      is_dock;
++    /** Whether these are the Clip's launchers (namespace "wlmdock-clip"). */
++    bool                      is_clip_launchers;
+     /** Whether the left button is held on the Dock: May become a drag. */
+     bool                      drag_pending;
+     /** Whether the Dock is being dragged to another corner. */
+@@ -85,6 +91,16 @@ struct _wlmaker_layer_panel_t {
+     double                    drag_start_x;
+     /** Pointer position where the button was pressed, in layout coords. */
+     double                    drag_start_y;
++    /** Tile under the pointer when the button was pressed. -1 for none. */
++    int                       press_index;
++    /** Where the pointer was on that tile, in tile coordinates. */
++    int                       press_tile_x;
++    /** Where the pointer was on that tile, in tile coordinates. */
++    int                       press_tile_y;
++    /** A launcher being dragged on or off the docks, or NULL. */
++    wlmaker_tile_drag_t       *tile_drag_ptr;
++    /** Listener for @ref wlmtk_element_events_t::pointer_leave. */
++    struct wl_listener        pointer_leave_listener;
+ };
+ 
+ wlmaker_layer_panel_t *_wlmaker_layer_panel_create_from_surface(
+@@ -106,6 +122,24 @@ static void _wlmaker_layer_panel_element_pointer_grab_cancel(
+     wlmtk_element_t *element_ptr);
+ static void _wlmaker_layer_panel_end_drag(
+     wlmaker_layer_panel_t *layer_panel_ptr);
++static bool _wlmaker_layer_panel_tile_at(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    double x,
++    double y,
++    int *index_ptr,
++    int *tile_x_ptr,
++    int *tile_y_ptr);
++static void _wlmaker_layer_panel_start_tile_drag(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    double x,
++    double y);
++static void _wlmaker_layer_panel_balloon(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    double x,
++    double y);
++static void _wlmaker_layer_panel_handle_pointer_leave(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
+ 
+ static bool _wlmaker_layer_panel_apply_keyboard(
+     wlmaker_layer_panel_t *layer_panel_ptr,
+@@ -155,6 +189,8 @@ static const wlmtk_element_vmt_t _wlmaker_layer_panel_element_vmt = {
+ static const double _wlmaker_layer_panel_drag_threshold = 8;
+ /** Namespace of the Dock's layer surface, as used by `wlmdock`. */
+ static const char *_wlmaker_layer_panel_dock_namespace = "wlmdock";
++/** Namespace of the Clip's launchers, as used by `wlmdock --clip`. */
++static const char *_wlmaker_layer_panel_clip_namespace = "wlmdock-clip";
+ 
+ /* == Exported methods ===================================================== */
+ 
+@@ -181,6 +217,30 @@ wlmaker_layer_panel_t *wlmaker_layer_panel_create(
+     return panel_ptr;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++bool wlmaker_layer_panel_get_box(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    struct wlr_box *box_ptr)
++{
++    wlmtk_element_t *e = wlmtk_panel_element(&layer_panel_ptr->super_panel);
++    if (!e->visible || NULL == e->parent_container_ptr) return false;
++    *box_ptr = wlmtk_element_get_dimensions_box(e);
++    int x, y;
++    wlmtk_element_get_absolute_position(e, &x, &y);
++    box_ptr->x += x;
++    box_ptr->y += y;
++    return 0 < box_ptr->width && 0 < box_ptr->height;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_layer_panel_update_layer(wlmaker_layer_panel_t *layer_panel_ptr)
++{
++    if (NULL == layer_panel_ptr->wlr_layer_surface_v1_ptr) return;
++    _wlmaker_layer_panel_apply_layer(
++        layer_panel_ptr,
++        layer_panel_ptr->wlr_layer_surface_v1_ptr->current.layer);
++}
++
+ /* == Local (static) methods =============================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -242,6 +302,21 @@ wlmaker_layer_panel_t *_wlmaker_layer_panel_create_from_surface(
+         NULL != wlr_layer_surface_v1_ptr->namespace &&
+         0 == strcmp(wlr_layer_surface_v1_ptr->namespace,
+                     _wlmaker_layer_panel_dock_namespace);
++    layer_panel_ptr->is_clip_launchers =
++        NULL != wlr_layer_surface_v1_ptr->namespace &&
++        0 == strcmp(wlr_layer_surface_v1_ptr->namespace,
++                    _wlmaker_layer_panel_clip_namespace);
++    if (layer_panel_ptr->is_dock) {
++        server_ptr->dock_layer_panel_ptr = layer_panel_ptr;
++    }
++    if (layer_panel_ptr->is_clip_launchers) {
++        server_ptr->clip_layer_panel_ptr = layer_panel_ptr;
++    }
++    layer_panel_ptr->press_index = -1;
++    wlmtk_util_connect_listener_signal(
++        &wlmtk_panel_element(&layer_panel_ptr->super_panel)->events.pointer_leave,
++        &layer_panel_ptr->pointer_leave_listener,
++        _wlmaker_layer_panel_handle_pointer_leave);
+ 
+     wlmtk_container_add_element_atop(
+         &layer_panel_ptr->super_panel.super_container,
+@@ -288,6 +363,23 @@ void _wlmaker_layer_panel_destroy(wlmaker_layer_panel_t *layer_panel_ptr)
+ {
+     bs_log(BS_INFO, "Destroying layer panel %p with wlmtk surface %p",
+            layer_panel_ptr, layer_panel_ptr->wlmtk_surface_ptr);
++    if (layer_panel_ptr->server_ptr->dock_layer_panel_ptr == layer_panel_ptr) {
++        layer_panel_ptr->server_ptr->dock_layer_panel_ptr = NULL;
++    }
++    if (layer_panel_ptr->server_ptr->clip_layer_panel_ptr == layer_panel_ptr) {
++        layer_panel_ptr->server_ptr->clip_layer_panel_ptr = NULL;
++    }
++    if (NULL != layer_panel_ptr->tile_drag_ptr &&
++        layer_panel_ptr->tile_drag_ptr ==
++        layer_panel_ptr->server_ptr->tile_drag_ptr) {
++        wlmaker_tile_drag_cancel(layer_panel_ptr->tile_drag_ptr);
++    }
++    layer_panel_ptr->tile_drag_ptr = NULL;
++    if (NULL != layer_panel_ptr->server_ptr->dock_fx_ptr) {
++        wlmaker_dock_fx_balloon_leave(
++            layer_panel_ptr->server_ptr->dock_fx_ptr, layer_panel_ptr);
++    }
++    wlmtk_util_disconnect_listener(&layer_panel_ptr->pointer_leave_listener);
+ 
+     wlmtk_layer_t *layer_ptr = wlmtk_panel_get_layer(
+         &layer_panel_ptr->super_panel);
+@@ -441,6 +533,11 @@ bool _wlmaker_layer_panel_apply_layer(
+         return false;
+     }
+ 
++    // The Dock and the Clip's launchers: Their level, as set in their menu.
++    if (layer_panel_ptr->is_dock || layer_panel_ptr->is_clip_launchers) {
++        layer = wlmaker_clip_layer(layer_panel_ptr->server_ptr,
++                                   layer_panel_ptr->is_dock);
++    }
+     wlmtk_layer_t *layer_ptr = wlmtk_desktop_get_layer(
+         layer_panel_ptr->server_ptr->desktop_ptr, layer);
+ 
+@@ -465,9 +562,14 @@ bool _wlmaker_layer_panel_apply_layer(
+ 
+ /* ------------------------------------------------------------------------- */
+ /**
+- * Implements @ref wlmtk_element_vmt_t::pointer_button. For the Dock: Moving
+- * the pointer with the left button held drags it to another corner, like on
+- * Window Maker. A click (without moving) goes to the Dock, eg. to launch.
++ * Implements @ref wlmtk_element_vmt_t::pointer_button. For the Dock and the
++ * Clip's launchers (`wlmdock`), like on Window Maker:
++ *
++ * * Moving the pointer with the left button held on the Dock's main tile
++ *   drags the Dock to another corner. On a launcher, it drags the launcher
++ *   on or off the docks.
++ * * The right button opens the menu of the tile.
++ * * A click (without moving) goes to the Dock, eg. to launch.
+  */
+ bool _wlmaker_layer_panel_element_pointer_button(
+     wlmtk_element_t *element_ptr,
+@@ -477,6 +579,30 @@ bool _wlmaker_layer_panel_element_pointer_button(
+         element_ptr, wlmaker_layer_panel_t,
+         super_panel.super_container.super_element);
+     wlmaker_server_t *server_ptr = layer_panel_ptr->server_ptr;
++    bool docklike = layer_panel_ptr->is_dock ||
++        layer_panel_ptr->is_clip_launchers;
++
++    if (docklike && NULL != server_ptr->dock_fx_ptr) {
++        wlmaker_dock_fx_balloon_leave(server_ptr->dock_fx_ptr, NULL);
++    }
++
++    // A launcher being dragged: Dropped, when the button is released.
++    if (NULL != layer_panel_ptr->tile_drag_ptr) {
++        if (BTN_LEFT != button_event_ptr->button ||
++            WLMTK_BUTTON_UP != button_event_ptr->type) return true;
++        wlr_seat_pointer_notify_button(
++            server_ptr->wlr_seat_ptr, button_event_ptr->time_msec,
++            BTN_LEFT, WL_POINTER_BUTTON_STATE_RELEASED);
++        wlmaker_tile_drag_t *tile_drag_ptr = layer_panel_ptr->tile_drag_ptr;
++        layer_panel_ptr->tile_drag_ptr = NULL;
++        _wlmaker_layer_panel_end_drag(layer_panel_ptr);
++        if (tile_drag_ptr == server_ptr->tile_drag_ptr) {
++            struct wlr_cursor *c = wlmim_wlr_cursor(
++                server_ptr->input_manager_ptr);
++            wlmaker_tile_drag_drop(tile_drag_ptr, c->x, c->y);
++        }
++        return true;
++    }
+ 
+     if (layer_panel_ptr->dragging) {
+         if (BTN_LEFT != button_event_ptr->button ||
+@@ -506,6 +632,24 @@ bool _wlmaker_layer_panel_element_pointer_button(
+         return true;
+     }
+ 
++    // The right button opens the tile's menu. Not passed to the client.
++    if (docklike && BTN_RIGHT == button_event_ptr->button) {
++        if (WLMTK_BUTTON_DOWN == button_event_ptr->type) {
++            int index;
++            if (_wlmaker_layer_panel_tile_at(
++                    layer_panel_ptr,
++                    element_ptr->last_pointer_motion_event.x,
++                    element_ptr->last_pointer_motion_event.y,
++                    &index, NULL, NULL)) {
++                // On the Dock, 0 is the main tile; launchers follow.
++                wlmaker_dock_menu_open_launcher(
++                    server_ptr, layer_panel_ptr->is_dock,
++                    layer_panel_ptr->is_dock ? index - 1 : index);
++            }
++        }
++        return true;
++    }
++
+     if (layer_panel_ptr->drag_pending &&
+         BTN_LEFT == button_event_ptr->button &&
+         WLMTK_BUTTON_UP == button_event_ptr->type) {
+@@ -515,7 +659,7 @@ bool _wlmaker_layer_panel_element_pointer_button(
+     bool rv = layer_panel_ptr->orig_element_vmt.pointer_button(
+         element_ptr, button_event_ptr);
+ 
+-    if (layer_panel_ptr->is_dock &&
++    if (docklike &&
+         BTN_LEFT == button_event_ptr->button &&
+         WLMTK_BUTTON_DOWN == button_event_ptr->type &&
+         NULL != element_ptr->parent_container_ptr &&
+@@ -525,6 +669,15 @@ bool _wlmaker_layer_panel_element_pointer_button(
+         layer_panel_ptr->dragging = false;
+         layer_panel_ptr->drag_start_x = c->x;
+         layer_panel_ptr->drag_start_y = c->y;
++        if (!_wlmaker_layer_panel_tile_at(
++                layer_panel_ptr,
++                element_ptr->last_pointer_motion_event.x,
++                element_ptr->last_pointer_motion_event.y,
++                &layer_panel_ptr->press_index,
++                &layer_panel_ptr->press_tile_x,
++                &layer_panel_ptr->press_tile_y)) {
++            layer_panel_ptr->press_index = -1;
++        }
+         wlmtk_container_pointer_grab(
+             element_ptr->parent_container_ptr, element_ptr);
+     }
+@@ -534,8 +687,9 @@ bool _wlmaker_layer_panel_element_pointer_button(
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Implements @ref wlmtk_element_vmt_t::pointer_accepts_motion. Beyond the
+- * threshold with the button held, the Dock is dragged: The Dock (client)
+- * loses the pointer, so the release does not launch anything.
++ * threshold with the button held, the Dock (from its main tile) or the
++ * launcher is dragged: The Dock (client) loses the pointer, so the release
++ * does not launch anything. Shows the balloons of the launchers.
+  */
+ bool _wlmaker_layer_panel_element_pointer_accepts_motion(
+     wlmtk_element_t *element_ptr,
+@@ -544,23 +698,59 @@ bool _wlmaker_layer_panel_element_pointer_accepts_motion(
+     wlmaker_layer_panel_t *layer_panel_ptr = BS_CONTAINER_OF(
+         element_ptr, wlmaker_layer_panel_t,
+         super_panel.super_container.super_element);
++    wlmaker_server_t *server_ptr = layer_panel_ptr->server_ptr;
++
++    if (NULL != layer_panel_ptr->tile_drag_ptr) {
++        if (layer_panel_ptr->tile_drag_ptr == server_ptr->tile_drag_ptr) {
++            struct wlr_cursor *c = wlmim_wlr_cursor(
++                server_ptr->input_manager_ptr);
++            wlmaker_tile_drag_motion(layer_panel_ptr->tile_drag_ptr,
++                                     c->x, c->y);
++        }
++        return true;
++    }
+ 
+     if (layer_panel_ptr->drag_pending && !layer_panel_ptr->dragging) {
+         struct wlr_cursor *c = wlmim_wlr_cursor(
+-            layer_panel_ptr->server_ptr->input_manager_ptr);
++            server_ptr->input_manager_ptr);
+         double dx = c->x - layer_panel_ptr->drag_start_x;
+         double dy = c->y - layer_panel_ptr->drag_start_y;
+         if (dx * dx + dy * dy >= _wlmaker_layer_panel_drag_threshold *
+             _wlmaker_layer_panel_drag_threshold) {
+-            layer_panel_ptr->dragging = true;
+-            wlr_seat_pointer_notify_clear_focus(
+-                layer_panel_ptr->server_ptr->wlr_seat_ptr);
++            bool launcher = layer_panel_ptr->is_clip_launchers ?
++                0 <= layer_panel_ptr->press_index :
++                0 < layer_panel_ptr->press_index;
++            if (launcher) {
++                _wlmaker_layer_panel_start_tile_drag(
++                    layer_panel_ptr, c->x, c->y);
++                if (NULL == layer_panel_ptr->tile_drag_ptr) {
++                    _wlmaker_layer_panel_end_drag(layer_panel_ptr);
++                }
++            } else if (layer_panel_ptr->is_dock) {
++                layer_panel_ptr->dragging = true;
++            } else {
++                _wlmaker_layer_panel_end_drag(layer_panel_ptr);
++            }
++            if (NULL != layer_panel_ptr->tile_drag_ptr ||
++                layer_panel_ptr->dragging) {
++                wlr_seat_pointer_notify_clear_focus(server_ptr->wlr_seat_ptr);
++            }
+         }
+     }
+-    if (layer_panel_ptr->dragging) return true;
++    if (layer_panel_ptr->dragging ||
++        NULL != layer_panel_ptr->tile_drag_ptr) return true;
+ 
+-    return layer_panel_ptr->orig_element_vmt.pointer_accepts_motion(
++    bool rv = layer_panel_ptr->orig_element_vmt.pointer_accepts_motion(
+         element_ptr, motion_event_ptr);
++    if (layer_panel_ptr->is_dock || layer_panel_ptr->is_clip_launchers) {
++        wlmaker_clip_dock_hovered(server_ptr, layer_panel_ptr->is_dock);
++    }
++    if ((layer_panel_ptr->is_dock || layer_panel_ptr->is_clip_launchers) &&
++        !layer_panel_ptr->drag_pending) {
++        _wlmaker_layer_panel_balloon(
++            layer_panel_ptr, motion_event_ptr->x, motion_event_ptr->y);
++    }
++    return rv;
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -573,9 +763,172 @@ void _wlmaker_layer_panel_element_pointer_grab_cancel(
+         super_panel.super_container.super_element);
+     layer_panel_ptr->drag_pending = false;
+     layer_panel_ptr->dragging = false;
++    if (NULL != layer_panel_ptr->tile_drag_ptr &&
++        layer_panel_ptr->tile_drag_ptr ==
++        layer_panel_ptr->server_ptr->tile_drag_ptr) {
++        wlmaker_tile_drag_cancel(layer_panel_ptr->tile_drag_ptr);
++    }
++    layer_panel_ptr->tile_drag_ptr = NULL;
+     layer_panel_ptr->orig_element_vmt.pointer_grab_cancel(element_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Finds the tile at `x`, `y` (panel coordinates) of the Dock or the Clip's
++ * launchers, counted from the anchor: On the Dock, 0 is its main tile.
++ */
++bool _wlmaker_layer_panel_tile_at(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    double x,
++    double y,
++    int *index_ptr,
++    int *tile_x_ptr,
++    int *tile_y_ptr)
++{
++    wlmaker_dock_column_t column;
++    if (!wlmaker_clip_column(layer_panel_ptr->server_ptr,
++                             layer_panel_ptr->is_dock, &column)) return false;
++    struct wlr_box b = wlmtk_element_get_dimensions_box(
++        wlmtk_panel_element(&layer_panel_ptr->super_panel));
++    int index = wlmaker_dock_tile_index_at(
++        column.place, b.width, b.height, x - b.x, y - b.y, column.pitch);
++    if (0 > index) return false;
++    *index_ptr = index;
++    // Position within the tile: Its offset from the anchor.
++    int d = index * column.pitch;
++    int tx = x - b.x, ty = y - b.y;
++    switch (column.place.anchor) {
++    case WLR_EDGE_TOP: ty -= d; break;
++    case WLR_EDGE_BOTTOM: ty -= b.height - d - column.size; break;
++    case WLR_EDGE_LEFT: tx -= d; break;
++    case WLR_EDGE_RIGHT: tx -= b.width - d - column.size; break;
++    default: break;
++    }
++    if (NULL != tile_x_ptr) *tile_x_ptr = tx;
++    if (NULL != tile_y_ptr) *tile_y_ptr = ty;
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Starts dragging the launcher the button was pressed on. */
++void _wlmaker_layer_panel_start_tile_drag(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    double x,
++    double y)
++{
++    wlmaker_server_t *server_ptr = layer_panel_ptr->server_ptr;
++    bool dock = layer_panel_ptr->is_dock;
++    int index = layer_panel_ptr->press_index - (dock ? 1 : 0);
++    if (0 > index) return;
++    bspl_array_t *a = wlmaker_dock_launchers_load(
++        server_ptr, dock ? "Dock" : "Clip");
++    if (NULL == a) return;
++    bspl_dict_t *dict_ptr = NULL;
++    if ((size_t)index < bspl_array_size(a)) {
++        dict_ptr = bspl_dict_from_object(bspl_array_at(a, index));
++    }
++    if (NULL == dict_ptr) {
++        bspl_array_unref(a);
++        return;
++    }
++    char *icon_ptr = wlmaker_dock_launcher_icon_path(
++        server_ptr->files_ptr, wlmaker_dock_launcher_value(dict_ptr, "Icon"));
++    struct wlr_buffer *image_ptr = wlmaker_dock_tile_buffer(
++        &server_ptr->style_ptr->tile, icon_ptr, NULL);
++    if (NULL != icon_ptr) free(icon_ptr);
++    if (NULL == image_ptr) {
++        bspl_array_unref(a);
++        return;
++    }
++    wlmaker_tile_drag_source_t source = {
++        .kind = WLMAKER_TILE_DRAG_LAUNCHER,
++        .from_dock = dock,
++        .index = index,
++        .image_ptr = image_ptr,
++        .grab_x = layer_panel_ptr->press_tile_x,
++        .grab_y = layer_panel_ptr->press_tile_y,
++        .running = 0 < wlmaker_dock_app_windows(
++            server_ptr, wlmaker_dock_launcher_value(dict_ptr, "AppID"), NULL),
++        .locked = wlmaker_dock_launcher_flag(dict_ptr, "Lock") };
++    layer_panel_ptr->tile_drag_ptr = wlmaker_tile_drag_start(
++        server_ptr, &source, x, y);
++    wlr_buffer_drop(image_ptr);
++    bspl_array_unref(a);
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Shows the balloon of the launcher at `x`, `y` (panel coordinates), like
++ * Window Maker's for docked icons. None for the Dock's main tile.
++ */
++void _wlmaker_layer_panel_balloon(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    double x,
++    double y)
++{
++    wlmaker_server_t *server_ptr = layer_panel_ptr->server_ptr;
++    if (NULL == server_ptr->dock_fx_ptr) return;
++    int index, tx, ty;
++    bool dock = layer_panel_ptr->is_dock;
++    if (!_wlmaker_layer_panel_tile_at(layer_panel_ptr, x, y,
++                                      &index, &tx, &ty) ||
++        (dock && 0 == index)) {
++        wlmaker_dock_fx_balloon_leave(server_ptr->dock_fx_ptr, layer_panel_ptr);
++        return;
++    }
++    if (dock) --index;
++    bspl_array_t *a = wlmaker_dock_launchers_load(
++        server_ptr, dock ? "Dock" : "Clip");
++    char *text_ptr = NULL;
++    if (NULL != a && (size_t)index < bspl_array_size(a)) {
++        text_ptr = wlmaker_dock_launcher_balloon_text(
++            bspl_dict_from_object(bspl_array_at(a, index)));
++    }
++    if (NULL != a) bspl_array_unref(a);
++
++    struct wlr_box box;
++    struct wlr_box area = {};
++    if (NULL != text_ptr &&
++        wlmaker_layer_panel_get_box(layer_panel_ptr, &box)) {
++        int size = server_ptr->style_ptr->tile.size;
++        box = (struct wlr_box){
++            .x = box.x + (int)x - tx - (int)wlmtk_element_get_dimensions_box(
++                wlmtk_panel_element(&layer_panel_ptr->super_panel)).x,
++            .y = box.y + (int)y - ty - (int)wlmtk_element_get_dimensions_box(
++                wlmtk_panel_element(&layer_panel_ptr->super_panel)).y,
++            .width = size, .height = size - 2 };
++        struct wlr_output *wlr_output_ptr = wlr_output_layout_output_at(
++            server_ptr->wlr_output_layout_ptr,
++            box.x + box.width / 2, box.y + box.height / 2);
++        if (NULL != wlr_output_ptr) {
++            wlr_output_layout_get_box(server_ptr->wlr_output_layout_ptr,
++                                      wlr_output_ptr, &area);
++        }
++        wlmaker_dock_fx_balloon_enter(server_ptr->dock_fx_ptr,
++                                      layer_panel_ptr, text_ptr, &box, &area);
++    } else {
++        wlmaker_dock_fx_balloon_leave(server_ptr->dock_fx_ptr, layer_panel_ptr);
++    }
++    if (NULL != text_ptr) free(text_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles @ref wlmtk_element_events_t::pointer_leave: Hides the balloon. */
++void _wlmaker_layer_panel_handle_pointer_leave(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmaker_layer_panel_t *layer_panel_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_layer_panel_t, pointer_leave_listener);
++    if (layer_panel_ptr->is_dock || layer_panel_ptr->is_clip_launchers) {
++        wlmaker_clip_dock_left(layer_panel_ptr->server_ptr,
++                               layer_panel_ptr->is_dock);
++    }
++    if (NULL == layer_panel_ptr->server_ptr->dock_fx_ptr) return;
++    wlmaker_dock_fx_balloon_leave(
++        layer_panel_ptr->server_ptr->dock_fx_ptr, layer_panel_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Ends a (pending) drag of the Dock: Releases the pointer grab. */
+ void _wlmaker_layer_panel_end_drag(wlmaker_layer_panel_t *layer_panel_ptr)
+@@ -676,6 +1029,11 @@ void _wlmaker_layer_panel_handle_surface_commit(
+         layer_panel_ptr,
+         state_ptr->keyboard_interactive,
+         state_ptr->layer);
++
++    // The Dock's dock-apps follow the Dock.
++    if (layer_panel_ptr->is_dock) {
++        wlmaker_clip_dock_surface_changed(layer_panel_ptr->server_ptr);
++    }
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -701,6 +1059,9 @@ void _wlmaker_layer_panel_handle_surface_map(
+     if (NULL != layer_output_ptr) {
+         wlmtk_layer_output_reconfigure(layer_output_ptr);
+     }
++    if (layer_panel_ptr->is_dock) {
++        wlmaker_clip_dock_surface_changed(layer_panel_ptr->server_ptr);
++    }
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/layer_panel.h b/src/layer_panel.h
+index a42bfe3..6fbab99 100644
+--- a/src/layer_panel.h
++++ b/src/layer_panel.h
+@@ -51,6 +51,24 @@ wlmaker_layer_panel_t *wlmaker_layer_panel_create(
+     struct wlr_layer_surface_v1 *wlr_layer_surface_v1_ptr,
+     wlmaker_server_t *server_ptr);
+ 
++/**
++ * Gets the panel's position and size, in layout coordinates.
++ *
++ * @param layer_panel_ptr
++ * @param box_ptr
++ *
++ * @return false if the panel is not mapped.
++ */
++bool wlmaker_layer_panel_get_box(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    struct wlr_box *box_ptr);
++
++/**
++ * Puts the panel in the layer it belongs in: For the Dock and the Clip's
++ * launchers, as their level ("Dock position") says. Else, as requested.
++ */
++void wlmaker_layer_panel_update_layer(wlmaker_layer_panel_t *layer_panel_ptr);
++
+ /** Unit test set of layer panel. */
+ extern const bs_test_set_t wlmaker_layer_panel_test_set;
+ 
+diff --git a/src/server.h b/src/server.h
+index bc09062..397266c 100644
+--- a/src/server.h
++++ b/src/server.h
+@@ -199,6 +199,14 @@ struct _wlmaker_server_t {
+     wlmtk_dock_t              *clip_dock_ptr;
+     /** Placement of dock-apps in the clip. Set by the clip, may be NULL. */
+     struct _wlmaker_dockapps_t *dockapps_ptr;
++    /** The Clip, also managing the dock-apps of the Dock. */
++    struct _wlmaker_clip_t    *clip_ptr;
++    /** Layer panel of the Dock (`wlmdock`). NULL if none. */
++    struct _wlmaker_layer_panel_t *dock_layer_panel_ptr;
++    /** Layer panel of the Clip's launchers (`wlmdock --clip`), or NULL. */
++    struct _wlmaker_layer_panel_t *clip_layer_panel_ptr;
++    /** The tile being dragged on or off the Dock or Clip, if any. */
++    struct _wlmaker_tile_drag_t *tile_drag_ptr;
+     /** Visual effects of Dock and Clip: Dragged icon, ghost, balloons. */
+     wlmaker_dock_fx_t         *dock_fx_ptr;
+     /** Listener for @ref wlmaker_server_t::theme_changed_event. */
+diff --git a/src/tile_drag.c b/src/tile_drag.c
+new file mode 100644
+index 0000000..897b503
+--- /dev/null
++++ b/src/tile_drag.c
+@@ -0,0 +1,674 @@
++/* ========================================================================= */
++/**
++ * @file tile_drag.c
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "tile_drag.h"
++
++#include <inttypes.h>
++#include <signal.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#define WLR_USE_UNSTABLE
++#include <wlr/types/wlr_buffer.h>
++#include <wlr/types/wlr_keyboard.h>
++#include <wlr/types/wlr_output_layout.h>
++#include <wlr/types/wlr_seat.h>
++#include <wlr/util/edges.h>
++#undef WLR_USE_UNSTABLE
++
++#include "dock_fx.h"
++#include "dock_launchers.h"
++#include "dockapps.h"
++#include "input/manager.h"
++
++/* == Declarations ========================================================= */
++
++/** State of a tile being dragged. */
++struct _wlmaker_tile_drag_t {
++    /** Back-link. */
++    wlmaker_server_t          *server_ptr;
++    /** What is dragged. */
++    wlmaker_tile_drag_source_t source;
++    /** Name of the dock-app, copied. */
++    char                      *name_ptr;
++    /** Where the tile was. */
++    wlmaker_tile_drag_target_t origin;
++    /** Whether @ref wlmaker_tile_drag_t::origin is known. */
++    bool                      has_origin;
++    /** Where it attaches, if dropped now. */
++    wlmaker_tile_drag_target_t target;
++    /** Whether it attaches somewhere, if dropped now. */
++    bool                      has_target;
++    /** Whether it was dropped: Slides, and is then applied. */
++    bool                      dropped;
++};
++
++static bool _wlmaker_tile_drag_find_target(
++    wlmaker_tile_drag_t *tile_drag_ptr,
++    double x,
++    double y,
++    wlmaker_tile_drag_target_t *target_ptr);
++static bool _wlmaker_tile_drag_may_detach(wlmaker_tile_drag_t *tile_drag_ptr);
++static bool _wlmaker_tile_drag_modifier_held(
++    wlmaker_tile_drag_t *tile_drag_ptr);
++static void _wlmaker_tile_drag_slid(void *ud_ptr);
++static void _wlmaker_tile_drag_apply(wlmaker_tile_drag_t *tile_drag_ptr);
++static void _wlmaker_tile_drag_remove(
++    wlmaker_tile_drag_t *tile_drag_ptr,
++    double x,
++    double y);
++static bool _wlmaker_tile_drag_move_launcher(
++    wlmaker_server_t *server_ptr,
++    bool from_dock,
++    size_t from_index,
++    bool to_dock,
++    size_t to_index);
++static void _wlmaker_tile_drag_destroy(wlmaker_tile_drag_t *tile_drag_ptr);
++static int _wlmaker_tile_drag_slot_position(
++    const wlmaker_dock_column_t *column_ptr,
++    size_t slot,
++    int *y_ptr);
++
++/* == Data ================================================================= */
++
++/** Window Maker's DOCK_DETTACH_THRESHOLD: Tiles away before detaching. */
++static const int _wlmaker_tile_drag_detach_threshold = 3;
++
++/* == Exported methods ===================================================== */
++
++/* ------------------------------------------------------------------------- */
++wlmaker_tile_drag_t *wlmaker_tile_drag_start(
++    wlmaker_server_t *server_ptr,
++    const wlmaker_tile_drag_source_t *source_ptr,
++    double x,
++    double y)
++{
++    if (NULL != server_ptr->tile_drag_ptr) {
++        wlmaker_tile_drag_cancel(server_ptr->tile_drag_ptr);
++    }
++    if (NULL == server_ptr->dock_fx_ptr || NULL == source_ptr->image_ptr) {
++        return NULL;
++    }
++    wlmaker_tile_drag_t *tile_drag_ptr = logged_calloc(
++        1, sizeof(*tile_drag_ptr));
++    if (NULL == tile_drag_ptr) return NULL;
++    tile_drag_ptr->server_ptr = server_ptr;
++    tile_drag_ptr->source = *source_ptr;
++    wlr_buffer_lock(tile_drag_ptr->source.image_ptr);
++    if (NULL != source_ptr->name_ptr) {
++        tile_drag_ptr->name_ptr = logged_strdup(source_ptr->name_ptr);
++    }
++    tile_drag_ptr->source.name_ptr = tile_drag_ptr->name_ptr;
++    server_ptr->tile_drag_ptr = tile_drag_ptr;
++
++    // Where it was: Its slot in the column.
++    wlmaker_dock_column_t column;
++    if (wlmaker_clip_column(server_ptr, source_ptr->from_dock, &column)) {
++        size_t slot = 1 + source_ptr->index;
++        if (WLMAKER_TILE_DRAG_DOCKAPP == source_ptr->kind) {
++            slot += column.launchers;
++        }
++        tile_drag_ptr->origin = (wlmaker_tile_drag_target_t){
++            .dock = source_ptr->from_dock,
++            .index = source_ptr->index,
++            .slot = slot };
++        tile_drag_ptr->origin.x = _wlmaker_tile_drag_slot_position(
++            &column, slot, &tile_drag_ptr->origin.y);
++        tile_drag_ptr->has_origin = true;
++        tile_drag_ptr->target = tile_drag_ptr->origin;
++        tile_drag_ptr->has_target = true;
++
++        // A launcher is drawn by `wlmdock`: Cover it with an empty tile.
++        if (WLMAKER_TILE_DRAG_LAUNCHER == source_ptr->kind) {
++            struct wlr_buffer *empty_ptr = wlmaker_dock_tile_buffer(
++                &server_ptr->style_ptr->tile, NULL, NULL);
++            wlmaker_dock_fx_cover_show(
++                server_ptr->dock_fx_ptr, empty_ptr,
++                tile_drag_ptr->origin.x, tile_drag_ptr->origin.y);
++            if (NULL != empty_ptr) wlr_buffer_drop(empty_ptr);
++        }
++    }
++    if (NULL != source_ptr->lift) {
++        source_ptr->lift(source_ptr->lift_ud_ptr, true);
++    }
++    wlmaker_dock_fx_balloon_leave(server_ptr->dock_fx_ptr, NULL);
++    wlmaker_dock_fx_drag_show(
++        server_ptr->dock_fx_ptr, source_ptr->image_ptr,
++        x - source_ptr->grab_x, y - source_ptr->grab_y);
++    wlmaker_tile_drag_motion(tile_drag_ptr, x, y);
++    return tile_drag_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_tile_drag_motion(
++    wlmaker_tile_drag_t *tile_drag_ptr,
++    double x,
++    double y)
++{
++    if (tile_drag_ptr->dropped) return;
++    wlmaker_server_t *server_ptr = tile_drag_ptr->server_ptr;
++    wlmaker_dock_fx_drag_show(
++        server_ptr->dock_fx_ptr, NULL,
++        x - tile_drag_ptr->source.grab_x, y - tile_drag_ptr->source.grab_y);
++
++    wlmaker_tile_drag_target_t target;
++    if (_wlmaker_tile_drag_find_target(tile_drag_ptr, x, y, &target)) {
++        tile_drag_ptr->target = target;
++        tile_drag_ptr->has_target = true;
++    } else if (!_wlmaker_tile_drag_may_detach(tile_drag_ptr)) {
++        // Window Maker: Stays where it was last attached.
++    } else {
++        tile_drag_ptr->has_target = false;
++    }
++
++    if (tile_drag_ptr->has_target) {
++        wlmaker_dock_fx_ghost_show(
++            server_ptr->dock_fx_ptr,
++            wlmaker_dock_fx_ghost_visible(server_ptr->dock_fx_ptr) ?
++            NULL : tile_drag_ptr->source.image_ptr,
++            tile_drag_ptr->target.x, tile_drag_ptr->target.y);
++    } else {
++        wlmaker_dock_fx_ghost_hide(server_ptr->dock_fx_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_tile_drag_drop(
++    wlmaker_tile_drag_t *tile_drag_ptr,
++    double x,
++    double y)
++{
++    if (tile_drag_ptr->dropped) return;
++    wlmaker_tile_drag_motion(tile_drag_ptr, x, y);
++    wlmaker_server_t *server_ptr = tile_drag_ptr->server_ptr;
++    tile_drag_ptr->dropped = true;
++    wlmaker_dock_fx_ghost_hide(server_ptr->dock_fx_ptr);
++
++    if (!tile_drag_ptr->has_target) {
++        wlmaker_dock_fx_drag_hide(server_ptr->dock_fx_ptr);
++        wlmaker_dock_fx_cover_hide(server_ptr->dock_fx_ptr);
++        _wlmaker_tile_drag_remove(tile_drag_ptr, x, y);
++        _wlmaker_tile_drag_destroy(tile_drag_ptr);
++        return;
++    }
++    // Slides into its slot, then gets attached there.
++    wlmaker_dock_fx_slide(
++        server_ptr->dock_fx_ptr,
++        tile_drag_ptr->target.x, tile_drag_ptr->target.y,
++        _wlmaker_tile_drag_slid, tile_drag_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_tile_drag_cancel(wlmaker_tile_drag_t *tile_drag_ptr)
++{
++    wlmaker_server_t *server_ptr = tile_drag_ptr->server_ptr;
++    wlmaker_dock_fx_ghost_hide(server_ptr->dock_fx_ptr);
++    wlmaker_dock_fx_drag_hide(server_ptr->dock_fx_ptr);
++    wlmaker_dock_fx_cover_hide(server_ptr->dock_fx_ptr);
++    if (NULL != tile_drag_ptr->source.lift) {
++        tile_drag_ptr->source.lift(tile_drag_ptr->source.lift_ud_ptr, false);
++    }
++    _wlmaker_tile_drag_destroy(tile_drag_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmaker_tile_drag_forget_tile(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr)
++{
++    wlmaker_tile_drag_t *tile_drag_ptr = server_ptr->tile_drag_ptr;
++    if (NULL == tile_drag_ptr || NULL == tile_ptr ||
++        tile_drag_ptr->source.tile_ptr != tile_ptr) return;
++    tile_drag_ptr->source.lift = NULL;
++    wlmaker_tile_drag_cancel(tile_drag_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_tile_drag_snap(
++    const wlmaker_dock_column_t *column_ptr,
++    wlmaker_tile_drag_kind_t kind,
++    bool own_column,
++    int x,
++    int y,
++    wlmaker_tile_drag_target_t *target_ptr)
++{
++    int pitch = column_ptr->pitch;
++    if (0 >= pitch) return false;
++    // As wDockSnapIcon: The slot nearest the tile's position.
++    int offset = column_ptr->size / 2;
++    int ex_x = (x < column_ptr->x) ?
++        (x - offset - column_ptr->x) / pitch :
++        (x + offset - column_ptr->x) / pitch;
++    int ex_y = (y < column_ptr->y) ?
++        (y - offset - column_ptr->y) / pitch :
++        (y + offset - column_ptr->y) / pitch;
++
++    int along, across;
++    switch (column_ptr->place.edge) {
++    case WLR_EDGE_LEFT:
++    case WLR_EDGE_RIGHT:
++        along = (WLR_EDGE_BOTTOM == column_ptr->place.anchor) ? -ex_y : ex_y;
++        across = ex_x;
++        break;
++    default:
++        along = (WLR_EDGE_RIGHT == column_ptr->place.anchor) ? -ex_x : ex_x;
++        across = ex_y;
++        break;
++    }
++    if (own_column) {
++        if (abs(across) > _wlmaker_tile_drag_detach_threshold) return false;
++    } else if (0 != across) {
++        return false;
++    }
++    if (0 > along) return false;
++
++    // Launchers come right after the first tile; dock-apps after them.
++    // Within its own area, a tile keeps one of the existing slots.
++    size_t first, count;
++    if (WLMAKER_TILE_DRAG_LAUNCHER == kind) {
++        first = 1;
++        count = column_ptr->launchers;
++    } else {
++        first = 1 + column_ptr->launchers;
++        count = column_ptr->dockapps;
++    }
++    size_t max_index = (own_column && 0 < count) ? count - 1 : count;
++    size_t index = (along < (int)first) ? 0 : (size_t)along - first;
++    if (index > max_index) index = max_index;
++
++    target_ptr->index = index;
++    target_ptr->slot = first + index;
++    target_ptr->x = _wlmaker_tile_drag_slot_position(
++        column_ptr, target_ptr->slot, &target_ptr->y);
++
++    // Not off the output.
++    const struct wlr_box *o_ptr = &column_ptr->output;
++    if (!wlr_box_empty(o_ptr) &&
++        (target_ptr->x < o_ptr->x || target_ptr->y < o_ptr->y ||
++         target_ptr->x + column_ptr->size > o_ptr->x + o_ptr->width ||
++         target_ptr->y + column_ptr->size > o_ptr->y + o_ptr->height)) {
++        return false;
++    }
++    return true;
++}
++
++/* == Local (static) methods =============================================== */
++
++/* ------------------------------------------------------------------------- */
++/** @return The x position of `slot`, and its y position in `y_ptr`. */
++int _wlmaker_tile_drag_slot_position(
++    const wlmaker_dock_column_t *column_ptr,
++    size_t slot,
++    int *y_ptr)
++{
++    int d = (int)slot * column_ptr->pitch;
++    int x = column_ptr->x, y = column_ptr->y;
++    switch (column_ptr->place.anchor) {
++    case WLR_EDGE_TOP: y += d; break;
++    case WLR_EDGE_BOTTOM: y -= d; break;
++    case WLR_EDGE_LEFT: x += d; break;
++    case WLR_EDGE_RIGHT: x -= d; break;
++    default: break;
++    }
++    *y_ptr = y;
++    return x;
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Finds where the tile attaches, for the pointer at `x`, `y`: The column it
++ * comes from first, then the other one.
++ */
++bool _wlmaker_tile_drag_find_target(
++    wlmaker_tile_drag_t *tile_drag_ptr,
++    double x,
++    double y,
++    wlmaker_tile_drag_target_t *target_ptr)
++{
++    int tx = x - tile_drag_ptr->source.grab_x;
++    int ty = y - tile_drag_ptr->source.grab_y;
++    // Window Maker: With the move modifier held, a docked icon detaches.
++    // Not for dock-apps: They are dragged with the modifier, or by the
++    // tile's border.
++    if (WLMAKER_TILE_DRAG_LAUNCHER == tile_drag_ptr->source.kind &&
++        !tile_drag_ptr->source.locked &&
++        _wlmaker_tile_drag_modifier_held(tile_drag_ptr)) return false;
++
++    bool docks[2] = { tile_drag_ptr->source.from_dock,
++                      !tile_drag_ptr->source.from_dock };
++    for (int i = 0; i < 2; ++i) {
++        wlmaker_dock_column_t column;
++        if (!wlmaker_clip_column(tile_drag_ptr->server_ptr, docks[i], &column)) {
++            continue;
++        }
++        bool own = (0 == i);
++        // The dragged tile is no longer counted in its own area.
++        if (wlmaker_tile_drag_snap(&column, tile_drag_ptr->source.kind, own,
++                                   tx, ty, target_ptr)) {
++            target_ptr->dock = docks[i];
++            return true;
++        }
++    }
++    return false;
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * @return Whether the tile may be dropped off the docks: Not if locked. For
++ *     a running application, only with the move modifier held (Window
++ *     Maker's MOD_MASK). Dock-apps always may: They are removed.
++ */
++bool _wlmaker_tile_drag_may_detach(wlmaker_tile_drag_t *tile_drag_ptr)
++{
++    if (tile_drag_ptr->source.locked) return false;
++    if (WLMAKER_TILE_DRAG_DOCKAPP == tile_drag_ptr->source.kind) return true;
++    if (!tile_drag_ptr->source.running) return true;
++    return _wlmaker_tile_drag_modifier_held(tile_drag_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** @return Whether the move modifier (as for moving windows) is held. */
++bool _wlmaker_tile_drag_modifier_held(wlmaker_tile_drag_t *tile_drag_ptr)
++{
++    wlmaker_server_t *server_ptr = tile_drag_ptr->server_ptr;
++    uint32_t modifier = 0;
++    if (NULL != server_ptr->input_manager_ptr) {
++        modifier = wlmim_cursor_options(
++            server_ptr->input_manager_ptr)->move_window_modifier;
++    }
++    struct wlr_keyboard *kb_ptr = NULL;
++    if (NULL != server_ptr->wlr_seat_ptr) {
++        kb_ptr = wlr_seat_get_keyboard(server_ptr->wlr_seat_ptr);
++    }
++    if (0 == modifier || NULL == kb_ptr) return false;
++    return modifier == (wlr_keyboard_get_modifiers(kb_ptr) & modifier);
++}
++
++/* ------------------------------------------------------------------------- */
++/** The tile slid into its slot: Attaches it there. */
++void _wlmaker_tile_drag_slid(void *ud_ptr)
++{
++    wlmaker_tile_drag_t *tile_drag_ptr = ud_ptr;
++    _wlmaker_tile_drag_apply(tile_drag_ptr);
++    _wlmaker_tile_drag_destroy(tile_drag_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Attaches the tile at the target. */
++void _wlmaker_tile_drag_apply(wlmaker_tile_drag_t *tile_drag_ptr)
++{
++    wlmaker_server_t *server_ptr = tile_drag_ptr->server_ptr;
++    wlmaker_tile_drag_source_t *s_ptr = &tile_drag_ptr->source;
++    wlmaker_tile_drag_target_t *t_ptr = &tile_drag_ptr->target;
++    bool moved = s_ptr->from_dock != t_ptr->dock || s_ptr->index != t_ptr->index;
++
++    if (WLMAKER_TILE_DRAG_DOCKAPP == s_ptr->kind) {
++        if (NULL != s_ptr->lift) s_ptr->lift(s_ptr->lift_ud_ptr, false);
++        if (moved && NULL != s_ptr->tile_ptr) {
++            wlmaker_clip_move_dockapp(server_ptr, s_ptr->tile_ptr,
++                                      t_ptr->dock, t_ptr->index);
++        }
++        wlmaker_dock_fx_cover_hide(server_ptr->dock_fx_ptr);
++        return;
++    }
++
++    if (moved) {
++        _wlmaker_tile_drag_move_launcher(
++            server_ptr, s_ptr->from_dock, s_ptr->index,
++            t_ptr->dock, t_ptr->index);
++    }
++    // `wlmdock` shows the launcher where it now is.
++    wlmaker_dock_fx_cover_hide(server_ptr->dock_fx_ptr);
++    if (NULL != s_ptr->lift) s_ptr->lift(s_ptr->lift_ud_ptr, false);
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Removes the tile dropped off the docks at `x`, `y`: With Window Maker's
++ * kaboom, unless the application is running. A dock-app is terminated, and
++ * remembered as removed.
++ */
++void _wlmaker_tile_drag_remove(
++    wlmaker_tile_drag_t *tile_drag_ptr,
++    double x,
++    double y)
++{
++    wlmaker_server_t *server_ptr = tile_drag_ptr->server_ptr;
++    wlmaker_tile_drag_source_t *s_ptr = &tile_drag_ptr->source;
++    int tx = x - s_ptr->grab_x, ty = y - s_ptr->grab_y;
++
++    struct wlr_output *wlr_output_ptr = wlr_output_layout_output_at(
++        server_ptr->wlr_output_layout_ptr, x, y);
++    struct wlr_box area = {};
++    if (NULL != wlr_output_ptr) {
++        wlr_output_layout_get_box(server_ptr->wlr_output_layout_ptr,
++                                  wlr_output_ptr, &area);
++    }
++
++    if (WLMAKER_TILE_DRAG_DOCKAPP == s_ptr->kind) {
++        bs_log(BS_INFO, "Dock-app \"%s\" dropped off the docks: Removing.",
++               NULL != s_ptr->name_ptr ? s_ptr->name_ptr : "(unknown)");
++        wlmaker_dock_fx_kaboom(server_ptr->dock_fx_ptr, s_ptr->image_ptr,
++                               tx, ty, &area);
++        if (NULL != s_ptr->name_ptr) {
++            wlmaker_dockapps_set_removed(
++                wlmaker_clip_dockapps_fname(server_ptr), s_ptr->name_ptr, true);
++        }
++        if (NULL != s_ptr->tile_ptr) {
++            wlmaker_dockapps_t *d_ptr = wlmaker_clip_dockapps_of(
++                server_ptr, s_ptr->tile_ptr);
++            if (NULL != d_ptr) wlmaker_dockapps_detach(d_ptr, s_ptr->tile_ptr);
++            if (NULL != s_ptr->lift) s_ptr->lift(s_ptr->lift_ud_ptr, false);
++        }
++        if (1 < s_ptr->pid && getpid() != s_ptr->pid &&
++            0 != kill(s_ptr->pid, SIGTERM)) {
++            bs_log(BS_WARNING | BS_ERRNO, "Failed kill(%"PRIdMAX", SIGTERM)",
++                   (intmax_t)s_ptr->pid);
++        }
++        return;
++    }
++
++    // A launcher: Kaboom, unless its application runs (Window Maker).
++    if (!s_ptr->running) {
++        wlmaker_dock_fx_kaboom(server_ptr->dock_fx_ptr, s_ptr->image_ptr,
++                               tx, ty, &area);
++    }
++    const char *section_ptr = s_ptr->from_dock ? "Dock" : "Clip";
++    bspl_array_t *a = wlmaker_dock_launchers_load(server_ptr, section_ptr);
++    bspl_array_t *n = bspl_array_create();
++    bool rv = NULL != a && NULL != n;
++    for (size_t i = 0; rv && i < bspl_array_size(a); ++i) {
++        if (i == s_ptr->index) continue;
++        rv = bspl_array_push_back(n, bspl_array_at(a, i));
++    }
++    if (rv) wlmaker_dock_launchers_store(server_ptr, section_ptr, n);
++    if (NULL != n) bspl_array_unref(n);
++    if (NULL != a) bspl_array_unref(a);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Moves a launcher in the state: Within the Dock or the Clip, or across. */
++bool _wlmaker_tile_drag_move_launcher(
++    wlmaker_server_t *server_ptr,
++    bool from_dock,
++    size_t from_index,
++    bool to_dock,
++    size_t to_index)
++{
++    const char *from_ptr = from_dock ? "Dock" : "Clip";
++    const char *to_ptr = to_dock ? "Dock" : "Clip";
++    bspl_array_t *from_a = wlmaker_dock_launchers_load(server_ptr, from_ptr);
++    bspl_array_t *to_a = (from_dock == to_dock) ? NULL :
++        wlmaker_dock_launchers_load(server_ptr, to_ptr);
++    bspl_array_t *new_from = bspl_array_create();
++    bspl_array_t *new_to = (from_dock == to_dock) ? NULL : bspl_array_create();
++    bool rv = NULL != from_a && NULL != new_from &&
++        from_index < bspl_array_size(from_a) &&
++        (from_dock == to_dock || (NULL != to_a && NULL != new_to));
++    bspl_object_t *moved_ptr = rv ? bspl_array_at(from_a, from_index) : NULL;
++
++    // Without the moved one; and for a move within, with it at `to_index`.
++    for (size_t i = 0, j = 0; rv && i < bspl_array_size(from_a); ++i) {
++        if (i == from_index) continue;
++        if (from_dock == to_dock && j == to_index) {
++            rv = bspl_array_push_back(new_from, moved_ptr);
++            ++j;
++        }
++        rv = rv && bspl_array_push_back(new_from, bspl_array_at(from_a, i));
++        ++j;
++    }
++    if (rv && from_dock == to_dock &&
++        bspl_array_size(new_from) < bspl_array_size(from_a)) {
++        rv = bspl_array_push_back(new_from, moved_ptr);
++    }
++    if (rv && from_dock != to_dock) {
++        size_t n = bspl_array_size(to_a);
++        for (size_t i = 0; rv && i <= n; ++i) {
++            if (i == to_index || (i == n && to_index > n)) {
++                rv = bspl_array_push_back(new_to, moved_ptr);
++            }
++            if (rv && i < n) {
++                rv = bspl_array_push_back(new_to, bspl_array_at(to_a, i));
++            }
++        }
++    }
++    if (rv && NULL != new_to) {
++        rv = wlmaker_dock_launchers_store(server_ptr, to_ptr, new_to);
++    }
++    if (rv) rv = wlmaker_dock_launchers_store(server_ptr, from_ptr, new_from);
++
++    if (NULL != new_to) bspl_array_unref(new_to);
++    if (NULL != new_from) bspl_array_unref(new_from);
++    if (NULL != to_a) bspl_array_unref(to_a);
++    if (NULL != from_a) bspl_array_unref(from_a);
++    return rv;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Destroys the drag. */
++void _wlmaker_tile_drag_destroy(wlmaker_tile_drag_t *tile_drag_ptr)
++{
++    if (tile_drag_ptr->server_ptr->tile_drag_ptr == tile_drag_ptr) {
++        tile_drag_ptr->server_ptr->tile_drag_ptr = NULL;
++    }
++    if (NULL != tile_drag_ptr->source.image_ptr) {
++        wlr_buffer_unlock(tile_drag_ptr->source.image_ptr);
++    }
++    if (NULL != tile_drag_ptr->name_ptr) free(tile_drag_ptr->name_ptr);
++    free(tile_drag_ptr);
++}
++
++/* == Unit tests =========================================================== */
++
++static void test_snap(bs_test_t *test_ptr);
++
++/** Unit test cases. */
++static const bs_test_case_t _wlmaker_tile_drag_test_cases[] = {
++    { true, "snap", test_snap },
++    BS_TEST_CASE_SENTINEL()
++};
++
++const bs_test_set_t wlmaker_tile_drag_test_set = BS_TEST_SET(
++    true, "tile_drag", _wlmaker_tile_drag_test_cases);
++
++/* ------------------------------------------------------------------------- */
++/** Tests where dragged tiles attach, as Window Maker's wDockSnapIcon. */
++void test_snap(bs_test_t *test_ptr)
++{
++    // The Dock at the top right of 1920x1080: Main tile, 2 launchers, 1 app.
++    wlmaker_dock_column_t dock = {
++        .place = { WLR_EDGE_RIGHT, WLR_EDGE_TOP },
++        .x = 1856, .y = 0, .size = 64, .pitch = 65,
++        .launchers = 2, .dockapps = 1,
++        .output = { .width = 1920, .height = 1080 } };
++    wlmaker_tile_drag_target_t t;
++
++    // A dock-app from the Clip, right over the Dock's 4th slot: Attaches to
++    // the end of the Dock's dock-apps.
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_tile_drag_snap(
++                            &dock, WLMAKER_TILE_DRAG_DOCKAPP, false,
++                            1850, 4 * 65 + 10, &t));
++    BS_TEST_VERIFY_EQ(test_ptr, 1, t.index);
++    BS_TEST_VERIFY_EQ(test_ptr, 4, t.slot);
++    BS_TEST_VERIFY_EQ(test_ptr, 1856, t.x);
++    BS_TEST_VERIFY_EQ(test_ptr, 260, t.y);
++    // Far down the column: Still the end.
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_tile_drag_snap(
++                            &dock, WLMAKER_TILE_DRAG_DOCKAPP, false,
++                            1856, 900, &t));
++    BS_TEST_VERIFY_EQ(test_ptr, 1, t.index);
++    // Over the launchers: The first dock-app slot.
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_tile_drag_snap(
++                            &dock, WLMAKER_TILE_DRAG_DOCKAPP, false,
++                            1856, 65, &t));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, t.index);
++    BS_TEST_VERIFY_EQ(test_ptr, 3, t.slot);
++    // One tile to the left: Not over the Dock, not attached.
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmaker_tile_drag_snap(
++                             &dock, WLMAKER_TILE_DRAG_DOCKAPP, false,
++                             1856 - 65, 260, &t));
++    // ... unless it comes from the Dock: Up to 3 tiles away.
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_tile_drag_snap(
++                            &dock, WLMAKER_TILE_DRAG_DOCKAPP, true,
++                            1856 - 3 * 65, 260, &t));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, t.index);
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmaker_tile_drag_snap(
++                             &dock, WLMAKER_TILE_DRAG_DOCKAPP, true,
++                             1856 - 5 * 65, 260, &t));
++
++    // A launcher over the main tile: The first launcher slot.
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_tile_drag_snap(
++                            &dock, WLMAKER_TILE_DRAG_LAUNCHER, true,
++                            1856, 0, &t));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, t.index);
++    BS_TEST_VERIFY_EQ(test_ptr, 1, t.slot);
++    // Within its own launchers, it keeps one of the 2 slots.
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_tile_drag_snap(
++                            &dock, WLMAKER_TILE_DRAG_LAUNCHER, true,
++                            1856, 500, &t));
++    BS_TEST_VERIFY_EQ(test_ptr, 1, t.index);
++    // From the Clip, it can go after them.
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_tile_drag_snap(
++                            &dock, WLMAKER_TILE_DRAG_LAUNCHER, false,
++                            1856, 500, &t));
++    BS_TEST_VERIFY_EQ(test_ptr, 2, t.index);
++
++    // The Clip at the bottom left: Slots go up from the anchor.
++    wlmaker_dock_column_t clip = {
++        .place = { WLR_EDGE_LEFT, WLR_EDGE_BOTTOM },
++        .x = 0, .y = 1016, .size = 64, .pitch = 65,
++        .launchers = 0, .dockapps = 2,
++        .output = { .width = 1920, .height = 1080 } };
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_tile_drag_snap(
++                            &clip, WLMAKER_TILE_DRAG_DOCKAPP, true,
++                            5, 1016 - 65, &t));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, t.index);
++    BS_TEST_VERIFY_EQ(test_ptr, 1016 - 65, t.y);
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_tile_drag_snap(
++                            &clip, WLMAKER_TILE_DRAG_DOCKAPP, false,
++                            5, 1016 - 3 * 65, &t));
++    BS_TEST_VERIFY_EQ(test_ptr, 2, t.index);
++    // Below the Clip (off the output): Not attached.
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmaker_tile_drag_snap(
++                             &clip, WLMAKER_TILE_DRAG_DOCKAPP, false,
++                             5, 1100, &t));
++}
++
++/* == End of tile_drag.c =================================================== */
+diff --git a/src/tile_drag.h b/src/tile_drag.h
+new file mode 100644
+index 0000000..1097ee1
+--- /dev/null
++++ b/src/tile_drag.h
+@@ -0,0 +1,174 @@
++/* ========================================================================= */
++/**
++ * @file tile_drag.h
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#ifndef __WLMAKER_TILE_DRAG_H__
++#define __WLMAKER_TILE_DRAG_H__
++
++#include <stdbool.h>
++#include <stddef.h>
++#include <sys/types.h>
++
++#include <libbase/libbase.h>
++#include <libbase/plist.h>
++
++/** Forward declaration: A tile being dragged. */
++typedef struct _wlmaker_tile_drag_t wlmaker_tile_drag_t;
++
++#include "clip.h"
++#include "server.h"
++#include "toolkit/toolkit.h"
++
++struct wlr_buffer;
++
++#ifdef __cplusplus
++extern "C" {
++#endif  // __cplusplus
++
++/** What is dragged. */
++typedef enum {
++    /** A launcher of the Dock or the Clip, shown by `wlmdock`. */
++    WLMAKER_TILE_DRAG_LAUNCHER,
++    /** A dock-app, attached to the Dock or the Clip. */
++    WLMAKER_TILE_DRAG_DOCKAPP,
++} wlmaker_tile_drag_kind_t;
++
++/** Callback: The dragged tile is lifted off its slot (or put back). */
++typedef void (*wlmaker_tile_drag_lift_t)(void *ud_ptr, bool lifted);
++
++/** Describes the dragged tile. */
++typedef struct {
++    /** What it is. */
++    wlmaker_tile_drag_kind_t  kind;
++    /** Whether it comes from the Dock (else from the Clip). */
++    bool                      from_dock;
++    /** Its index among the launchers, or among the dock-apps there. */
++    size_t                    index;
++    /** The dock-app's tile. */
++    wlmtk_tile_t              *tile_ptr;
++    /** The dock-app's process, terminated when dropped off the docks. */
++    pid_t                     pid;
++    /** The dock-app's name. May be NULL. */
++    const char                *name_ptr;
++    /** The tile's image. Referenced while dragging. */
++    struct wlr_buffer         *image_ptr;
++    /** Where the pointer is on the tile. */
++    int                       grab_x;
++    /** Where the pointer is on the tile. */
++    int                       grab_y;
++    /**
++     * Whether the icon stays on the docks when dropped elsewhere, as Window
++     * Maker does for locked icons, and those of running applications (unless
++     * the move modifier is held).
++     */
++    bool                      running;
++    /** Whether it is locked: It always stays on the docks. */
++    bool                      locked;
++    /** Called when lifted off its slot, and put back. May be NULL. */
++    wlmaker_tile_drag_lift_t  lift;
++    /** Argument to @ref wlmaker_tile_drag_source_t::lift. */
++    void                      *lift_ud_ptr;
++} wlmaker_tile_drag_source_t;
++
++/** Where a dragged tile will be attached. */
++typedef struct {
++    /** Whether on the Dock (else on the Clip). */
++    bool                      dock;
++    /** Index among the launchers or the dock-apps there. */
++    size_t                    index;
++    /** Slot in the column: 0 is the Dock's main tile, or the Clip. */
++    size_t                    slot;
++    /** Position of the slot, in layout coordinates. */
++    int                       x;
++    /** Position of the slot, in layout coordinates. */
++    int                       y;
++} wlmaker_tile_drag_target_t;
++
++/**
++ * Starts dragging a tile, like Window Maker's wHandleAppIconMove: The tile
++ * follows the pointer, and the ghost shows where it will be attached.
++ *
++ * @param server_ptr
++ * @param source_ptr          Copied.
++ * @param x                   Pointer position, in layout coordinates.
++ * @param y
++ *
++ * @return The drag, or NULL on error. Ends with @ref wlmaker_tile_drag_drop
++ *     or @ref wlmaker_tile_drag_cancel. Also held in the server.
++ */
++wlmaker_tile_drag_t *wlmaker_tile_drag_start(
++    wlmaker_server_t *server_ptr,
++    const wlmaker_tile_drag_source_t *source_ptr,
++    double x,
++    double y);
++
++/** The pointer moved, to `x`, `y` in layout coordinates. */
++void wlmaker_tile_drag_motion(
++    wlmaker_tile_drag_t *tile_drag_ptr,
++    double x,
++    double y);
++
++/**
++ * The button was released at `x`, `y`: Attaches the tile where the ghost
++ * is (it slides there), or removes it with Window Maker's "kaboom". Ends
++ * the drag.
++ */
++void wlmaker_tile_drag_drop(
++    wlmaker_tile_drag_t *tile_drag_ptr,
++    double x,
++    double y);
++
++/** Cancels the drag: The tile stays where it was. */
++void wlmaker_tile_drag_cancel(wlmaker_tile_drag_t *tile_drag_ptr);
++
++/** The dock-app's tile is going away: Forgets it, if dragged. */
++void wlmaker_tile_drag_forget_tile(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr);
++
++/**
++ * Computes where a tile with its top-left at `x`, `y` attaches to the
++ * column, as Window Maker's wDockSnapIcon: When right over the column; or,
++ * for the column it comes from, until it is 3 tiles away from it.
++ *
++ * @param column_ptr
++ * @param kind
++ * @param own_column          Whether the tile comes from this column.
++ * @param x
++ * @param y
++ * @param target_ptr          Only `index`, `slot`, `x` and `y` are set.
++ *
++ * @return Whether it attaches.
++ */
++bool wlmaker_tile_drag_snap(
++    const wlmaker_dock_column_t *column_ptr,
++    wlmaker_tile_drag_kind_t kind,
++    bool own_column,
++    int x,
++    int y,
++    wlmaker_tile_drag_target_t *target_ptr);
++
++/** Unit test cases. */
++extern const bs_test_set_t wlmaker_tile_drag_test_set;
++
++#ifdef __cplusplus
++}  // extern "C"
++#endif  // __cplusplus
++
++#endif /* __WLMAKER_TILE_DRAG_H__ */
++/* == End of tile_drag.h =================================================== */
+diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
+index 5e0ba94..5874188 100644
+--- a/tests/wlmaker_test.c
++++ b/tests/wlmaker_test.c
+@@ -29,6 +29,8 @@
+ #include "context_menu.h"
+ #include "corner.h"
+ #include "dock_fx.h"
++#include "dock_launchers.h"
++#include "dock_menu.h"
+ #include "dock_position.h"
+ #include "dockapp_prefs.h"
+ #include "i18n.h"
+@@ -37,6 +39,7 @@
+ #include "lock_mgr.h"
+ #include "menu_scroll.h"
+ #include "root_menu.h"
++#include "tile_drag.h"
+ #include "toplevel_tracker.h"
+ #include "util/backtrace.h"
+ #include "xdg_decoration.h"
+@@ -64,6 +67,8 @@ int main(int argc, const char **argv)
+         &wlmaker_context_menu_test_set,
+         &wlmaker_corner_test_set,
+         &wlmaker_dock_fx_test_set,
++        &wlmaker_dock_launchers_test_set,
++        &wlmaker_dock_menu_test_set,
+         &wlmaker_dock_position_test_set,
+         &wlmaker_dockapp_prefs_test_set,
+         &wlmaker_i18n_test_set,
+@@ -72,6 +77,7 @@ int main(int argc, const char **argv)
+         &wlmaker_lock_mgr_test_set,
+         &wlmaker_menu_scroll_test_set,
+         &wlmaker_root_menu_test_set,
++        &wlmaker_tile_drag_test_set,
+         &wlmaker_toplevel_tracker_test_set,
+         &wlmaker_xdg_decoration_test_set,
+         &wlmaker_xdg_toplevel_test_set,
+-- 
+2.55.0
+

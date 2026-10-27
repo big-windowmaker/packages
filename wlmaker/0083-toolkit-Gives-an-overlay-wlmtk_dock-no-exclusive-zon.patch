@@ -1,0 +1,35 @@
+From 6a35507117b9fa33629cde60cb2a301f23151cc8 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 16:38:02 -0300
+Subject: [PATCH] toolkit: Gives an overlay wlmtk_dock no exclusive zone.
+
+wlmtk_dock_positioning_t::overlay is documented to position the dock
+relative to the full output, without an exclusive zone of its own. The
+dock still claimed one: An overlay dock placed over another dock's column
+pushed that one aside. Sets the exclusive zone to -1, as the layer shell
+does for overlay surfaces.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/toolkit/dock.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/toolkit/dock.c b/src/toolkit/dock.c
+index 449ca18..ccec45c 100644
+--- a/src/toolkit/dock.c
++++ b/src/toolkit/dock.c
+@@ -480,6 +480,11 @@ bool _wlmtk_dock_positioning(
+     }
+ 
+     panel_positioning_ptr->exclusive_edge = dock_ptr->dock_positioning.edge;
++    // Overlay: Relative to the full output, without an exclusive zone. As
++    // the layer shell's exclusive zone of -1.
++    if (dock_ptr->dock_positioning.overlay) {
++        panel_positioning_ptr->exclusive_zone = -1;
++    }
+     return true;
+ }
+ 
+-- 
+2.55.0
+
