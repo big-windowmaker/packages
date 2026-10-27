@@ -1,0 +1,39 @@
+From 56fc8315d1070294c37fef4bc1e41e2413a19cdd Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 19:31:01 -0300
+Subject: [PATCH 95/99] toolkit: Places windows above the bottom layer.
+
+As layer-shell has it, surfaces of the bottom layer are below the
+windows, and above the background. The windows were placed right above
+the background layer, ie. below the bottom layer: The Dock's "Normal"
+level (bottom layer) showed above the windows.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/toolkit/desktop.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/toolkit/desktop.c b/src/toolkit/desktop.c
+index 37f3865..341ef14 100644
+--- a/src/toolkit/desktop.c
++++ b/src/toolkit/desktop.c
+@@ -189,11 +189,13 @@ wlmtk_desktop_t *wlmtk_desktop_create(
+     wlmtk_element_set_visible(
+         &desktop_ptr->workspace_window_container.super_element,
+         true);
+-    wlmtk_layer_t *bg_layer_ptr = wlmtk_desktop_get_layer(
+-        desktop_ptr, WLMTK_DESKTOP_LAYER_BACKGROUND);
++    // Windows are above the bottom layer, as layer-shell has it: Its
++    // surfaces are "below shell surfaces" (and above the background).
++    wlmtk_layer_t *bottom_layer_ptr = wlmtk_desktop_get_layer(
++        desktop_ptr, WLMTK_DESKTOP_LAYER_BOTTOM);
+     wlmtk_container_add_element_atop(
+         &desktop_ptr->container,
+-        wlmtk_layer_element(bg_layer_ptr),
++        wlmtk_layer_element(bottom_layer_ptr),
+         &desktop_ptr->workspace_window_container.super_element);
+ 
+     if (!wlmtk_container_init(&desktop_ptr->workspace_fullscreen_container)) {
+-- 
+2.55.0
+

@@ -1,0 +1,81 @@
+From 95d7780b1398f3c8baf25424ac915ba3a35f5dc2 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 18:17:37 -0300
+Subject: [PATCH 91/99] dockapps: Adds wlmaker_dockapps_tile_at, places tiles
+ at the dock's start.
+
+wlmtk_box only sets an element's position along the box: A tile moved
+from a vertical dock to a horizontal one kept its y position. The tile
+is now placed at (0, 0) before being added to the dock.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/dockapps.c | 21 +++++++++++++++++++++
+ src/dockapps.h |  5 +++++
+ 2 files changed, 26 insertions(+)
+
+diff --git a/src/dockapps.c b/src/dockapps.c
+index 220924c..db025f1 100644
+--- a/src/dockapps.c
++++ b/src/dockapps.c
+@@ -209,6 +209,9 @@ bool wlmaker_dockapps_add(
+             &dockapps_ptr->placed, dlnode_ptr, &dockapp_ptr->dlnode);
+     }
+ 
++    // The dock's box sets the position along it only: Across, the tile
++    // would keep its position from another dock (eg. a vertical one).
++    wlmtk_element_set_position(wlmtk_tile_element(tile_ptr), 0, 0);
+     wlmtk_dock_add_tile(dockapps_ptr->dock_ptr, tile_ptr);
+     wlmtk_dock_move_tile(dockapps_ptr->dock_ptr, tile_ptr, base + index);
+     return true;
+@@ -357,6 +360,21 @@ int wlmaker_dockapps_index(
+     return index;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++wlmtk_tile_t *wlmaker_dockapps_tile_at(
++    wlmaker_dockapps_t *dockapps_ptr,
++    size_t index)
++{
++    for (bs_dllist_node_t *dlnode_ptr = dockapps_ptr->placed.head_ptr;
++         NULL != dlnode_ptr;
++         dlnode_ptr = dlnode_ptr->next_ptr, --index) {
++        if (0 == index) {
++            return BS_CONTAINER_OF(dlnode_ptr, wlmaker_dockapp_t, dlnode)->tile_ptr;
++        }
++    }
++    return NULL;
++}
++
+ /* ------------------------------------------------------------------------- */
+ const char *wlmaker_dockapps_name(
+     wlmaker_dockapps_t *dockapps_ptr,
+@@ -399,6 +417,9 @@ bool wlmaker_dockapps_insert(
+         bs_dllist_insert_node_before(
+             &dockapps_ptr->placed, dlnode_ptr, &dockapp_ptr->dlnode);
+     }
++    // The dock's box sets the position along it only: Across, the tile
++    // would keep its position from another dock (eg. a vertical one).
++    wlmtk_element_set_position(wlmtk_tile_element(tile_ptr), 0, 0);
+     wlmtk_dock_add_tile(dockapps_ptr->dock_ptr, tile_ptr);
+     wlmtk_dock_move_tile(dockapps_ptr->dock_ptr, tile_ptr, base + index);
+ 
+diff --git a/src/dockapps.h b/src/dockapps.h
+index 9584cca..25644c1 100644
+--- a/src/dockapps.h
++++ b/src/dockapps.h
+@@ -171,6 +171,11 @@ int wlmaker_dockapps_index(
+     wlmaker_dockapps_t *dockapps_ptr,
+     wlmtk_tile_t *tile_ptr);
+ 
++/** @return Tile of the dock-app at `index` from the anchor, or NULL. */
++wlmtk_tile_t *wlmaker_dockapps_tile_at(
++    wlmaker_dockapps_t *dockapps_ptr,
++    size_t index);
++
+ /** @return Name of the dock-app of `tile_ptr`, or NULL. */
+ const char *wlmaker_dockapps_name(
+     wlmaker_dockapps_t *dockapps_ptr,
+-- 
+2.55.0
+

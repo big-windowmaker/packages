@@ -1,0 +1,49 @@
+From af0e48284306350e85c20d66a5398240586aa642 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 19:43:25 -0300
+Subject: [PATCH 99/99] share: Adds the preferences of big-wm-tray to
+ Dockapps.plist.
+
+The system tray of Big WindowMaker, adopted as dock-app: "Small Icons",
+as wmsystemtray's -s, in its "Settings..." submenu.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ share/wlmaker/Dockapps.plist | 9 +++++++++
+ src/i18n.c                   | 1 +
+ 2 files changed, 10 insertions(+)
+
+diff --git a/share/wlmaker/Dockapps.plist b/share/wlmaker/Dockapps.plist
+index 9fc02fc..7004baa 100644
+--- a/share/wlmaker/Dockapps.plist
++++ b/share/wlmaker/Dockapps.plist
+@@ -181,5 +181,14 @@
+         { Key = Theme; Title = "Theme"; Choices = Theme; Default = Default; }
+       );
+     };
++
++    // The system tray of Big WindowMaker: A layer-shell client adopted as
++    // dock-app (namespace "wlmaker-dockapp"). As wmsystemtray's -s.
++    "big-wm-tray" = {
++      Preferences = (
++        { Key = SmallIcons; Title = "Small Icons"; Type = Bool;
++          Default = No; }
++      );
++    };
+   };
+ }
+diff --git a/src/i18n.c b/src/i18n.c
+index 081398c..9330ce7 100644
+--- a/src/i18n.c
++++ b/src/i18n.c
+@@ -117,6 +117,7 @@ static const wlmaker_i18n_entry_t _wlmaker_i18n_pt_br[] = {
+     { "Calendar in a Terminal", "Calendário no terminal" },
+     { "Open Task Manager", "Abrir gerenciador de tarefas" },
+     { "Show", "Mostrar" },
++    { "Small Icons", "Ícones pequenos" },
+     { "Each Core", "Cada núcleo" },
+     { "Total Usage", "Uso total" },
+     { "Graph Style", "Estilo do gráfico" },
+-- 
+2.55.0
+
