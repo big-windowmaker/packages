@@ -15,3 +15,4 @@ s/^\(@define-color \(in\|out\)set_lighter_color \)shade(@base_color,1.3);$/\1#6a
 s/^\(@define-color theme_\(text\|fg\|tooltip_fg\)_color \)@black_color;$/\1@osb_fg_color;/
 s/^\([[:space:]]*color:[[:space:]]*\)@black_color;/\1@osb_fg_color;/
 s/^\(@define-color \(window\|view\|sidebar\|secondary_sidebar\|card\|dialog\|popover\|thumbnail\)_fg_color \)@black_color;$/\1@osb_fg_color;/
+s/^@define-color osb_outline_color @black_color;$/@define-color osb_outline_color #d0d0d0;/

@@ -24,3 +24,8 @@ headerbar button:backdrop {
 button.destructive-action {
     color: #ff8a8a;
 }
+
+/* Dicas (tooltip): o filete preto do tema claro some no cinza-escuro. */
+tooltip {
+    border-color: #8a8a8a;
+}

@@ -12,6 +12,20 @@
  * embaixo e à direita, cantos retos). Só nomes de cor do tema: o
  * OneStepBack-Dark troca as cores e o desenho continua o mesmo. */
 
+/* Filetes que marcam o botão padrão, os avisos e o foco do teclado: preto
+ * no tema claro; o dark.sed troca por um cinza-claro no OneStepBack-Dark,
+ * onde o preto some no cinza-escuro. */
+@define-color osb_outline_color @black_color;
+
+/* Foco do teclado: o tema não desenha nenhum, e sem ele quem navega com Tab
+ * (ou com o Orca) não via onde estava. Um tracejado por dentro, que não muda
+ * o tamanho dos controles. */
+button:focus-visible, row:focus-visible, checkbutton:focus-visible,
+switch:focus-visible, scale:focus-visible, notebook > header > tabs > tab:focus-visible {
+    outline: 1px dashed @osb_outline_color;
+    outline-offset: -4px;
+}
+
 /* Títulos e textos */
 
 .large-title {
@@ -126,7 +140,7 @@ button.pill {
 /* Botão padrão do NeXTSTEP: o texto em negrito e um filete preto em volta. */
 button.suggested-action, button.default {
     font-weight: bold;
-    box-shadow: 0 0 0 1px @black_color;
+    box-shadow: 0 0 0 1px @osb_outline_color;
 }
 
 button.destructive-action {
@@ -282,7 +296,7 @@ toast {
     margin: 12px;
     padding: 6px 6px 6px 12px;
     border-radius: 0;
-    border: 1px solid @black_color;
+    border: 1px solid @osb_outline_color;
     box-shadow: 4px 4px 0 alpha(@black_color, 0.35);
 }
 
