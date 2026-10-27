@@ -1,0 +1,20 @@
+wmglobe: mensagem de erro da libwraster como argumento, não como formato
+
+fprintf(stderr, RMessageForError(...)) usa a mensagem como string de
+formato: o -Werror=format-security das CFLAGS do makepkg recusa compilar.
+
+Upstream: window-maker/dockapps (wmglobe), ainda sem PR; enviar para wmaker-dev.
+
+diff --git a/wmglobe/src/wmglobe.c b/wmglobe/src/wmglobe.c
+index f69fd11..8df1f8d 100644
+--- a/wmglobe/src/wmglobe.c
++++ b/wmglobe/src/wmglobe.c
+@@ -416,7 +416,7 @@ int main(int argc, char *argv[])
+ 	    if (do_something) {
+ 		if (!myRConvertImage(ctx, small, &pix)) {
+ 		    fprintf(stderr, "crash !?\n");
+-		    fprintf(stderr, RMessageForError(RErrorCode));
++		    fprintf(stderr, "%s\n", RMessageForError(RErrorCode));
+ 		    exit(1);
+ 		}
+ 		wmg.pixmap = pix;
