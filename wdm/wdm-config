@@ -31,6 +31,11 @@ DisplayManager*wdmLoginConfig:	/etc/wdm/wdmLogin-config
 DisplayManager*wdmLogo:		/usr/share/icons/hicolor/128x128/apps/big-wm.png
 DisplayManager*wdmBg:		pixmap:/usr/share/backgrounds/big-wm/default.jpg
 DisplayManager*wdmAnimations:	true
+! Usuário escolhido numa lista (contas com UID entre UID_MIN e UID_MAX do
+! /etc/login.defs, shell do /etc/shells, não bloqueadas); o último item,
+! "Outro...", abre o campo de texto (LDAP, contas ocultas). false = só o
+! campo de texto.
+DisplayManager*wdmUserList:	true
 ! Reiniciar e desligar pela tela de login, sem senha (como no LightDM).
 DisplayManager*wdmReboot:	/usr/bin/systemctl reboot
 DisplayManager*wdmHalt:		/usr/bin/systemctl poweroff

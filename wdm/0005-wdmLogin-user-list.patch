@@ -1,0 +1,919 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 01:40:33 -0300
+Subject: [PATCH] =?UTF-8?q?wdmLogin:=20lista=20de=20usu=C3=A1rios=20no=20l?=
+ =?UTF-8?q?ugar=20do=20campo=20de=20nome?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+O usuário é escolhido num botão pop-up do WINGs, no mesmo lugar do campo
+de texto: "Nome Real (login)" das contas humanas (libwdm/users.c: UID
+entre UID_MIN e UID_MAX do /etc/login.defs, shell do /etc/shells que não
+seja nologin/false, sem "!" no shadow nem expirada, sem
+SystemAccount=true no AccountsService; getpwent(), então contas de NSS
+também aparecem; mais de 100 contas: campo de texto).
+
+- Pré-seleciona o último usuário que entrou (wdm grava
+  <wdmSessionStateDir>/.last-user).
+- Teclado: setas, Page Up/Down, Home/End e as primeiras letras do login
+  ou do nome escolhem; Enter vai para a senha; Esc volta à lista.
+- A sessão lembrada (F2) acompanha o usuário escolhido; sem sessão
+  lembrada, a padrão.
+- O último item, "Outro...", abre o campo de texto (LDAP, contas
+  ocultas).
+- Na senha, a primeira linha do painel mostra o usuário; senha errada
+  mantém o usuário e volta para a senha.
+- DisplayManager*wdmUserList (padrão true) desliga a lista.
+---
+ Makefile.in          |   7 +-
+ include/wdmusers.h   |  51 ++++++++
+ po/pt_BR.po          |   7 +-
+ src/libwdm/users.c   | 295 +++++++++++++++++++++++++++++++++++++++++++
+ src/wdm/Greet.c      |   3 +
+ src/wdm/resource.c   |   3 +
+ src/wdm/session.c    |   3 +
+ src/wdmLogin/Login.c | 264 +++++++++++++++++++++++++++++++++++++-
+ 8 files changed, 625 insertions(+), 8 deletions(-)
+ create mode 100644 include/wdmusers.h
+ create mode 100644 src/libwdm/users.c
+
+diff --git a/Makefile.in b/Makefile.in
+index a54551b..41a5120 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -130,6 +130,9 @@ src/libwdm/sessions.o: src/libwdm/sessions.c include/wdmsessions.h
+ src/libwdm/faillock.o: src/libwdm/faillock.c include/wdmfaillock.h
+ 	$(CC) -c $(libwdm_cflags) src/libwdm/faillock.c -o src/libwdm/faillock.o
+ 
++src/libwdm/users.o: src/libwdm/users.c include/wdmusers.h
++	$(CC) -c $(libwdm_cflags) src/libwdm/users.c -o src/libwdm/users.o
++
+ src/wdm/Greet.o: src/wdm/Greet.c include/dm.h include/wdmconfig.h include/config.h include/greet.h include/wdmlib.h
+ 	$(CC) -c $(wdm_cflags) src/wdm/Greet.c -o src/wdm/Greet.o
+ 
+@@ -254,9 +257,9 @@ $(DESTDIR)$(bindir)/wdmPrefs: bin/wdmPrefs
+ 	$(INSTALL) -d $(@D)
+ 	$(INSTALL_PROGRAM) bin/wdmPrefs $@
+ 
+-bin/libwdm.a: src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/libwdm/sessions.o src/libwdm/faillock.o
++bin/libwdm.a: src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/libwdm/sessions.o src/libwdm/faillock.o src/libwdm/users.o
+ 	mkdir -p bin
+-	$(ar) cru bin/libwdm.a src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/libwdm/sessions.o src/libwdm/faillock.o
++	$(ar) cru bin/libwdm.a src/libwdm/debug.o src/libwdm/environment.o src/libwdm/names.o src/libwdm/plcheckers.o src/libwdm/sessions.o src/libwdm/faillock.o src/libwdm/users.o
+ 	$(ranlib) bin/libwdm.a
+ 
+ $(DESTDIR)$(MANDIR)/man1/wdmLogin.1: doc/wdmLogin.man
+diff --git a/include/wdmusers.h b/include/wdmusers.h
+new file mode 100644
+index 0000000..96a3261
+--- /dev/null
++++ b/include/wdmusers.h
+@@ -0,0 +1,51 @@
++/*
++ * wdm - WINGs display manager
++ * Copyright (C) 2026 Big WindowMaker <https://github.com/big-windowmaker>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * wdmusers.h: accounts offered in the user list of wdmLogin.
++ */
++#ifndef _WDMUSERS_H
++#define _WDMUSERS_H
++
++#include <sys/types.h>
++
++typedef struct WDMUser {
++	char *login;
++	char *realName;		/* GECOS up to the first ',' (may be "") */
++	char *label;		/* "Real Name (login)" or "login" */
++	uid_t uid;
++} WDMUser;
++
++typedef struct WDMUserList {
++	int count;
++	WDMUser *items;
++} WDMUserList;
++
++typedef struct WDMUserSources {
++	const char *passwd;	/* file, or NULL for getpwent() (NSS) */
++	const char *shadow;	/* file, or NULL for getspnam() */
++	const char *loginDefs;	/* /etc/login.defs: UID_MIN, UID_MAX */
++	const char *shells;	/* /etc/shells */
++	const char *accountsDir;/* /var/lib/AccountsService/users */
++	long today;		/* days since the epoch, for expired accounts */
++} WDMUserSources;
++
++/* Human accounts: UID_MIN <= uid <= UID_MAX, a login shell listed in
++ * /etc/shells (not nologin/false), not locked ("!" in shadow) nor
++ * expired, not marked SystemAccount=true by AccountsService.  Sorted by
++ * label; at most "max" entries (0 when there are more: a list that long is
++ * useless, wdmLogin then shows the text field).  Never returns NULL. */
++WDMUserList *WDMReadUsers(const WDMUserSources *src, int max);
++void WDMFreeUsers(WDMUserList *list);
++int WDMFindUser(const WDMUserList *list, const char *login);
++
++/* Last user that logged in (<statedir>/.last-user). */
++int WDMSaveLastUser(const char *statedir, const char *user);
++char *WDMLoadLastUser(const char *statedir);
++
++#endif /* _WDMUSERS_H */
+diff --git a/po/pt_BR.po b/po/pt_BR.po
+index f7b95c9..67c4fe4 100644
+--- a/po/pt_BR.po
++++ b/po/pt_BR.po
+@@ -14,6 +14,7 @@ msgstr ""
+ 
+ msgid ""
+ "Keyboard shortcuts:\n"
++"  Up/Down, Home/End, first letters: choose the user in the list\n"
+ "  Enter: next field, log in or run the selected option\n"
+ "  Tab: switch between login name and password\n"
+ "  Esc: start over\n"
+@@ -22,9 +23,10 @@ msgid ""
+ "  F3 / Shift+F3: next / previous option (reboot, halt)\n"
+ msgstr ""
+ "Atalhos de teclado:\n"
++"  Setas, Home/End, primeiras letras: escolhem o usuário na lista\n"
+ "  Enter: próximo campo, entrar ou executar a opção escolhida\n"
+ "  Tab: alterna entre o nome de usuário e a senha\n"
+-"  Esc: recomeçar\n"
++"  Esc: recomeçar (volta à lista de usuários)\n"
+ "  F1: mostra ou esconde esta ajuda\n"
+ "  F2 / Shift+F2: sessão seguinte / anterior\n"
+ "  F3 / Shift+F3: opção seguinte / anterior (reiniciar, desligar)\n"
+@@ -140,3 +142,6 @@ msgid ""
+ msgstr ""
+ "Conta bloqueada após várias senhas erradas. Peça ao administrador para "
+ "desbloqueá-la."
++
++msgid "Other..."
++msgstr "Outro..."
+diff --git a/src/libwdm/users.c b/src/libwdm/users.c
+new file mode 100644
+index 0000000..a8b4fe9
+--- /dev/null
++++ b/src/libwdm/users.c
+@@ -0,0 +1,295 @@
++/*
++ * wdm - WINGs display manager
++ * Copyright (C) 2026 Big WindowMaker <https://github.com/big-windowmaker>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * users.c: the accounts listed by wdmLogin, filtered like the user lists
++ * of other display managers (login.defs, /etc/shells, shadow, the
++ * SystemAccount flag of AccountsService).
++ */
++
++#include <wdmusers.h>
++#include <wdmsessions.h>	/* WDMValidUserName() */
++
++#include <ctype.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <pwd.h>
++#include <shadow.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <strings.h>
++#include <sys/stat.h>
++#include <time.h>
++#include <unistd.h>
++
++static char *xstrdup(const char *s)
++{
++	char *r = strdup(s ? s : "");
++
++	if (!r)
++		abort();
++	return r;
++}
++
++static void read_login_defs(const char *path, long *uid_min, long *uid_max)
++{
++	char line[512], key[64];
++	long v;
++	FILE *f = fopen(path, "r");
++
++	if (!f)
++		return;
++	while (fgets(line, sizeof(line), f)) {
++		if (sscanf(line, " %63s %ld", key, &v) != 2 || key[0] == '#')
++			continue;
++		if (strcmp(key, "UID_MIN") == 0)
++			*uid_min = v;
++		else if (strcmp(key, "UID_MAX") == 0)
++			*uid_max = v;
++	}
++	fclose(f);
++}
++
++static int valid_shell(const char *shells, const char *shell)
++{
++	char line[512];
++	const char *base;
++	FILE *f;
++	int ok = 0;
++
++	if (!shell || !*shell)
++		shell = "/bin/sh";
++	base = strrchr(shell, '/');
++	base = base ? base + 1 : shell;
++	if (strcmp(base, "nologin") == 0 || strcmp(base, "false") == 0)
++		return 0;
++	f = fopen(shells, "r");
++	if (!f)
++		return 1;	/* no /etc/shells: like getusershell(), any shell */
++	while (!ok && fgets(line, sizeof(line), f)) {
++		line[strcspn(line, " \t\r\n#")] = '\0';
++		ok = line[0] == '/' && strcmp(line, shell) == 0;
++	}
++	fclose(f);
++	return ok;
++}
++
++/* 1 when the shadow entry says the account cannot log in with a password
++ * now: locked ("!...") or expired. */
++static int locked(const WDMUserSources *src, const char *login)
++{
++	struct spwd *sp = NULL;
++	int r = 0;
++
++	if (src->shadow) {
++		FILE *f = fopen(src->shadow, "r");
++
++		if (!f)
++			return 0;
++		while ((sp = fgetspent(f)) != NULL)
++			if (strcmp(sp->sp_namp, login) == 0)
++				break;
++		if (sp)
++			r = (sp->sp_pwdp && sp->sp_pwdp[0] == '!') ||
++			    (sp->sp_expire > 0 && src->today >= sp->sp_expire);
++		fclose(f);
++		return r;
++	}
++	sp = getspnam(login);
++	if (!sp)
++		return 0;	/* not in shadow (NSS, LDAP): let PAM decide */
++	return (sp->sp_pwdp && sp->sp_pwdp[0] == '!') ||
++	       (sp->sp_expire > 0 && src->today >= sp->sp_expire);
++}
++
++static int system_account(const char *dir, const char *login)
++{
++	char path[1024], line[256];
++	FILE *f;
++	int r = 0;
++
++	if (!dir || !*dir)
++		return 0;
++	snprintf(path, sizeof(path), "%s/%s", dir, login);
++	f = fopen(path, "r");
++	if (!f)
++		return 0;
++	while (!r && fgets(line, sizeof(line), f)) {
++		line[strcspn(line, "\r\n")] = '\0';
++		r = strcasecmp(line, "SystemAccount=true") == 0;
++	}
++	fclose(f);
++	return r;
++}
++
++static int cmp_user(const void *a, const void *b)
++{
++	const WDMUser *x = a, *y = b;
++	int r = strcasecmp(x->label, y->label);
++
++	return r ? r : strcmp(x->login, y->login);
++}
++
++static void consider(WDMUserList *l, const WDMUserSources *src, const struct passwd *pw,
++		     long uid_min, long uid_max, int *overflow, int max)
++{
++	WDMUser *u;
++	char *real, *label;
++	size_t n;
++	int i;
++
++	if (!pw || !WDMValidUserName(pw->pw_name) || (long)pw->pw_uid < uid_min ||
++	    (long)pw->pw_uid > uid_max || !valid_shell(src->shells, pw->pw_shell) ||
++	    system_account(src->accountsDir, pw->pw_name) || locked(src, pw->pw_name))
++		return;
++	for (i = 0; i < l->count; i++)
++		if (strcmp(l->items[i].login, pw->pw_name) == 0)
++			return;
++	if (l->count >= max) {
++		*overflow = 1;
++		return;
++	}
++	real = xstrdup(pw->pw_gecos);
++	real[strcspn(real, ",")] = '\0';
++	while ((n = strlen(real)) > 0 && isspace((unsigned char)real[n - 1]))
++		real[n - 1] = '\0';
++	if (*real && strcmp(real, pw->pw_name) != 0) {
++		n = strlen(real) + strlen(pw->pw_name) + 4;
++		label = malloc(n);
++		if (!label)
++			abort();
++		snprintf(label, n, "%s (%s)", real, pw->pw_name);
++	} else
++		label = xstrdup(pw->pw_name);
++	l->items = realloc(l->items, sizeof(WDMUser) * (l->count + 1));
++	if (!l->items)
++		abort();
++	u = &l->items[l->count++];
++	u->login = xstrdup(pw->pw_name);
++	u->realName = real;
++	u->label = label;
++	u->uid = pw->pw_uid;
++}
++
++WDMUserList *WDMReadUsers(const WDMUserSources *src, int max)
++{
++	WDMUserList *l = calloc(1, sizeof(WDMUserList));
++	long uid_min = 1000, uid_max = 60000;
++	struct passwd *pw;
++	int overflow = 0;
++
++	if (!l)
++		abort();
++	read_login_defs(src->loginDefs ? src->loginDefs : "/etc/login.defs", &uid_min, &uid_max);
++	if (src->passwd) {
++		FILE *f = fopen(src->passwd, "r");
++
++		if (f) {
++			while ((pw = fgetpwent(f)) != NULL)
++				consider(l, src, pw, uid_min, uid_max, &overflow, max);
++			fclose(f);
++		}
++	} else {
++		setpwent();
++		while ((pw = getpwent()) != NULL)
++			consider(l, src, pw, uid_min, uid_max, &overflow, max);
++		endpwent();
++	}
++	if (!src->shadow)
++		endspent();
++	if (overflow) {
++		WDMUserList *empty = calloc(1, sizeof(WDMUserList));
++
++		WDMFreeUsers(l);
++		if (!empty)
++			abort();
++		return empty;
++	}
++	if (l->count > 1)
++		qsort(l->items, l->count, sizeof(WDMUser), cmp_user);
++	return l;
++}
++
++void WDMFreeUsers(WDMUserList *list)
++{
++	int i;
++
++	if (!list)
++		return;
++	for (i = 0; i < list->count; i++) {
++		free(list->items[i].login);
++		free(list->items[i].realName);
++		free(list->items[i].label);
++	}
++	free(list->items);
++	free(list);
++}
++
++int WDMFindUser(const WDMUserList *list, const char *login)
++{
++	int i;
++
++	if (!list || !login)
++		return -1;
++	for (i = 0; i < list->count; i++)
++		if (strcmp(list->items[i].login, login) == 0)
++			return i;
++	return -1;
++}
++
++int WDMSaveLastUser(const char *statedir, const char *user)
++{
++	char path[1024], tmp[1100];
++	int fd, len, ok;
++
++	if (!statedir || !*statedir || !WDMValidUserName(user))
++		return 0;
++	if (mkdir(statedir, 0755) != 0 && errno != EEXIST)
++		return 0;
++	snprintf(path, sizeof(path), "%s/.last-user", statedir);
++	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
++	unlink(tmp);
++	fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
++	if (fd < 0)
++		return 0;
++	len = strlen(user);
++	ok = write(fd, user, len) == len && write(fd, "\n", 1) == 1;
++	ok = (close(fd) == 0) && ok;
++	if (!ok || rename(tmp, path) != 0) {
++		unlink(tmp);
++		return 0;
++	}
++	return 1;
++}
++
++char *WDMLoadLastUser(const char *statedir)
++{
++	char path[1024], buf[128];
++	int fd;
++	ssize_t n;
++
++	if (!statedir || !*statedir)
++		return NULL;
++	snprintf(path, sizeof(path), "%s/.last-user", statedir);
++	fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
++	if (fd < 0)
++		return NULL;
++	n = read(fd, buf, sizeof(buf) - 1);
++	close(fd);
++	if (n <= 0)
++		return NULL;
++	buf[n] = '\0';
++	buf[strcspn(buf, "\r\n")] = '\0';
++	return WDMValidUserName(buf) ? xstrdup(buf) : NULL;
++}
+diff --git a/src/wdm/Greet.c b/src/wdm/Greet.c
+index 31400ef..efbed5e 100644
+--- a/src/wdm/Greet.c
++++ b/src/wdm/Greet.c
+@@ -134,6 +134,7 @@ extern char *wdmHalt;
+ extern int   wdmRoot;
+ extern int   wdmVerify;
+ extern int   wdmAnimations;
++extern int   wdmUserList;
+ extern char *wdmLocale;
+ extern char *wdmLoginConfig;
+ extern char *wdmCursorTheme;
+@@ -315,6 +316,8 @@ static int InitGreet (struct display *d)
+ 		argv[argc++] = wstrconcat("-c", wdmLoginConfig);
+ 	if(wdmAnimations)
+ 		argv[argc++] = "-a";
++	if(wdmUserList)
++		argv[argc++] = "-L";	/* list of users instead of the text field */
+ 	if(wdmXineramaHead)
+ 	{
+ 		argv[argc] = wmalloc(25); /* much more than length of 64bit integer 
+diff --git a/src/wdm/resource.c b/src/wdm/resource.c
+index 739e827..2c796b5 100644
+--- a/src/wdm/resource.c
++++ b/src/wdm/resource.c
+@@ -104,6 +104,7 @@ char	*wdmWaylandSession;	/* wrapper that runs a Wayland session */
+ char	*wdmDefaultSession;	/* session preselected in wdmLogin ("big-wm") */
+ char	*wdmSessionStateDir;	/* last session of each user */
+ char	*wdmRunDir;		/* runtime state (failed session notices) */
++int_resource	wdmUserList;	/* wdmLogin shows a list of the users */
+ 
+ # define DM_STRING	0
+ # define DM_INT		1
+@@ -414,6 +415,8 @@ struct dmResources wdmResources[] = {
+ 				"/var/lib/wdm/sessions"} ,
+ { "wdmRunDir",	"WdmRunDir",	DM_STRING,	&wdmRunDir,
+ 				"/run/wdm"} ,
++{ "wdmUserList",	"WdmUserList",	DM_BOOL,	&wdmUserList.c,
++				"true"} ,
+ };
+ 
+ # define NUM_WDM_RESOURCES	(sizeof wdmResources/\
+diff --git a/src/wdm/session.c b/src/wdm/session.c
+index 1f1a773..3906523 100644
+--- a/src/wdm/session.c
++++ b/src/wdm/session.c
+@@ -68,6 +68,7 @@ from The Open Group.
+ 
+ #include <wdmlib.h>
+ #include <wdmsessions.h>
++#include <wdmusers.h>
+ 
+ #include <fcntl.h>
+ #include <string.h>
+@@ -461,6 +462,8 @@ ManageSession (struct display *d)
+ 
+     if (greet_stat == Greet_Success)
+     {
++	if (wdmSessionStateDir && *wdmSessionStateDir)
++	    WDMSaveLastUser (wdmSessionStateDir, greet.name);	/* preselected in the list */
+ 	if (verify.sessionKey && wdmSessionStateDir && *wdmSessionStateDir) {
+ 	    previousKey = WDMLoadUserSession (wdmSessionStateDir, greet.name);
+ 	    savedKey = WDMSaveUserSession (wdmSessionStateDir, greet.name, verify.sessionKey);
+diff --git a/src/wdmLogin/Login.c b/src/wdmLogin/Login.c
+index 95826fa..283b44a 100644
+--- a/src/wdmLogin/Login.c
++++ b/src/wdmLogin/Login.c
+@@ -24,6 +24,7 @@
+ #include <wdmlib.h>
+ #include <wdmLogin.h>
+ #include <wdmsessions.h>
++#include <wdmusers.h>
+ #include <errno.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -74,6 +75,7 @@ static int WmDefUser = False;	/* default username */
+ 
+ static char *helpArg = NULL;
+ static char *HelpMsg = N_("Keyboard shortcuts:\n"
++	"  Up/Down, Home/End, first letters: choose the user in the list\n"
+ 	"  Enter: next field, log in or run the selected option\n"
+ 	"  Tab: switch between login name and password\n"
+ 	"  Esc: start over\n"
+@@ -93,6 +95,7 @@ typedef struct LoginPanel
+ 	WMFrame *authF;
+ 	WMLabel *welcomeMsg1, *welcomeMsg2;
+ 	WMTextField *entryText;
++	WMPopUpButton *userBtn;	/* list of users, in place of entryText */
+ 	WMLabel *entryLabel;
+ 	WMFrame *msgF;
+ 	WMLabel *msgL;
+@@ -165,6 +168,16 @@ static char *defaultSession = NULL;
+ static char *sessionStateDir = NULL;
+ static char *noticeArg = NULL;
+ static int reply_fd = -1;	/* wdm -> wdmLogin: why the login failed */
++
++/* -L: list of users (popup) instead of the text field for the name.  The
++ * last item, "Other...", goes back to the text field (LDAP, hidden
++ * accounts); Esc returns to the list. */
++static int userListArg = False;
++static WDMUserList *users = NULL;
++static int otherUser = False;
++static int defaultSessionIndex = 0;
++static char typeAhead[32];
++static Time typeAheadTime = 0;
+ static int xkb_event_base = -1;
+ static WDMSessionList *sessions = NULL;
+ static int sessionTouched = False;	/* user picked a session by hand */
+@@ -343,6 +356,7 @@ SetupSessions()
+ 		if(sessions->items[i].type == WDM_SESSION_X11)
+ 			def = i;
+ 	WmOptionCode = def < 0 ? 0 : def;
++	defaultSessionIndex = WmOptionCode;
+ 	return True;
+ }
+ 
+@@ -358,6 +372,8 @@ SelectUserSession(const char *user)
+ 	key = WDMLoadUserSession(sessionStateDir, user);
+ 	idx = FindSessionIndex(key);
+ 	free(key);
++	if(idx < 0 && users)
++		idx = defaultSessionIndex;	/* list: do not keep the last user's */
+ 	if(idx >= 0)
+ 	{
+ 		WmOptionCode = idx;
+@@ -413,7 +429,7 @@ LoginArgs(int argc, char *argv[])
+ 	int c;
+ 
+ 
+-	while((c = getopt(argc, argv, "asb:d:h:l:uw:c:x:f:X:W:D:R:e:r:")) != -1)
++	while((c = getopt(argc, argv, "asb:d:h:l:uLw:c:x:f:X:W:D:R:e:r:")) != -1)
+ 	{
+ 		switch (c)
+ 		{
+@@ -456,6 +472,9 @@ LoginArgs(int argc, char *argv[])
+ 		case 'R':	/* directory with the last session of each user */
+ 			sessionStateDir = optarg;
+ 			break;
++		case 'L':	/* list of users */
++			userListArg = True;
++			break;
+ 		case 'r':	/* file descriptor with failure details from wdm */
+ 			reply_fd = strtol(optarg, NULL, 0);
+ 			if(reply_fd < 3)
+@@ -557,12 +576,65 @@ PrintInfoMsg(LoginPanel * panel, char *msg)
+ 
+ /*###################################################################*/
+ 
++/* First line of the welcome text: "Welcome to" while the name is asked,
++ * the user ("Real Name (login)") while the password is asked. */
++static void
++SetWelcome(const char *text)
++{
++	int size;
++	WMFont *font = NULL;
++
++	for(size = 18; size >= 10; size -= 2)
++	{
++		font = WMBoldSystemFontOfSize(panel->scr, size);
++		if(!font || WMWidthOfString(font, text, strlen(text)) <= WMWidgetWidth(panel->welcomeMsg1) - 6)
++			break;
++		WMReleaseFont(font);
++		font = NULL;
++	}
++	if(!font)
++		font = WMBoldSystemFontOfSize(panel->scr, 10);
++	if(font)
++	{
++		WMSetLabelFont(panel->welcomeMsg1, font);
++		WMReleaseFont(font);
++	}
++	WMSetLabelText(panel->welcomeMsg1, (char *) text);
++}
++
+ static void
+ init_pwdfield(char *pwd)
+ {
++	if(LoginName && *LoginName)
++	{
++		int i = WDMFindUser(users, LoginName);
++
++		SetWelcome(i >= 0 ? users->items[i].label : LoginName);
++	}
+ 	WMSetTextFieldText(panel->entryText, pwd);
+ 	WMSetTextFieldSecure(panel->entryText, True);
+ 	WMSetLabelText(panel->entryLabel, _("Password:"));
++	if(panel->userBtn)
++		WMUnmapWidget(panel->userBtn);
++	WMMapWidget(panel->entryText);
++	WMSetFocusToWidget(panel->entryText);
++}
++
++/* the user list is shown while the name is asked and "Other..." was not
++ * chosen */
++static int
++UsingUserList(void)
++{
++	return panel->userBtn && !otherUser && LoginSwitch == False;
++}
++
++static void
++FocusInput(void)
++{
++	if(UsingUserList())
++		WMSetFocusToWidget(panel->userBtn);
++	else
++		WMSetFocusToWidget(panel->entryText);
+ }
+ 
+ static void
+@@ -571,8 +643,103 @@ init_namefield(char *name)
+ 	WMResizeWidget(panel->entryText, text_width, text_heigth);
+ 	WMSetTextFieldText(panel->entryText, name);
+ 	WMSetLabelText(panel->entryLabel, _("Login name:"));
+-	WMSetFocusToWidget(panel->entryText);
+ 	WMSetTextFieldSecure(panel->entryText, False);
++	SetWelcome(_("Welcome to"));
++	if(panel->userBtn && name && *name && !otherUser)
++	{
++		int idx = WDMFindUser(users, name);
++
++		if(idx >= 0)
++			WMSetPopUpButtonSelectedItem(panel->userBtn, idx);
++		else
++			otherUser = True;	/* typed by hand before */
++	}
++	if(UsingUserList())
++	{
++		WMUnmapWidget(panel->entryText);
++		WMMapWidget(panel->userBtn);
++	}
++	else
++	{
++		if(panel->userBtn)
++			WMUnmapWidget(panel->userBtn);
++		WMMapWidget(panel->entryText);
++	}
++	FocusInput();
++}
++
++/* selected entry of the user list: index in users, or users->count for
++ * "Other..." */
++static int
++SelectedUser(void)
++{
++	int i = WMGetPopUpButtonSelectedItem(panel->userBtn);
++
++	return (i < 0 || i > users->count) ? 0 : i;
++}
++
++static void
++UserSelected(void)
++{
++	int i = SelectedUser();
++
++	if(i < users->count)
++		SelectUserSession(users->items[i].login);	/* F2 follows the user */
++}
++
++static void
++SelectUserIndex(int i)
++{
++	if(i < 0)
++		i = 0;
++	if(i > users->count)
++		i = users->count;
++	WMSetPopUpButtonSelectedItem(panel->userBtn, i);
++	UserSelected();
++}
++
++/* typing the first letters of the login or of the name selects the user */
++static void
++UserTypeAhead(XKeyEvent *ev)
++{
++	char buf[8];
++	KeySym ks;
++	int n, i, l;
++
++	n = XLookupString(ev, buf, sizeof(buf) - 1, &ks, NULL);
++	if(n != 1 || !isprint((unsigned char)buf[0]))
++		return;
++	if(ev->time - typeAheadTime > 1000)
++		typeAhead[0] = '\0';
++	typeAheadTime = ev->time;
++	l = strlen(typeAhead);
++	if(l < (int)sizeof(typeAhead) - 1)
++	{
++		typeAhead[l] = buf[0];
++		typeAhead[l + 1] = '\0';
++	}
++	l = strlen(typeAhead);
++	for(i = 0; i < users->count; i++)
++		if(strncasecmp(users->items[i].login, typeAhead, l) == 0
++		   || strncasecmp(users->items[i].label, typeAhead, l) == 0)
++		{
++			SelectUserIndex(i);
++			return;
++		}
++}
++
++static void
++changeUser(WMWidget * self, LoginPanel * panel)
++{
++	if(SelectedUser() == users->count)
++	{
++		/* "Other...": free text field for the name */
++		otherUser = True;
++		init_namefield("");
++		return;
++	}
++	UserSelected();
++	FocusInput();
+ }
+ 
+ static void
+@@ -596,7 +763,21 @@ PerformLogin(LoginPanel * panel, int canexit)
+ 	{
+ 		if(LoginName)
+ 			wfree(LoginName);
+-		LoginName = WMGetTextFieldText(panel->entryText);
++		LoginName = NULL;
++		if(UsingUserList())
++		{
++			int i = SelectedUser();
++
++			if(i == users->count)
++			{
++				otherUser = True;	/* "Other..." */
++				init_namefield("");
++				return;
++			}
++			LoginName = wstrdup(users->items[i].login);
++		}
++		else
++			LoginName = WMGetTextFieldText(panel->entryText);
+ 
+ 		if((LoginName[0] == '\0') && (WmDefUser == False))
+ 		{
+@@ -664,6 +845,7 @@ goPressed(WMWidget * self, LoginPanel * panel)
+ static void
+ startoverPressed(WMWidget * self, LoginPanel * panel)
+ {
++	otherUser = False;	/* back to the list of users */
+ 	ClearMsgs(panel);
+ 	InitializeLoginInput(panel);
+ }
+@@ -693,7 +875,7 @@ changeWm(WMWidget * self, LoginPanel * panel)
+ {
+ 	WmOptionCode = WMGetPopUpButtonSelectedItem(self);
+ 	sessionTouched = True;
+-	WMSetFocusToWidget(panel->entryText);
++	FocusInput();
+ }
+ 
+ static void
+@@ -703,7 +885,7 @@ changeOption(WMPopUpButton * self, LoginPanel * panel)
+ 
+ 	item = WMGetPopUpButtonSelectedItem(self);
+ 	OptionCode = item;
+-	WMSetFocusToWidget(panel->entryText);
++	FocusInput();
+ }
+ 
+ /* Shows "Caps Lock is on" while the lock is active (XKB state). */
+@@ -780,6 +962,36 @@ handleKeyPress(XEvent * event, void *clientData)
+ 	}
+ 	if(ks == XK_Caps_Lock)
+ 		UpdateCapsLock(panel);
++	if(UsingUserList())
++	{
++		int i = SelectedUser();
++
++		switch(ks)
++		{
++		case XK_Up: case XK_KP_Up:
++			SelectUserIndex(i - 1);
++			return;
++		case XK_Down: case XK_KP_Down:
++			SelectUserIndex(i + 1);
++			return;
++		case XK_Page_Up: case XK_KP_Page_Up:
++			SelectUserIndex(i - 5);
++			return;
++		case XK_Page_Down: case XK_KP_Page_Down:
++			SelectUserIndex(i + 5);
++			return;
++		case XK_Home: case XK_KP_Home:
++			SelectUserIndex(0);
++			return;
++		case XK_End: case XK_KP_End:
++			SelectUserIndex(users->count);
++			return;
++		default:
++			if(!(event->xkey.state & (ControlMask | Mod1Mask)))
++				UserTypeAhead(&event->xkey);
++			break;
++		}
++	}
+ 	switch(ks)
+ 	{
+ 	case XK_Return:
+@@ -1025,6 +1237,24 @@ CreateAuthFrame(LoginPanel * panel)
+ 	WMSetTextFieldText(panel->entryText, "");
+ 	WMSetTextFieldSecure(panel->entryText, False);
+ 
++	if(users)
++	{
++		int i, idx;
++		char *last;
++
++		panel->userBtn = WMCreatePopUpButton(panel->authF);
++		WMMoveWidget(panel->userBtn, 120, y);
++		WMResizeWidget(panel->userBtn, text_width, text_heigth);
++		for(i = 0; i < users->count; i++)
++			WMAddPopUpButtonItem(panel->userBtn, users->items[i].label);
++		WMAddPopUpButtonItem(panel->userBtn, _("Other..."));
++		last = WDMLoadLastUser(sessionStateDir);
++		idx = WDMFindUser(users, last);
++		free(last);
++		WMSetPopUpButtonSelectedItem(panel->userBtn, idx < 0 ? 0 : idx);
++		WMSetPopUpButtonAction(panel->userBtn, (WMAction *) changeUser, panel);
++	}
++
+ 	if(auth_h >= 128)
+ 	{
+ 		WMColor *red;
+@@ -1717,6 +1947,23 @@ main(int argc, char **argv)
+ 
+ 	SetupWm();		/* and init the startup list */
+ 
++	if(userListArg)
++	{
++		WDMUserSources src;
++
++		memset(&src, 0, sizeof(src));
++		src.loginDefs = "/etc/login.defs";
++		src.shells = "/etc/shells";
++		src.accountsDir = "/var/lib/AccountsService/users";
++		src.today = (long)(time(NULL) / 86400);
++		users = WDMReadUsers(&src, 100);
++		if(users->count == 0)
++		{	/* none, or too many to list: text field */
++			WDMFreeUsers(users);
++			users = NULL;
++		}
++	}
++
+ 	WMInitializeApplication(ProgName, &argc, argv);
+ 	scr = WMOpenScreen(displayArg);
+ 	if(!scr)
+@@ -1817,6 +2064,13 @@ main(int argc, char **argv)
+ 
+ 	WMCreateEventHandler(WMWidgetView(panel->entryText), KeyPressMask,
+ 			     handleKeyPress, panel);
++	if(panel->userBtn)
++	{
++		WMCreateEventHandler(WMWidgetView(panel->userBtn), KeyPressMask,
++				     handleKeyPress, panel);
++		init_namefield("");	/* list in place of the text field */
++		UserSelected();		/* session of the preselected user */
++	}
+ 
+ 	exit_request = 0;
+ 	SetupSignals();
