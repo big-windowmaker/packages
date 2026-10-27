@@ -5,19 +5,32 @@
 # Thunar e nos outros aplicativos GTK (GTK_THEME em big-wm-env.sh). O pacote
 # do AUR (gtk-theme-onestepback) parou na 0.991; a origem e os hashes
 # conferem com os do pkgsrc do NetBSD (graphics/onestepback-gtk-theme).
+#
+# O pacote traz também o OneStepBack-Dark, a variação escura usada pelo modo
+# escuro do Big WindowMaker (big-wm-theme dark): gerada aqui a partir do
+# OneStepBack, trocando os cinzas e a cor do texto (dark.sed, dark-gtk2.sed)
+# e reescurecendo as imagens dos controles (setas, caixas, barras de
+# rolagem).
 pkgname=onestepback-gtk-theme
 _name=OneStepBack
 pkgver=0.997
-pkgrel=3
-pkgdesc='GTK 2/3/4 theme with the embossed gray look of NeXTSTEP'
+pkgrel=4
+pkgdesc='GTK 2/3/4 theme with the embossed gray look of NeXTSTEP (light and dark)'
 arch=(any)
 url='http://www.vide.memoire.free.fr/pages/onestepback/onestepback.php'
 license=('GPL-3.0-only')
 optdepends=('gtk-engine-murrine: GTK 2 applications')
+makedepends=('imagemagick')
 source=("http://www.vide.memoire.free.fr/pages/onestepback/${_name}-v${pkgver}.zip"
-        libadwaita.css)
+        libadwaita.css
+        dark.sed
+        dark-gtk2.sed
+        dark.css)
 sha256sums=('b81ea97e74e430a78fef5ac0be7d6894925e08bf38db6d944f9bb11bbdaccb01'
-            'bf04110932c2bee712c92c764bd9464f265e932eb3b53d357ed93bc2ece437a2')
+            'bf04110932c2bee712c92c764bd9464f265e932eb3b53d357ed93bc2ece437a2'
+            '9dbd8987e3efc34653e78f2cedff2cd526b392ae05ef15e5bbacd72e71e74a39'
+            '6e0125d370b9aee537fdd8e1f22844f1df8e7b6c8c8e4eb8ff46ba9b84a2945c'
+            '69d4ba2c166003aab3f64715f026be2e2465daf6a8c9fbee7e06b0a2f5bf03c8')
 
 # Terminais GTK 4 (VTE) transparentes, como o AshyTerm: o VTE pinta o fundo
 # do widget com @text_view_bg numa folha de estilo própria, de prioridade
@@ -57,11 +70,70 @@ prepare() {
   grep -q '^@define-color window_bg_color ' gtk-4.0/gtk.css
 }
 
+# OneStepBack-Dark: cópia do OneStepBack já ajustado (os dois acertos do
+# gtk-4.0 e as cores do libadwaita valem para ela também).
+build() {
+  rm -rf "${_name}-Dark"
+  cp -r "${_name}" "${_name}-Dark"
+  cd "${_name}-Dark"
+  local css
+  for css in gtk-3.0/gtk.css gtk-4.0/gtk.css; do
+    sed -i -f "${srcdir}/dark.sed" "${css}"
+    cat "${srcdir}/dark.css" >> "${css}"
+  done
+  sed -i -f "${srcdir}/dark-gtk2.sed" gtk-2.0/gtkrc
+  sed -i "s/^Name=${_name}\$/Name=${_name}-Dark/; s/^GtkTheme=${_name}\$/GtkTheme=${_name}-Dark/" index.theme
+
+  # Imagens dos controles. Setas, marcas e caixas (desenho preto sobre
+  # cinza-claro) invertem: preto vira #e0e0e0 e o cinza #c8c8c8 das caixas
+  # vira #2b2b2b. Barras de rolagem e separadores (relevo sobre o cinza do
+  # fundo) escurecem: o cinza #a8a8a8 vira #3c3c3c, o preto fica preto e o
+  # branco da luz vira um cinza médio. O canal alfa não muda.
+  local img
+  for img in img/*.png; do
+    case ${img##*/} in
+    scrollbar_* | separator_*)
+      magick "${img}" -channel RGB -fx 'u<0.659 ? u*0.357 : 0.235+(u-0.659)*1.06' "${img}" ;;
+    *)
+      magick "${img}" -channel RGB -fx '0.878-0.905*u' "${img}" ;;
+    esac
+  done
+}
+
+check() {
+  local dark="${srcdir}/${_name}-Dark" css
+  for css in "${dark}"/gtk-3.0/gtk.css "${dark}"/gtk-4.0/gtk.css; do
+    # Cada troca do dark.sed tem de ter achado a linha do tema.
+    grep -qx '@define-color base_color #3c3c3c;' "${css}"
+    grep -qx '@define-color lighter_color #2e2e2e;' "${css}"
+    grep -qx '@define-color darker_color #686868;' "${css}"
+    grep -qx '@define-color osb_fg_color #e0e0e0;' "${css}"
+    grep -qx '@define-color theme_fg_color @osb_fg_color;' "${css}"
+    grep -qx '@define-color menuitem_selected_bg_color #a8a8a8;' "${css}"
+    grep -qx '@define-color inset_lighter_color #6a6a6a;' "${css}"
+    # Nenhum texto preto sobre o fundo escuro.
+    ! grep -Eq '^[[:space:]]*color:[[:space:]]*@black_color;' "${css}"
+  done
+  grep -qx '@define-color window_fg_color @osb_fg_color;' "${dark}/gtk-4.0/gtk.css"
+  ! grep -Eq '@define-color[[:space:]]+text_view_bg' "${dark}/gtk-4.0/gtk.css"
+  grep -qx 'black_color:#e0e0e0' "${dark}/gtk-2.0/gtkrc"
+  grep -qx 'base_color:#3c3c3c' "${dark}/gtk-2.0/gtkrc"
+  [[ $(grep -c '^menuitem_selected_bg_color:#a8a8a8$' "${dark}/gtk-2.0/gtkrc") == 2 ]]
+  grep -qx "GtkTheme=${_name}-Dark" "${dark}/index.theme"
+  # Seta preta do tema claro clara no escuro; fundo da barra escuro.
+  [[ $(magick "${dark}/img/arrow-down.png" -format '%[fx:int(255*maxima.r)]' info:) -ge 200 ]]
+  [[ $(magick "${dark}/img/scrollbar_vertical.png" -format '%[fx:int(255*mean.r)]' info:) -le 90 ]]
+  # O tema claro continua como era.
+  grep -qx '@define-color base_color #a8a8a8;' "${srcdir}/${_name}/gtk-3.0/gtk.css"
+}
+
 package() {
-  cd "${_name}"
-  local dir
-  install -Dm644 -t "${pkgdir}/usr/share/themes/${_name}" index.theme README
-  for dir in gtk-2.0 gtk-3.0 gtk-4.0 img; do
-    install -Dm644 -t "${pkgdir}/usr/share/themes/${_name}/${dir}" "${dir}"/*
+  local theme dir
+  for theme in "${_name}" "${_name}-Dark"; do
+    cd "${srcdir}/${theme}"
+    install -Dm644 -t "${pkgdir}/usr/share/themes/${theme}" index.theme README
+    for dir in gtk-2.0 gtk-3.0 gtk-4.0 img; do
+      install -Dm644 -t "${pkgdir}/usr/share/themes/${theme}/${dir}" "${dir}"/*
+    done
   done
 }

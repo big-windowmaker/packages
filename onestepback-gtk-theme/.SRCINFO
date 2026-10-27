@@ -1,14 +1,21 @@
 pkgbase = onestepback-gtk-theme
-	pkgdesc = GTK 2/3/4 theme with the embossed gray look of NeXTSTEP
+	pkgdesc = GTK 2/3/4 theme with the embossed gray look of NeXTSTEP (light and dark)
 	pkgver = 0.997
-	pkgrel = 3
+	pkgrel = 4
 	url = http://www.vide.memoire.free.fr/pages/onestepback/onestepback.php
 	arch = any
 	license = GPL-3.0-only
+	makedepends = imagemagick
 	optdepends = gtk-engine-murrine: GTK 2 applications
 	source = http://www.vide.memoire.free.fr/pages/onestepback/OneStepBack-v0.997.zip
 	source = libadwaita.css
+	source = dark.sed
+	source = dark-gtk2.sed
+	source = dark.css
 	sha256sums = b81ea97e74e430a78fef5ac0be7d6894925e08bf38db6d944f9bb11bbdaccb01
 	sha256sums = bf04110932c2bee712c92c764bd9464f265e932eb3b53d357ed93bc2ece437a2
+	sha256sums = 9dbd8987e3efc34653e78f2cedff2cd526b392ae05ef15e5bbacd72e71e74a39
+	sha256sums = 6e0125d370b9aee537fdd8e1f22844f1df8e7b6c8c8e4eb8ff46ba9b84a2945c
+	sha256sums = 69d4ba2c166003aab3f64715f026be2e2465daf6a8c9fbee7e06b0a2f5bf03c8
 
 pkgname = onestepback-gtk-theme

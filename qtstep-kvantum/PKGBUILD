@@ -11,17 +11,27 @@
 # screenshots/kvantum.png do projeto (fundo #aaaaaa, campos #aaaaaa,
 # seleção branca). O big-wm-firstrun o escolhe quando o usuário ainda não
 # tem ~/.config/Kvantum/kvantum.kvconfig.
+#
+# Nenhuma das variações do QTStep serve ao modo escuro do Big WindowMaker
+# (big-wm-theme dark): o QTStepDark tem fundo quase preto (#101010) e as
+# outras escuras não são cinza-neutras. O colors.OpenStepDark acrescenta o
+# QTStepOpenStepDark, o OpenStep em cinza-escuro, com as cores do estilo
+# BigWindowMaker-Dark do Window Maker: fundo #3c3c3c, campos #2e2e2e, texto
+# claro, relevo cinza/preto, seleção cinza-clara com texto preto e barra de
+# título preta. É gerado pelo mesmo modelo, como as outras variações.
 pkgname=qtstep-kvantum
 _commit=36dc0d37d7159e3562f370a6a697124e379cf665
 pkgver=0.r23.36dc0d3
-pkgrel=1
+pkgrel=2
 pkgdesc='QTStep: NeXTSTEP/OpenStep/Window Maker look for Qt apps (Kvantum themes and KDE color schemes)'
 arch=(any)
 url='https://github.com/andbgr/QTStep'
 license=('GPL-3.0-only')
 depends=(kvantum)
-source=("QTStep-${_commit}.tar.gz::https://github.com/andbgr/QTStep/archive/${_commit}.tar.gz")
-sha256sums=('5c245ecf71758a1fa87764b0d796b3761ae85abc205fcdd6d401be1eb054e3c3')
+source=("QTStep-${_commit}.tar.gz::https://github.com/andbgr/QTStep/archive/${_commit}.tar.gz"
+        colors.OpenStepDark)
+sha256sums=('5c245ecf71758a1fa87764b0d796b3761ae85abc205fcdd6d401be1eb054e3c3'
+            'aa3f854c1032a5320f88d56e3b55ff0a94084f84743115db27bf925066db6ecb')
 
 build() {
   local src="${srcdir}/QTStep-${_commit}/kvantum/QTStep.source"
@@ -36,7 +46,7 @@ build() {
   done < "${src}/colors"
 
   local colors variant name file
-  for colors in "${src}"/colors.*; do
+  for colors in "${src}"/colors.* "${srcdir}/colors.OpenStepDark"; do
     variant=${colors##*/colors.}
     name="QTStep${variant// /}"
     local -A theme=()
@@ -77,6 +87,15 @@ check() {
   grep -qx 'highlight.color=#ffffff' "${themes}/QTStepOpenStep/QTStepOpenStep.kvconfig"
   # Nenhuma cor do modelo (verde/vermelho/amarelo de marcação) pode sobrar.
   ! grep -q '#ffff80\|#008000\|#800000' "${themes}/QTStepOpenStep/QTStepOpenStep.svg"
+  # Modo escuro: fundo e campos cinza-escuros, texto claro, seleção clara.
+  local dark="${themes}/QTStepOpenStepDark/QTStepOpenStepDark.kvconfig"
+  grep -qx 'window.color=#3c3c3c' "${dark}"
+  grep -qx 'base.color=#2e2e2e' "${dark}"
+  grep -qx 'text.color=#e6e6e6' "${dark}"
+  grep -qx 'window.text.color=#e0e0e0' "${dark}"
+  grep -qx 'highlight.color=#a8a8a8' "${dark}"
+  grep -qx 'highlight.text.color=#000000' "${dark}"
+  ! grep -q '#ffff80\|#008000\|#800000' "${themes}/QTStepOpenStepDark/QTStepOpenStepDark.svg"
 }
 
 package() {

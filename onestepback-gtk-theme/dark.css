@@ -1,0 +1,20 @@
+
+/**********************************************/
+/* Big WindowMaker: OneStepBack-Dark          */
+/**********************************************/
+
+/* Barra de título (fundo preto): o tema claro pinta o texto fora de foco
+ * com o cinza de fundo e os botões com o cinza-claro (fora de foco) e o
+ * cinza de fundo (ponteiro em cima), cores que no modo escuro somem no
+ * preto. */
+headerbar *:backdrop, .titlebar .title:backdrop, .titlebar:backdrop {
+    color: #8a8a8a;
+}
+
+headerbar button:hover {
+    color: #a8a8a8;
+}
+
+headerbar button:backdrop {
+    color: #8a8a8a;
+}

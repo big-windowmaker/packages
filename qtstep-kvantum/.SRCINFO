@@ -1,12 +1,14 @@
 pkgbase = qtstep-kvantum
 	pkgdesc = QTStep: NeXTSTEP/OpenStep/Window Maker look for Qt apps (Kvantum themes and KDE color schemes)
 	pkgver = 0.r23.36dc0d3
-	pkgrel = 1
+	pkgrel = 2
 	url = https://github.com/andbgr/QTStep
 	arch = any
 	license = GPL-3.0-only
 	depends = kvantum
 	source = QTStep-36dc0d37d7159e3562f370a6a697124e379cf665.tar.gz::https://github.com/andbgr/QTStep/archive/36dc0d37d7159e3562f370a6a697124e379cf665.tar.gz
+	source = colors.OpenStepDark
 	sha256sums = 5c245ecf71758a1fa87764b0d796b3761ae85abc205fcdd6d401be1eb054e3c3
+	sha256sums = aa3f854c1032a5320f88d56e3b55ff0a94084f84743115db27bf925066db6ecb
 
 pkgname = qtstep-kvantum
