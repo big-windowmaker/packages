@@ -1,0 +1,35 @@
+From 30ba3a9313a5783a44ea555251d5aa292f9de0d0 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 23:57:53 -0300
+Subject: [PATCH] po/pt_BR: Fix the kill confirmation message
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The message is appended to the window title ("<title> will be forcibly
+closed."), but the Brazilian Portuguese translation was a standalone
+sentence without the leading space, so the dialog showed e.g.
+"big-wm-tabbed-dockA aplicação obrigatoriamente será fechada (kill).".
+---
+ po/pt_BR.po | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/po/pt_BR.po b/po/pt_BR.po
+index e1de719..d69c1a6 100644
+--- a/po/pt_BR.po
++++ b/po/pt_BR.po
+@@ -44,9 +44,9 @@ msgid ""
+ "Any unsaved changes will be lost.\n"
+ "Please confirm."
+ msgstr ""
+-"A aplicação obrigatoriamente será fechada (kill).\n"
++" será fechado à força.\n"
+ "Qualquer mudança não salva será perdida.\n"
+-"Confirme por favor."
++"Confirme, por favor."
+ 
+ #: ../src/appicon.c:585 ../src/dock.c:282 ../src/winmenu.c:125
+ msgid "Kill Application"
+-- 
+2.55.0
+

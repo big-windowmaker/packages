@@ -12,7 +12,7 @@
 pkgname=windowmaker
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
-pkgrel=2
+pkgrel=3
 pkgdesc='X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)'
 arch=(x86_64)
 url='https://www.windowmaker.org/'
@@ -50,9 +50,11 @@ conflicts=(windowmaker-git)
 source=(
   "git+https://github.com/window-maker/wmaker.git#commit=${_commit}"
   0001-setstyle-keep-absolute-texture-paths.patch
+  0002-po-pt_BR-Fix-the-kill-confirmation-message.patch
 )
 sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
-            '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337')
+            '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337'
+            '077b2a6e5274420751a8e9ae40bed7ea3b944e7b0e16d29fbf461afed1d3e685')
 
 prepare() {
   cd wmaker
@@ -69,6 +71,12 @@ prepare() {
   # (".../X.themed//usr/share/backgrounds/x.jpg"): o papel de parede dos
   # temas não carregava. Enviar ao upstream (wmaker-dev@googlegroups.com).
   patch -Np1 -i "${srcdir}/0001-setstyle-keep-absolute-texture-paths.patch"
+
+  # pt_BR: a confirmação de "Matar" é colada ao título da janela ("<título>
+  # will be forcibly closed."), mas a tradução era uma frase solta, sem o
+  # espaço: "big-wm-tabbed-dockA aplicação obrigatoriamente será fechada".
+  # Enviar ao upstream (wmaker-dev@googlegroups.com).
+  patch -Np1 -i "${srcdir}/0002-po-pt_BR-Fix-the-kill-confirmation-message.patch"
 
   # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
   # sed que o Arch faz na 0.96.0 não é necessário aqui.
