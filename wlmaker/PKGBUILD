@@ -82,7 +82,7 @@
 #         definido no build (o clipe do tema Window Maker em SVG)
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=6
+pkgrel=7
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -293,5 +293,14 @@ package() {
     [[ -e $_desktop ]] || continue
     grep -q '^OnlyShowIn=' "$_desktop" ||
       sed -i '0,/^\[Desktop Entry\]$/s//[Desktop Entry]\nOnlyShowIn=wlmaker;/' "$_desktop"
+  done
+
+  # O wlmdock (Dock/Clip) e o próprio wlmaker são partes da sessão, não
+  # aplicativos: abertos pelo rofi ou pelos menus, criavam um segundo Dock
+  # ou um compositor aninhado (visto na VM: dois ladrilhos do logo no Dock).
+  for _desktop in "$pkgdir"/usr/share/applications/{wlmaker,wlmdock}.desktop; do
+    [[ -e $_desktop ]] || continue
+    grep -q '^NoDisplay=' "$_desktop" ||
+      sed -i '0,/^\[Desktop Entry\]$/s//[Desktop Entry]\nNoDisplay=true/' "$_desktop"
   done
 }

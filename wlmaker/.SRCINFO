@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r80.g7481afe
-	pkgrel = 6
+	pkgrel = 7
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
