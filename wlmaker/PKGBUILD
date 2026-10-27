@@ -112,9 +112,11 @@
 #   0073  painéis que ocupam uma borda inteira (o Dock com Abas em "Largura
 #         Total") são arranjados primeiro e vão de ponta a ponta; Clip e
 #         Dock ficam no que sobra
+#   0074  wlmdock não liga mais na libxcb (namcap: "Unused shared library
+#         libxcb.so.1"): carregar a configuração puxava o compositor inteiro
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=9
+pkgrel=10
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -214,6 +216,7 @@ _patches=(
   0071-apps-Lets-wlmclock-follow-the-Theme-preference.patch
   0072-context_menu-Gives-the-menu-keyboard-focus-so-Escape.patch
   0073-layer-Arranges-panels-spanning-a-full-edge-first-lik.patch
+  0074-config-Defines-the-task-list-style-descriptor-with-t.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -288,7 +291,8 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             '802a19b077bec56e2b959d7163a29442ade73adbc29809805c876988f6ff6440'
             'f7eb782d6970f84cb7457cfd6a20215450e8b1dd48517ad4f14eb5ef2839f212'
             '23fe8a291f73dda14486f0777a50e6537c239e94cdba42757dd308822cdbf1da'
-            '4f93b4316533c04f269908b0a6dcdd889422521dc4ed0044bffba4733845781d')
+            '4f93b4316533c04f269908b0a6dcdd889422521dc4ed0044bffba4733845781d'
+            '94c2dff6a504c3c152aa35c61befedb288d0e8f692580d7df78d4ef43ce36da5')
 
 prepare() {
   cd wlmaker

@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r80.g7481afe
-	pkgrel = 9
+	pkgrel = 10
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -93,6 +93,7 @@ pkgbase = wlmaker
 	source = 0071-apps-Lets-wlmclock-follow-the-Theme-preference.patch
 	source = 0072-context_menu-Gives-the-menu-keyboard-focus-so-Escape.patch
 	source = 0073-layer-Arranges-panels-spanning-a-full-edge-first-lik.patch
+	source = 0074-config-Defines-the-task-list-style-descriptor-with-t.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
 	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
@@ -161,5 +162,6 @@ pkgbase = wlmaker
 	sha256sums = f7eb782d6970f84cb7457cfd6a20215450e8b1dd48517ad4f14eb5ef2839f212
 	sha256sums = 23fe8a291f73dda14486f0777a50e6537c239e94cdba42757dd308822cdbf1da
 	sha256sums = 4f93b4316533c04f269908b0a6dcdd889422521dc4ed0044bffba4733845781d
+	sha256sums = 94c2dff6a504c3c152aa35c61befedb288d0e8f692580d7df78d4ef43ce36da5
 
 pkgname = wlmaker
