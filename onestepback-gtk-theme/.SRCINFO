@@ -1,7 +1,7 @@
 pkgbase = onestepback-gtk-theme
 	pkgdesc = GTK 2/3/4 theme with the embossed gray look of NeXTSTEP
 	pkgver = 0.997
-	pkgrel = 1
+	pkgrel = 2
 	url = http://www.vide.memoire.free.fr/pages/onestepback/onestepback.php
 	arch = any
 	license = GPL-3.0-only
