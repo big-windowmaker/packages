@@ -1,0 +1,142 @@
+From 0d1f296c08c91fca5af80040d241cc28931d8b44 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 16:21:37 -0300
+Subject: [PATCH] toplevel_tracker: Adds
+ wlmaker_toplevel_tracker_for_each_app_window.
+
+Finds the windows of an application by its app ID: For a docked icon's
+'Hide', 'Bring Here' and 'Kill', as on Window Maker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/toplevel_tracker.c | 60 ++++++++++++++++++++++++++++++++++++++++++
+ src/toplevel_tracker.h | 23 ++++++++++++++++
+ 2 files changed, 83 insertions(+)
+
+diff --git a/src/toplevel_tracker.c b/src/toplevel_tracker.c
+index 20f5de9..ddc45d5 100644
+--- a/src/toplevel_tracker.c
++++ b/src/toplevel_tracker.c
+@@ -22,6 +22,7 @@
+ 
+ #include <libbase/libbase.h>
+ #include <stdlib.h>
++#include <string.h>
+ #include <wayland-server-core.h>
+ #define WLR_USE_UNSTABLE
+ #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
+@@ -366,13 +367,40 @@ void _wlmaker_toplevel_tracker_handle_display_destroy(
+     _wlmaker_toplevel_tracker_destroy(toplevel_tracker_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++size_t wlmaker_toplevel_tracker_for_each_app_window(
++    struct wlmaker_toplevel_tracker *toplevel_tracker_ptr,
++    const char *app_id_ptr,
++    wlmaker_toplevel_tracker_window_callback_t callback,
++    void *ud_ptr)
++{
++    if (NULL == toplevel_tracker_ptr || NULL == app_id_ptr ||
++        '\0' == *app_id_ptr) return 0;
++    size_t windows = 0;
++    bs_dllist_node_t *dlnode_ptr = toplevel_tracker_ptr->toplevels.head_ptr;
++    while (NULL != dlnode_ptr) {
++        struct wlmaker_toplevel_tracker_handle *handle_ptr = BS_CONTAINER_OF(
++            dlnode_ptr, struct wlmaker_toplevel_tracker_handle, dlnode);
++        // The callback may close the window: Step ahead first.
++        dlnode_ptr = dlnode_ptr->next_ptr;
++        if (NULL == handle_ptr->window_ptr ||
++            NULL == handle_ptr->app_id_ptr ||
++            0 != strcmp(handle_ptr->app_id_ptr, app_id_ptr)) continue;
++        ++windows;
++        if (NULL != callback) callback(handle_ptr->window_ptr, ud_ptr);
++    }
++    return windows;
++}
++
+ /* == Unit Tests =========================================================== */
+ 
+ static void _wlmaker_toplevel_tracker_test_handle(bs_test_t *test_ptr);
++static void _wlmaker_toplevel_tracker_test_app_windows(bs_test_t *test_ptr);
+ 
+ /** Unit test cases. */
+ const bs_test_case_t _wlmaker_toplevel_tracker_test_cases[] = {
+     { true, "handle", _wlmaker_toplevel_tracker_test_handle },
++    { true, "app_windows", _wlmaker_toplevel_tracker_test_app_windows },
+     BS_TEST_CASE_SENTINEL()
+ };
+ 
+@@ -398,4 +426,36 @@ void _wlmaker_toplevel_tracker_test_handle(bs_test_t *test_ptr)
+     wlmaker_toplevel_tracker_handle_destroy(h);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Counts calls, for the test. */
++static void _test_count_window(__UNUSED__ wlmtk_window_t *w, void *ud_ptr)
++{
++    ++*(int*)ud_ptr;
++}
++
++/** Tests finding the windows of an application by app ID. */
++void _wlmaker_toplevel_tracker_test_app_windows(bs_test_t *test_ptr)
++{
++    struct wlmaker_toplevel_tracker tracker = {};
++    struct wlmaker_toplevel_tracker_handle h[3] = {};
++    // Not dereferenced: Just to tell them apart.
++    int windows[3];
++    const char *app_ids[3] = { "firefox", "thunar", "firefox" };
++    for (int i = 0; i < 3; ++i) {
++        h[i].window_ptr = (wlmtk_window_t*)&windows[i];
++        h[i].app_id_ptr = (char*)app_ids[i];
++        bs_dllist_push_back(&tracker.toplevels, &h[i].dlnode);
++    }
++    int calls = 0;
++    BS_TEST_VERIFY_EQ(test_ptr, 2, wlmaker_toplevel_tracker_for_each_app_window(
++                          &tracker, "firefox", _test_count_window, &calls));
++    BS_TEST_VERIFY_EQ(test_ptr, 2, calls);
++    BS_TEST_VERIFY_EQ(test_ptr, 1, wlmaker_toplevel_tracker_for_each_app_window(
++                          &tracker, "thunar", NULL, NULL));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlmaker_toplevel_tracker_for_each_app_window(
++                          &tracker, "", NULL, NULL));
++    BS_TEST_VERIFY_EQ(test_ptr, 0, wlmaker_toplevel_tracker_for_each_app_window(
++                          &tracker, NULL, NULL, NULL));
++}
++
+ /* == End of toplevel_tracker.c ============================================ */
+diff --git a/src/toplevel_tracker.h b/src/toplevel_tracker.h
+index f65dbd4..25e3276 100644
+--- a/src/toplevel_tracker.h
++++ b/src/toplevel_tracker.h
+@@ -77,6 +77,29 @@ bool wlmaker_toplevel_tracker_handle_set_app_id(
+     struct wlmaker_toplevel_tracker_handle *handle_ptr,
+     const char *title_ptr);
+ 
++/** Callback for @ref wlmaker_toplevel_tracker_for_each_app_window. */
++typedef void (*wlmaker_toplevel_tracker_window_callback_t)(
++    wlmtk_window_t *window_ptr,
++    void *ud_ptr);
++
++/**
++ * Calls `callback` for each window of the application `app_id_ptr`: The
++ * toplevels with that app ID. Like Window Maker's application, for the
++ * docked icon's "Hide", "Bring Here" and "Kill".
++ *
++ * @param toplevel_tracker_ptr
++ * @param app_id_ptr          Neither NULL nor empty, else nothing matches.
++ * @param callback            May be NULL, to just count.
++ * @param ud_ptr
++ *
++ * @return Number of windows.
++ */
++size_t wlmaker_toplevel_tracker_for_each_app_window(
++    struct wlmaker_toplevel_tracker *toplevel_tracker_ptr,
++    const char *app_id_ptr,
++    wlmaker_toplevel_tracker_window_callback_t callback,
++    void *ud_ptr);
++
+ /** Toplevel tracker test set. */
+ extern const bs_test_set_t wlmaker_toplevel_tracker_test_set;
+ 
+-- 
+2.55.0
+
