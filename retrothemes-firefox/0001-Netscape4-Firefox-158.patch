@@ -1,0 +1,1544 @@
+From c1493ef72d92b36af41c23ed5ef61ace4a4fa420 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 22:55:09 -0300
+Subject: [PATCH] Netscape4: adapta o tema ao Firefox 158
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+O tema foi feito para o Firefox ~103 (2022). No Firefox 158 só os ícones
+ainda funcionavam: vários seletores deixaram de existir e um seletor
+inválido descarta a regra inteira. O que mudou:
+
+- colors.css: paleta do Netscape fixa (cinza #c0c0c0, texto preto, menu
+  #efefef, aba ativa azul-claro), porque o Firefox não usa mais as cores
+  do tema GTK nas barras e segue o modo escuro do sistema.
+- userChrome.css: color-scheme claro e as variáveis do próprio Firefox
+  (--toolbox-*, --toolbar-*, --toolbar-field-*, --arrowpanel-*) apontando
+  para a paleta; importa o novo menus.css.
+- toolbars.css: seletores novos para a barra de navegação, a de
+  favoritos (:-moz-lwtheme não existe mais) e a de menus, que fica sempre
+  visível (com browser.tabs.inTitlebar=0 o Firefox a esconde no Linux);
+  linhas separadoras escuras/brancas como no screenshot; abas no rodapé
+  da janela com position: fixed e espaço reservado sob #browser (o
+  #browser-bottombox foi removido), sem rodapé em pop-ups, tela cheia e
+  com espaço também no modo Personalizar; barra lateral sem cantos
+  arredondados.
+- tabs.css: as abas são desenhadas em .tab-background com a borda em
+  relevo do Netscape; aba ativa afundada com o degradê azul.
+- urlbar.css: .urlbar-background / .urlbar-input-container (antes ids),
+  caixa branca com o botão de lista do Netscape, sem a expansão e sem os
+  cantos arredondados do novo campo; o campo ocupa a barra toda; lista de
+  sugestões com seleção azul e sem rótulos de grupo.
+- statusbar.css: o texto de status agora é #statuspanel-label (o
+  #statuspanel-inner sumiu), com fundo cinza e borda preta.
+- icons.css: :-moz-any() trocado por :is(); removidos -moz-box-*,
+  :-moz-lwtheme e #main-window[uidensity]; o rótulo "Voltar" ao lado do
+  botão volta a aparecer na densidade normal.
+- menus.css (novo): menus, menus de contexto e dicas com fundo claro,
+  borda preta e seleção azul, sem cantos arredondados.
+- bookmarkpanel.css: declara o namespace html (as regras html| eram
+  descartadas) e dá relevo aos botões e campos do painel "Adicionar
+  favorito".
+- findbar.css: barra de localizar cinza.
+
+Somente CSS: os diretórios JS/ e utils/ (fx-autoconfig) não são usados.
+---
+ Netscape4/chrome/bookmarkpanel.css |  44 ++++
+ Netscape4/chrome/colors.css        |  36 ++-
+ Netscape4/chrome/findbar.css       |   3 +-
+ Netscape4/chrome/icons.css         | 158 +++---------
+ Netscape4/chrome/menus.css         |  68 +++++
+ Netscape4/chrome/statusbar.css     |  83 ++----
+ Netscape4/chrome/tabs.css          | 180 +++++++------
+ Netscape4/chrome/toolbars.css      | 213 ++++++++++-----
+ Netscape4/chrome/urlbar.css        | 398 ++++++++++++++---------------
+ Netscape4/chrome/userChrome.css    |  34 ++-
+ 10 files changed, 668 insertions(+), 549 deletions(-)
+ create mode 100644 Netscape4/chrome/menus.css
+
+diff --git a/Netscape4/chrome/bookmarkpanel.css b/Netscape4/chrome/bookmarkpanel.css
+index 9aea371..61d179b 100644
+--- a/Netscape4/chrome/bookmarkpanel.css
++++ b/Netscape4/chrome/bookmarkpanel.css
+@@ -1,3 +1,7 @@
++/* Firefox 158: the html| selectors below need this namespace (it was
++ * missing, so those rules were dropped). */
++@namespace html url("http://www.w3.org/1999/xhtml");
++
+ /* Bookmark panel ui */
+ 
+ #editBookmarkPanel {
+@@ -144,3 +148,43 @@ menupopup,
+ 
+ 
+ 
++
++/* Firefox 158: the panel inputs and the footer buttons (.footer-button in a
++ * moz-button-group) replaced #editBookmarkPanelRows/BottomButtons. */
++#editBookmarkPanel input,
++#editBookmarkPanel menulist {
++  border-radius: 0px !important;
++  border: 1px solid var(--border_bg) !important;
++  outline: none !important;
++  box-shadow: none !important;
++  background-color: var(--input_bg) !important;
++  color: var(--input_fg) !important;
++}
++
++#editBookmarkPanel menulist {
++  background-color: var(--button_bg) !important;
++}
++
++#editBookmarkPanel .footer-button,
++#editBookmarkPanel .panel-button {
++  min-height: 24px !important;
++  background: var(--button_bg) !important;
++  color: var(--button_fg) !important;
++  font-weight: normal !important;
++  outline: none !important;
++  border-radius: 0px !important;
++  padding: 2px 8px !important;
++  border: 3px solid !important;
++  border-image: url("image/toolbarbutton.png") 3 !important;
++}
++
++#editBookmarkPanel .footer-button:hover:active,
++#editBookmarkPanel .panel-button:hover:active {
++  border-image: url("image/toolbarbutton_pressed.png") 3 !important;
++}
++
++#editBookmarkPanel .footer-button:focus-visible,
++#editBookmarkPanel .footer-button[default] {
++  outline: 1px dotted var(--border_bg) !important;
++  outline-offset: -5px !important;
++}
+diff --git a/Netscape4/chrome/colors.css b/Netscape4/chrome/colors.css
+index 41191a4..1eaba98 100644
+--- a/Netscape4/chrome/colors.css
++++ b/Netscape4/chrome/colors.css
+@@ -1,14 +1,24 @@
++/* Netscape 4 palette.
++ * Firefox 158 no longer takes the toolbar colors from the GTK theme (and
++ * follows the system dark mode), so the gray of the original screenshots is
++ * spelled out here instead of using the Window/WindowText system colors. */
+ :root {
+-  --selected_fg: HighlightText;
+-  --selected_bg: Highlight;
+-  --bg_color: Window;
+-  --fg_color: WindowText;
+-  --button_bg: --var(--bg_color); /*#c3c3c3;*/
+-  --button_fg: ButtonText;
+-  --menu_fg: MenuText;
+-  --menu_bg: Menu;
+-  --border_bg: WindowText;
+-  --canvas_bg: Canvas;
+-  --input_bg: Field;
+-  --input_fg: FieldText;
+-}
+\ No newline at end of file
++  --selected_fg: #000000;
++  --selected_bg: #9abae1;
++  --bg_color: #c0c0c0;
++  --fg_color: #000000;
++  --button_bg: #c0c0c0;
++  --button_fg: #000000;
++  --menu_fg: #000000;
++  --menu_bg: #efefef;
++  --menubar_bg: #efefef;
++  --border_bg: #000000;
++  --shadow_color: #808080;
++  --light_color: #ffffff;
++  --canvas_bg: #ffffff;
++  --input_bg: #ffffff;
++  --input_fg: #000000;
++  --disabled_fg: #808080;
++  --tab_selected_bg: linear-gradient(#9abae1, #c0c0c0);
++  --bottombar_height: 29px;
++}
+diff --git a/Netscape4/chrome/findbar.css b/Netscape4/chrome/findbar.css
+index 32a4bc9..ccb70c2 100644
+--- a/Netscape4/chrome/findbar.css
++++ b/Netscape4/chrome/findbar.css
+@@ -3,7 +3,8 @@ findbar {
+     padding: 3px !important;
+     padding-left: 0px !important;
+     padding-right: 0px !important;
+-    background-color: var(--menu_bg) !important;
++    background-color: var(--bg_color) !important;
++    color: var(--fg_color) !important;
+     border-top: 1px solid ThreeDShadow;
+     min-width: 1px;
+     transition-duration: 0s !important;
+diff --git a/Netscape4/chrome/icons.css b/Netscape4/chrome/icons.css
+index 7457065..1d1bac0 100644
+--- a/Netscape4/chrome/icons.css
++++ b/Netscape4/chrome/icons.css
+@@ -1,104 +1,41 @@
+-/* Unset default button borders and backgrounds */
+-#main-window:not([customizing]) #nav-bar .toolbarbutton-1[disabled=true]:-moz-any([open],[checked],:hover:active,:active) > .toolbarbutton-icon,
+-#main-window:not([customizing]) #nav-bar .toolbarbutton-1[disabled=true]:-moz-any([open],[checked],:hover:active,:active) > .toolbarbutton-text,
+-#main-window:not([customizing]) #nav-bar .toolbarbutton-1[disabled=true]:-moz-any([open],[checked],:hover:active,:active) > .toolbarbutton-badge-stack,
+-#nav-bar toolbarbutton[type="menu-button"] .toolbarbutton-icon,
+-#nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-button[open] + .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#nav-bar .toolbarbutton-1[open] > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
+-#nav-bar .toolbarbutton-1[open] > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#nav-bar .toolbarbutton-1:not([checked]):not([open]):not(:active) > .toolbarbutton-icon,
+-#nav-bar .toolbarbutton-1:not([checked]):not([open]):not(:active) > .toolbarbutton-text,
+-#nav-bar .toolbarbutton-1:not([checked]):not([open]):not(:active) > .toolbarbutton-badge-stack,
+-#nav-bar .toolbarbutton-1:not([buttonover]):not([open]):not(:active) > .toolbarbutton-menubutton-dropmarker:not([disabled]) > .dropmarker-icon,
+-#nav-bar .toolbarbutton-1:not([disabled=true]) > .toolbarbutton-menubutton-button[open] + .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any(:hover,[open]) > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
+-#nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any(:hover,[open]) > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#nav-bar .toolbarbutton-1:not([disabled=true]):not([checked]):not([open]):not(:active):hover > .toolbarbutton-icon,
+-#nav-bar .toolbarbutton-1:not([disabled=true]):not([checked]):not([open]):not(:active):hover > .toolbarbutton-text,
+-#nav-bar .toolbarbutton-1:not([disabled=true]):not([checked]):not([open]):not(:active):hover > .toolbarbutton-badge-stack,
+-#nav-bar .toolbarbutton-1:not([buttonover]):not([open]):not(:active):hover > .toolbarbutton-menubutton-dropmarker:not([disabled]) > .dropmarker-icon,
+-#nav-bar toolbarbutton[type="menu"][open]:not([disabled]) .toolbarbutton-icon,
+-#nav-bar toolbarbutton[type="menu-button"]:not([open]):hover:not([disabled]):active .toolbarbutton-icon,
+-#nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-button:not([disabled=true]):-moz-any(:hover:active,:active, [open]) > .toolbarbutton-icon,
+-#nav-bar .toolbarbutton-1[open] > .toolbarbutton-menubutton-dropmarker:not([disabled=true]) > .dropmarker-icon,
+-#nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any([open],[checked],:hover:active,:active) > .toolbarbutton-icon,
+-#nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any([open],[checked],:hover:active,:active) > .toolbarbutton-text,
+-#nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any([open],[checked],:hover:active,:active) > .toolbarbutton-badge-stack,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext:not([customizing]) #nav-bar .toolbarbutton-1[disabled=true]:-moz-any([open],[checked],:hover:active,:active) > .toolbarbutton-icon,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext:not([customizing]) #nav-bar .toolbarbutton-1[disabled=true]:-moz-any([open],[checked],:hover:active,:active) > .toolbarbutton-text,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext:not([customizing]) #nav-bar .toolbarbutton-1[disabled=true]:-moz-any([open],[checked],:hover:active,:active) > .toolbarbutton-badge-stack,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar toolbarbutton[type="menu-button"] .toolbarbutton-icon,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-button[open] + .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1[open] > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1[open] > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1:not([checked]):not([open]):not(:active) > .toolbarbutton-icon,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1:not([checked]):not([open]):not(:active) > .toolbarbutton-text,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1:not([checked]):not([open]):not(:active) > .toolbarbutton-badge-stack,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1:not([buttonover]):not([open]):not(:active) > .toolbarbutton-menubutton-dropmarker:not([disabled]) > .dropmarker-icon,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1:not([disabled=true]) > .toolbarbutton-menubutton-button[open] + .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any(:hover,[open]) > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1:not([disabled=true]):-moz-any(:hover,[open]) > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1:not([disabled=true]):not([checked]):not([open]):not(:active):hover > .toolbarbutton-icon,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1:not([disabled=true]):not([checked]):not([open]):not(:active):hover > .toolbarbutton-text,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1:not([disabled=true]):not([checked]):not([open]):not(:active):hover > .toolbarbutton-badge-stack,
+-#main-window:not([style*='--lwt-header-image']):-moz-lwtheme:-moz-lwtheme-brighttext #nav-bar .toolbarbutton-1:not([buttonover]):not([open]):not(:active):hover > .toolbarbutton-menubutton-dropmarker:not([disabled]) > .dropmarker-icon ,
+-#main-window:not([customizing]) #toolbar-menubar .toolbarbutton-1[disabled=true]:-moz-any([open],[checked],:hover:active,:active),
+-#toolbar-menubar toolbarbutton[type="menu-button"],
+-#toolbar-menubar .toolbarbutton-1 > .toolbarbutton-menubutton-button[open] + .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#toolbar-menubar .toolbarbutton-1[open] > .toolbarbutton-menubutton-button,
+-#toolbar-menubar .toolbarbutton-1[open] > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#toolbar-menubar .toolbarbutton-1:not([checked]):not([open]):not(:active),
+-#toolbar-menubar .toolbarbutton-1:not([buttonover]):not([open]):not(:active) > .toolbarbutton-menubutton-dropmarker:not([disabled]) > .dropmarker-icon,
+-#toolbar-menubar .toolbarbutton-1:not([disabled=true]) > .toolbarbutton-menubutton-button[open] + .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#toolbar-menubar .toolbarbutton-1:not([disabled=true]):-moz-any(:hover,[open]) > .toolbarbutton-menubutton-button ,
+-#toolbar-menubar .toolbarbutton-1:not([disabled=true]):-moz-any(:hover,[open]) > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+-#toolbar-menubar .toolbarbutton-1:not([disabled=true]):not([checked]):not([open]):not(:active):hover,
+-#toolbar-menubar .toolbarbutton-1:not([buttonover]):not([open]):not(:active):hover > .toolbarbutton-menubutton-dropmarker:not([disabled]) > .dropmarker-icon,
+-#toolbar-menubar toolbarbutton[type="menu"][open]:not([disabled]),
+-#toolbar-menubar toolbarbutton[type="menu-button"]:not([open]):hover:not([disabled]):active ,
+-#toolbar-menubar .toolbarbutton-1 > .toolbarbutton-menubutton-button:not([disabled=true]):-moz-any(:hover:active,:active,[open]),
+-#toolbar-menubar .toolbarbutton-1[open] > .toolbarbutton-menubutton-dropmarker:not([disabled=true]) > .dropmarker-icon,
+-#toolbar-menubar .toolbarbutton-1:not([disabled=true]):-moz-any([open],[checked],:hover:active,:active),
+-#TabsToolbar .toolbarbutton-1 .toolbarbutton-badge-stack,
+-#TabsToolbar .toolbarbutton-1 .toolbarbutton-1 {
++/* Unset default button borders and backgrounds.
++ * Firefox 158: the old list relied on :-moz-any(), :-moz-lwtheme and the
++ * menu-button dropmarkers, which are all gone (one invalid selector dropped
++ * the whole rule); the button hover/active fills are now set through
++ * --toolbarbutton-*-background in userChrome.css. */
++toolbar .toolbarbutton-1 > :is(.toolbarbutton-icon, .toolbarbutton-text, .toolbarbutton-badge-stack),
++toolbar toolbaritem .toolbarbutton-1 > :is(.toolbarbutton-icon, .toolbarbutton-text, .toolbarbutton-badge-stack) {
+   background: unset !important;
+-  background-color: unset !important;
+-  border-color: unset !important;
+   box-shadow: unset !important;
+   transition: unset !important;
++  outline: none !important;
+ }
+ 
+-toolbar:not(#TabsToolbar) .toolbarbutton-1 .toolbarbutton-badge-stack,
+-toolbar:not(#TabsToolbar) toolbaritem .toolbarbutton-1,
+-toolbar:not(#TabsToolbar) .toolbarbutton-1,
+-toolbar:not(#TabsToolbar) .toolbarbutton-1[type="menu-button"] toolbarbutton,
+-toolbar:not(#TabsToolbar) toolbaritem .toolbarbutton-1 :-moz-any(.toolbarbutton-icon, .toolbarbutton-text),
+-toolbar:not(#TabsToolbar) .toolbarbutton-1 :-moz-any(.toolbarbutton-icon, .toolbarbutton-text),
+-toolbar:not(#TabsToolbar) .toolbarbutton-1[type="menu-button"] toolbarbutton :-moz-any(.toolbarbutton-icon, .toolbarbutton-text){
+-  background: unset !important;
+-  box-shadow: unset !important;
++toolbar .toolbarbutton-1 {
++  color: var(--fg_color) !important;
+ }
+ 
+-/* Buttons to put text next to icons */
+-#navigator-toolbox toolbar#nav-bar.browser-toolbar #back-button > .toolbarbutton-text,
+-#navigator-toolbox toolbar#nav-bar.browser-toolbar #find-button > .toolbarbutton-text,
+-#navigator-toolbox toolbar#nav-bar.browser-toolbar #reload-button > .toolbarbutton-text,
+-#navigator-toolbox toolbar#nav-bar.browser-toolbar #stop-button > .toolbarbutton-text,
+-#navigator-toolbox toolbar#nav-bar.browser-toolbar #library-button > .toolbarbutton-text,
+-#navigator-toolbox toolbar#nav-bar.browser-toolbar #history-panelmenu > .toolbarbutton-text {
++/* Text label next to the Back button (Netscape 4 screenshot), hidden in the
++ * compact density.  display:-moz-box no longer exists. */
++#nav-bar #back-button > .toolbarbutton-text,
++#nav-bar #find-button > .toolbarbutton-text,
++#nav-bar #library-button > .toolbarbutton-text,
++#nav-bar #history-panelmenu > .toolbarbutton-text {
+   font-family: sans-serif !important;
+-  display: -moz-box !important;
++  display: flex !important;
++  align-items: center !important;
++  min-height: unset !important;
++  padding: 0px 2px 0px 0px !important;
+   margin-left: -3px !important;
+-  -moz-box-pack: center !important;
++  color: var(--fg_color) !important;
++}
++
++#nav-bar :is(#back-button, #find-button, #library-button, #history-panelmenu) {
++  flex-direction: row !important;
+ }
+ 
+-#main-window[uidensity="compact"] #back-button > .toolbarbutton-text,
+-#main-window[uidensity="compact"] #find-button > .toolbarbutton-text,
+-#main-window[uidensity="compact"] #reload-button > .toolbarbutton-text,
+-#main-window[uidensity="compact"] #stop-button > .toolbarbutton-text,
+-#main-window[uidensity="compact"] #library-button > .toolbarbutton-text,
+-#main-window[uidensity="compact"] #history-panelmenu > .toolbarbutton-text {
+-  display:none !important;
++:root[uidensity="compact"] #nav-bar :is(#back-button, #find-button, #library-button, #history-panelmenu) > .toolbarbutton-text {
++  display: none !important;
+ }
+ 
+ .toolbarbutton-1[disabled] > .toolbarbutton-text {
+@@ -107,7 +44,7 @@ toolbar:not(#TabsToolbar) .toolbarbutton-1[type="menu-button"] toolbarbutton :-m
+ }
+ 
+ /* Set icon padding for all buttons */
+-:-moz-any(#back-button,#forward-button,#home-button,#stop-button,#reload-button,#bookmarks-menu-button,#history-panelmenu,
++:is(#back-button,#forward-button,#home-button,#stop-button,#reload-button,#bookmarks-menu-button,#history-panelmenu,
+         #privatebrowsing-button,#find-button,#print-button,#fullscreen-button,#developer-button,
+ 	#preferences-button,#cut-button,#copy-button,#paste-button,#zoom-out-button,#zoom-in-button,
+ 	#tabview-button,#email-link-button,#sidebar-button,#web-apps-button,#webide-button,#developer-button,#containers-panelmenu,
+@@ -115,7 +52,7 @@ toolbar:not(#TabsToolbar) .toolbarbutton-1[type="menu-button"] toolbarbutton :-m
+   padding: 3px !important;
+ }
+ 
+-#main-window[uidensity="compact"] :-moz-any(#back-button,#forward-button,#home-button,#stop-button,#reload-button,#bookmarks-menu-button,#history-panelmenu,
++:root[uidensity="compact"] :is(#back-button,#forward-button,#home-button,#stop-button,#reload-button,#bookmarks-menu-button,#history-panelmenu,
+ #privatebrowsing-button,#find-button,#print-button,#fullscreen-button,#developer-button,
+ #preferences-button,#cut-button,#copy-button,#paste-button,#zoom-out-button,#zoom-in-button,
+ #tabview-button,#email-link-button,#sidebar-button,#web-apps-button,#webide-button,#developer-button,#containers-panelmenu,
+@@ -153,7 +90,7 @@ padding: 2px !important;
+   background-color: inherit !important;
+ }
+ 
+-#main-window #PersonalToolbar toolbarbutton:hover {
++#PersonalToolbar toolbarbutton:hover {
+   background-color: var(--button_bg) !important;
+   border-radius: 2px !important;
+   border: 3px solid !important;
+@@ -161,15 +98,15 @@ padding: 2px !important;
+   border-image-slice: 3 3 3 3 !important; }
+ 
+ 
+-#main-window #PersonalToolbar toolbarbutton:active {
++#PersonalToolbar toolbarbutton:active {
+   background-color: var(--button_bg) !important;
+   border-radius: 2px !important;
+   border: 3px solid !important;
+   border-image: url("image/toolbarbutton_pressed.png") !important;
+   border-image-slice: 3 3 3 3 !important; }
+ 
+-#main-window #PersonalToolbar:hover toolbarbutton .label,
+-#main-window #PersonalToolbar:active toolbarbutton .label {
++#PersonalToolbar:hover toolbarbutton .label,
++#PersonalToolbar:active toolbarbutton .label {
+   background-color: var(--button_bg) !important;
+ }
+ 
+@@ -275,19 +212,6 @@ toolbar .toolbarbutton-1[type="menu-button"] toolbarbutton[disabled] .toolbarbut
+   opacity: 0.6 !important;
+ }
+ 
+-/* Move text next to icons in compact mode, under icons in normal mode. */
+-#main-window[uidensity="compact"] toolbar:not(#TabsToolbar) toolbaritem .toolbarbutton-1:not([type="menu-button"]),
+-#main-window[uidensity="compact"] toolbar:not(#TabsToolbar) .toolbarbutton-1:not([type="menu-button"]),
+-#main-window[uidensity="compact"] toolbar:not(#TabsToolbar) .toolbarbutton-1[type="menu-button"] toolbarbutton{
+-  -moz-box-orient: horizontal !important;
+-}
+-
+-#main-window:not([uidensity="compact"]) toolbar:not(#TabsToolbar) toolbaritem .toolbarbutton-1:not([type="menu-button"]),
+-#main-window:not([uidensity="compact"]) toolbar:not(#TabsToolbar) .toolbarbutton-1:not([type="menu-button"]),
+-#main-window:not([uidensity="compact"]) toolbar:not(#TabsToolbar) .toolbarbutton-1[type="menu-button"] toolbarbutton{
+-  -moz-box-orient: horizontal !important;
+-}
+-
+ /* Disable transparency for disabled buttons */
+ .toolbarbutton-1[disabled] {
+   opacity: 1 !important;
+@@ -321,7 +245,7 @@ toolbar:not(#TabsToolbar) #stop-reload-button[animate] > #reload-button[displays
+   fill: unset !important;
+ }
+ /*
+-#main-window[uidensity="compact"] #back-button .toolbarbutton-icon {
++:root[uidensity="compact"] #back-button .toolbarbutton-icon {
+   padding: 5px !important; }
+ */
+ #forward-button .toolbarbutton-icon {
+@@ -629,17 +553,17 @@ toolbar:not(#TabsToolbar) #stop-reload-button[animate] > #reload-button[displays
+ }
+ */
+ 
+-#tracking-protection-icon-container:not([hidden]) ~ #identity-box:-moz-any(.verifiedDomain,.verifiedIdentity) #identity-icon,
+-:-moz-any(.verifiedDomain,.verifiedIdentity) #connection-icon {
++#tracking-protection-icon-container:not([hidden]) ~ #identity-box:is(.verifiedDomain,.verifiedIdentity) #identity-icon,
++:is(.verifiedDomain,.verifiedIdentity) #connection-icon {
+   list-style-image: url("image/padlock_modern.png") !important;
+ }
+-#tracking-protection-icon-container:not([hidden]) ~ #identity-box:-moz-any(.insecureLoginForms,.mixedActiveContent,.notSecure) #identity-icon,
+-:-moz-any(.insecureLoginForms,.mixedActiveContent,.notSecure) #connection-icon {
++#tracking-protection-icon-container:not([hidden]) ~ #identity-box:is(.insecureLoginForms,.mixedActiveContent,.notSecure) #identity-icon,
++:is(.insecureLoginForms,.mixedActiveContent,.notSecure) #connection-icon {
+   list-style-image: url("image/padlock_modern_mal.png") !important;
+ }
+ 
+-#tracking-protection-icon-container:not([hidden]) ~ #identity-box:-moz-any(.weakCipher,.mixedDisplayContent,.mixedDisplayContentLoadedActiveBlocked,.certUserOverridden) #identity-icon,
+-:-moz-any(.weakCipher,.mixedDisplayContent,.mixedDisplayContentLoadedActiveBlocked,.certUserOverridden) #connection-icon {
++#tracking-protection-icon-container:not([hidden]) ~ #identity-box:is(.weakCipher,.mixedDisplayContent,.mixedDisplayContentLoadedActiveBlocked,.certUserOverridden) #identity-icon,
++:is(.weakCipher,.mixedDisplayContent,.mixedDisplayContentLoadedActiveBlocked,.certUserOverridden) #connection-icon {
+   list-style-image: url("image/padlock_modern_mpl.png") !important;
+   -moz-image-region: rect(0, 16px, 16px, 0) !important;
+ }
+@@ -647,4 +571,4 @@ toolbar:not(#TabsToolbar) #stop-reload-button[animate] > #reload-button[displays
+ #tracking-protection-icon-container:not([hidden]) ~ #identity-box.mixedActiveBlocked #identity-icon,
+ .mixedActiveBlocked #connection-icon {
+   list-style-image: url("image/padlock_modern_mab.png") !important;
+-}
+\ No newline at end of file
++}
+\ No newline at end of file
+diff --git a/Netscape4/chrome/menus.css b/Netscape4/chrome/menus.css
+new file mode 100644
+index 0000000..adff48b
+--- /dev/null
++++ b/Netscape4/chrome/menus.css
+@@ -0,0 +1,68 @@
++/* Menus and context menus (new in the Firefox 158 port).
++ * Firefox takes the menu colors from the system (Menu, -moz-menuhover) and
++ * follows the dark mode; give them the flat light Netscape look instead. */
++
++menupopup,
++panel[type="arrow"],
++#widget-overflow,
++#appMenu-popup,
++#unified-extensions-panel {
++  color-scheme: light !important;
++  --panel-background-color: var(--menu_bg) !important;
++  --panel-text-color: var(--menu_fg) !important;
++  --panel-border-color: var(--border_bg) !important;
++  --panel-border-radius: 0px !important;
++  --panel-box-shadow: none !important;
++  --panel-padding-block: 2px !important;
++  --menuitem-border-radius: 0px !important;
++  --menuitem-padding-block: 3px !important;
++  --panel-separator-color: var(--shadow_color) !important;
++  --arrowpanel-background: var(--menu_bg) !important;
++  --arrowpanel-color: var(--menu_fg) !important;
++  --arrowpanel-border-color: var(--border_bg) !important;
++  --arrowpanel-border-radius: 0px !important;
++  --panel-item-hover-bgcolor: var(--selected_bg) !important;
++  --panel-item-active-bgcolor: var(--selected_bg) !important;
++  --button-background-color-hover: var(--selected_bg) !important;
++  --background-color-list-item-hover: var(--selected_bg) !important;
++}
++
++menupopup::part(content) {
++  box-shadow: 1px 1px 0px var(--shadow_color), inset 1px 1px var(--light_color) !important;
++}
++
++menupopup menuitem,
++menupopup menu {
++  color: var(--menu_fg) !important;
++  border-radius: 0px !important;
++}
++
++menupopup :is(menuitem, menu)[_moz-menuactive]:not([disabled]) {
++  background-color: var(--selected_bg) !important;
++  color: var(--selected_fg) !important;
++}
++
++menupopup :is(menuitem, menu)[disabled] {
++  color: var(--disabled_fg) !important;
++  text-shadow: 1px 1px var(--light_color) !important;
++}
++
++menupopup :is(menuitem, menu)[_moz-menuactive][disabled] {
++  background-color: transparent !important;
++}
++
++menuseparator::before {
++  border-top-color: var(--shadow_color) !important;
++  border-bottom: 1px solid var(--light_color) !important;
++}
++
++/* Tooltips */
++tooltip {
++  color-scheme: light !important;
++  appearance: none !important;
++  background: #ffffe1 !important;
++  color: #000000 !important;
++  border: 1px solid #000000 !important;
++  border-radius: 0px !important;
++  box-shadow: none !important;
++}
+diff --git a/Netscape4/chrome/statusbar.css b/Netscape4/chrome/statusbar.css
+index b4b7d62..1aeae02 100644
+--- a/Netscape4/chrome/statusbar.css
++++ b/Netscape4/chrome/statusbar.css
+@@ -1,70 +1,27 @@
+-/* Firefox Quantum userChrome.css tweaks ************************************************/
+-/* Github: https://github.com/aris-t2/customcssforfx ************************************/
+-/****************************************************************************************/
+-
+-:root {
+-  --statusbar_background_color: grey;
+-  --statusbar_font_color: black;
+-}
+-
+-:-moz-any(statuspanel,#statuspanel) {
+-  -moz-appearance: none !important;
+-  display:block !important;
+-  background-color: unset !important;
+-  width: unset !important;
+-  border: 0 !important;
+-}
+-
+-
+-
+-/* Below located in tabs.css */
+-
+-/*
+-*#browser-bottombox {
+-*	background: unset !important;
+-*   height: calc(var(--tab-min-height) + 5px) !important;
+-*	border: 0px solid transparent !important;
+-*    border-right: 1px solid transparent !important;
+-*    border-top: 1px solid #404040 !important;
+-*}
+-*/
++/* Link / loading status text.
++ * Firefox 158 has only #statuspanel-label (the old #statuspanel-inner and
++ * the <statuspanel> element are gone); it is drawn as a Netscape status
++ * field at the bottom left of the page, above the bottom bar. */
+ 
+ #statuspanel {
+-	font-family: Arial, Helvetica, sans-serif !important;
+-	height: 28px !important;
+-	left: 1px !important;
+-	bottom: 0px !important;
+-	padding: 0px !important;
+-	transition-duration: 0s !important;
+-	transition-delay: 0s !important;
+-	transition-property: none !important;
+-}
+-#statuspanel-inner {
+-	margin-top: -40px !important;
+-	transition-duration: 0s !important;
+-	transition-delay: 0s !important;
+-	padding: 3px !important;
+-	z-index: 99 !important;
+-	background-color: #c3c3c3 !important;
+-	border: 1px solid #000 !important;
+-	/*box-shadow: 2px 2px #c3c3c3 inset, 3px 3px #808080 inset,
+-		-2px -2px #c3c3c3 inset, -3px -3px #fff inset !important;
+-	*/
+-	box-shadow: 1px 1px #808080 inset !important;
+-	width: 100% !important;
+-	height: 100% !important;
++  font-family: sans-serif !important;
++  transition: none !important;
+ }
++
+ #statuspanel-label {
+-	border: none !important;
+-	padding: 0px !important;
+-	background: transparent !important;
++  margin: 0px !important;
++  padding: 2px 6px !important;
++  color: var(--fg_color) !important;
++  background-color: var(--bg_color) !important;
++  color-scheme: light !important;
++  border: 1px solid var(--border_bg) !important;
++  border-bottom: 0px !important;
++  border-left: 0px !important;
++  border-radius: 0px !important;
++  box-shadow: inset 1px 1px var(--light_color) !important;
+ }
+ 
+-html[inFullscreen="true"] #browser-bottombox {
+-	display:none !important;
++#statuspanel[mirror] #statuspanel-label {
++  border-left: 1px solid var(--border_bg) !important;
++  border-right: 0px !important;
+ }
+-html[inFullscreen="true"] #statuspanel:hover {
+-	display: block;
+-}
+-
+-
+diff --git a/Netscape4/chrome/tabs.css b/Netscape4/chrome/tabs.css
+index b9acc31..0893f77 100644
+--- a/Netscape4/chrome/tabs.css
++++ b/Netscape4/chrome/tabs.css
+@@ -1,90 +1,100 @@
+-/* remove default tab colors */
++/* Tabs: bevelled buttons in the bottom bar (see #TabsToolbar in
++ * toolbars.css).  Firefox 158 draws the tab look on .tab-background, which
++ * now carries the Netscape button border; the old .tab-line and
++ * #browser-bottombox no longer exist. */
+ :root {
+-   --tab-min-height: 26px !important; }
+-  
+-   #browser-bottombox {
+-     /* 2px on top/bottom padding + 1px for top border: */
+-     display: block !important;
+-     height: calc(var(--tab-min-height) + 5px) !important;
+-     border: 0px solid transparent !important;
+-     border-right: 1px solid transparent !important;
+-     border-top: 1px solid #404040 !important;
+-  }
+-  
+-  .tab-line {                             /* = light top line in selected tab in Quantum default */
+-      display: none !important;
+-  }
+-  
+-  .tab-background {
+-     min-height: unset !important;
+-     border: transparent !important;
+-     background: transparent;
+-     color: transparent;
+-     opacity: 0.0;
+-  }
+-  
+-  #TabsToolbar:not(:-moz-lwtheme) .tabbrowser-tab[visuallyselected="true"],
+-  #TabsToolbar:not(:-moz-lwtheme) .tabbrowser-tab, .tabbrowser-tab, .tab-content {
+-     min-height: unset !important;
+-     border: unset !important;
+-     padding: unset !important;
+-  }
+-   
+-  #TabsToolbar:not(:-moz-lwtheme) .tabbrowser-tab, .tabbrowser-tab {
+-   background-color: var(--button_bg) !important;
+-   margin-right: 1px !important;
+-   margin-left: 1px !important;
+-   border: 3px solid !important;
+-   border-image: url("image/toolbarbutton.png") !important;
+-   border-image-slice: 3 3 3 3 !important;}
+-    
+-  #TabsToolbar:not(:-moz-lwtheme) .tabbrowser-tab[visuallyselected="true"],
+-  .tabbrowser-tab[visuallyselected="true"] {
+-    z-index: 0 !important;
+-    margin-right: 1px !important;
+-    margin-left: 1px !important;
+-    box-shadow: unset !important;
+-    border: 3px solid !important;
+-    border-image: url("image/toolbarbutton_pressed.png") !important;
+-    border-image-slice: 3 3 3 3 !important; }
+-  
+-  .tab-content {
+-     max-height: calc(var(--tab-min-height) - 4px) !important;
+-     padding-left: 8px !important;
+-     padding-right: 8px !important;
+-  }
+-  
+-  .tab-content[selected="true"] {
+-     color: --var(fg_color) !important;
+-     box-shadow: unset !important;
+-  }
+-  
+-  .tab-content[selected="true"]:hover {
+-     color: --var(fg_color) !important;
+-  }
+-  
+-  spacer[part=overflow-start-indicator], 
+-  spacer[part=overflow-end-indicator] {
+-    display: none !important; }
+-  
+-  .tab-icon-image {
+-     filter: sepia(0%) saturate(20%) contrast(100%);
+-     /*margin-left: -3px !important;
+-     margin-right: 3px !important;*/
+-  }
++  --tab-min-height: 26px !important;
++  --tab-min-width: 76px !important;
++  --tab-block-margin: 0px !important;
++  --tab-margin-block: 0px !important;
++  --tab-margin-inline-inner: 0px !important;
++  --tab-border-radius: 0px !important;
++  --tab-outline-offset: 0px !important;
++  --tab-box-shadow-selected: none !important;
++  --tab-text-color: var(--fg_color) !important;
++  --tab-text-color-hover: var(--fg_color) !important;
++  --tab-text-color-selected: var(--fg_color) !important;
++  --tab-selected-color-scheme: light !important;
++  --tabstrip-min-height: var(--tab-min-height) !important;
++  --tabstrip-inner-border: none !important;
++}
+ 
+-  
+-  .tabbrowser-tab stack.tab-stack {
+-     margin-top: -1px !important;
+-  }
++#tabbrowser-tabs {
++  min-height: unset !important;
++  border: 0px !important;
++  padding: 0px !important;
++  margin: 0px !important;
++  --tab-overflow-pinned-tabs-width: 0px;
++}
+ 
+-  
+-  .tabbrowser-tab[selected="true"] stack.tab-stack {
+-     margin-top: 0px !important;
+-  }
++#tabbrowser-arrowscrollbox {
++  min-height: unset !important;
++}
+ 
++.tabbrowser-tab {
++  min-height: unset !important;
++  padding: 0px 1px !important;
++  margin: 0px !important;
++  border: 0px !important;
++}
+ 
+-  
+-  .tab-text {
+-    margin-top: -1px !important;
+-  }
+\ No newline at end of file
++.tab-stack {
++  min-height: var(--tab-min-height) !important;
++}
++
++.tab-background {
++   min-height: unset !important;
++   margin: 0px !important;
++   border-radius: 0px !important;
++   outline: none !important;
++   box-shadow: none !important;
++   background: var(--button_bg) !important;
++   border-style: solid !important;
++   border-width: 3px !important;
++   border-image: url("image/toolbarbutton.png") 3 !important;
++}
++
++.tab-background:is([selected], [multiselected]) {
++   background: var(--tab_selected_bg) !important;
++   border-image: url("image/toolbarbutton_pressed.png") 3 !important;
++}
++
++.tab-context-line,
++.tab-loading-burst::before {
++   display: none !important;
++}
++
++.tab-content {
++   color: var(--fg_color) !important;
++   min-height: unset !important;
++   padding-inline: 12px 8px !important;
++}
++
++.tab-label {
++   color: var(--fg_color) !important;
++   font-family: sans-serif !important;
++}
++
++.tab-icon-image {
++   filter: sepia(0%) saturate(20%) contrast(100%);
++}
++
++.tab-content[selected] .tab-icon-image {
++   filter: none;
++}
++
++/* Scroll arrows when there are too many tabs */
++#tabbrowser-arrowscrollbox::part(scrollbutton-up),
++#tabbrowser-arrowscrollbox::part(scrollbutton-down) {
++  background: var(--button_bg) !important;
++  border-radius: 0px !important;
++  border: 3px solid !important;
++  border-image: url("image/toolbarbutton.png") 3 !important;
++  padding: 0px 2px !important;
++  fill: var(--fg_color) !important;
++}
++
++spacer[part=overflow-start-indicator],
++spacer[part=overflow-end-indicator] {
++  display: none !important;
++}
+diff --git a/Netscape4/chrome/toolbars.css b/Netscape4/chrome/toolbars.css
+index 289d957..9b3ca10 100644
+--- a/Netscape4/chrome/toolbars.css
++++ b/Netscape4/chrome/toolbars.css
+@@ -1,93 +1,188 @@
++/* Toolbox: menu bar, navigation bar and bookmarks toolbar.
++ * Firefox 158: #browser-bottombox, :-moz-lwtheme and :-moz-any() are gone,
++ * the toolbox paints its own background and the tab strip lives in the
++ * toolbox, so the selectors below were rewritten. */
++
++#navigator-toolbox {
++  background: var(--bg_color) !important;
++  color: var(--fg_color) !important;
++  border-bottom: 1px solid var(--border_bg) !important;
++  box-shadow: none !important;
++}
++
++/* Menu bar: always shown, like in Netscape (Firefox hides it on Linux unless
++ * Alt is pressed when browser.tabs.inTitlebar=0). */
++#toolbar-menubar {
++  background: var(--menubar_bg) !important;
++  color: var(--fg_color) !important;
++  padding: 0px !important;
++  padding-left: 2px !important;
++  border-bottom: 1px solid var(--border_bg) !important;
++  margin-bottom: 1px !important;
++  min-height: unset !important;
++}
++
++#toolbar-menubar[autohide][inactive]:not([customizing]) {
++  height: auto !important;
++  min-height: unset !important;
++  padding-left: 2px !important;
++}
++
++#main-menubar > menu {
++  color: var(--fg_color) !important;
++  background: transparent !important;
++  padding: 1px 5px !important;
++  margin: 0px !important;
++  border-radius: 0px !important;
++}
++
++#main-menubar > menu[_moz-menuactive],
++#main-menubar > menu[open] {
++  background: var(--selected_bg) !important;
++  color: var(--selected_fg) !important;
++}
++
++#toolbar-menubar .titlebar-buttonbox-container,
++#TabsToolbar .titlebar-buttonbox-container,
++#nav-bar .titlebar-buttonbox-container,
++.titlebar-spacer {
++  display: none !important;
++}
++
+ /* Main browser window navbar */
+-#navigator-toolbox toolbar#nav-bar.browser-toolbar {
++#nav-bar {
+   margin-top: 0px !important;
+-  background-color: inherit !important;
++  background-color: var(--bg_color) !important;
+   background-image: url("image/top.png") !important;
+-  background-position: left bottom;
++  background-position: left bottom !important;
++  color: var(--fg_color) !important;
++  box-shadow: none !important;
+   padding: 1px !important;
+   padding-bottom: 2px !important;
+-  border-top: 2px solid !important;
+-  border-left: 9px solid !important;
+-  border-bottom: 0px solid !important;
+-  border-image: url("image/toolbar_handle_top.png") !important;
+-  border-image-slice: 2 0 2 9 !important;
++  border-style: solid !important;
++  border-width: 0px 0px 0px 9px !important;
++  border-image: url("image/toolbar_handle_top.png") 2 0 2 9 !important;
+ }
+ 
+ /* Bookmarks toolbar */
+-toolbar:not(#TabsToolbar):not(#toolbar-menubar):not(#nav-bar):not(:-moz-lwtheme) {
++#PersonalToolbar {
+   min-height: unset !important;
+-  -moz-appearance: none !important;
+-  background-color: inherit !important;
++  appearance: none !important;
++  background-color: var(--bg_color) !important;
+   background-image: url("image/bottom.png") !important;
++  color: var(--fg_color) !important;
+   padding: 1px !important;
+   padding-top: 0px !important;
+   padding-bottom: 0px !important;
+-  border: 0px solid !important;
+-  border-left: 9px solid !important;
+-  border-top: 2px solid !important;
+-  border-bottom: 0px !important;
+-  border-image: url("image/toolbar_handle.png") !important;
+-  border-image-slice: 2 0 2 9 !important; }
+-
+-#main-window toolbar:not(#TabsToolbar):not(#toolbar-menubar):not(#nav-bar):not(:-moz-lwtheme) {
+   margin-bottom: 0px !important;
++  padding-top: 2px !important;
++  position: relative !important;
++  overflow-clip-margin: 9px !important;
++  border-style: solid !important;
++  border-width: 0px 0px 0px 9px !important;
++  border-image: url("image/toolbar_handle.png") 2 0 2 9 !important;
+ }
+ 
+-#toolbar-menubar {
+-  /*background-color: var(--bg_color) !important;*/
+-  color: var(-moz-menubartext) !important;
+-  padding: 0px !important;
+-  padding-left: 2px !important;
+-  border-bottom: 1px solid var(--border_bg) !important;
+-  margin-bottom: 1px !important; }
+-
+-#main-window[tabsintitlebar="true"] #toolbar-menubar {
+-  border: none !important;
+-  height: 100% !important;
+-  background-image: linear-gradient(to right, #000060,#A1C4E9) !important;
+-} 
+-
+-#main-window[tabsintitlebar="true"] #toolbar-menubar .menubar-text {
+-  color: #fff !important;
++/* The handle images carry a reddish line meant for another palette; draw
++ * the dark/white separators of the screenshots instead. */
++#nav-bar::after,
++#PersonalToolbar::after {
++  content: "" !important;
++  position: absolute !important;
++  top: 0px !important;
++  bottom: 0px !important;
++  left: -1px !important;
++  width: 1px !important;
++  background: #505050 !important;
+ }
+ 
++#PersonalToolbar::before {
++  content: "" !important;
++  position: absolute !important;
++  top: 0px !important;
++  left: -9px !important;
++  right: 0px !important;
++  height: 2px !important;
++  background: linear-gradient(#505050 1px, #ffffff 1px) !important;
++}
+ 
+-#TabsToolbar .titlebar-buttonbox-container {
+-  visibility: collapse !important;
++#personal-toolbar-empty-description {
++  color: var(--fg_color) !important;
+ }
+ 
+ #browser {
+    background-color: var(--bg_color) !important;
+-   border: solid !important;
+    border: 0px solid !important;
+-   border-color: #585858 !important;
+ }
+ 
++/* No rounded "card" around the page (sidebar.revamp / Nova). */
++#tabbrowser-tabbox,
++#tabbrowser-tabpanels,
++.browserContainer,
++.browserStack,
++.browserStack > browser {
++  border-radius: 0px !important;
++  outline: none !important;
++  box-shadow: none !important;
++  margin: 0px !important;
++}
++
++#tabbrowser-tabbox {
++  border: 0px !important;
++}
++
++/* Tab strip: moved to the bottom of the window, next to the status area,
++ * like the task bar of Netscape 4 component bar.  The space it covers is
++ * reserved under #browser. */
+ #TabsToolbar {
+-  /*margin-top: 1px !important;*/
+-  display: block !important;
+-  position: absolute !important;
+-  bottom: 0px !important;/*var(--tabbar-top) !important;*/
+-  width: 100vw !important;
+-  -moz-appearance: none !important;
+-  background-color: var(--bg_color) !important;
++  position: fixed !important;
++  left: 0px !important;
++  right: 0px !important;
++  bottom: 0px !important;
++  z-index: 3 !important;
++  height: var(--bottombar_height) !important;
++  min-height: unset !important;
++  appearance: none !important;
++  background: var(--bg_color) !important;
++  color: var(--fg_color) !important;
++  box-sizing: border-box !important;
+   border: 0px solid !important;
+-  padding-left: 1px !important;
++  border-top: 1px solid var(--bg_color) !important;
++  box-shadow: inset 0px 1px #404040 !important;
++  padding: 0px 1px !important;
++}
++
++#TabsToolbar > .toolbar-items {
++  height: 100% !important;
++  align-items: center !important;
+ }
+ 
+-/*
+- #TabsToolbar-customization-target #tabbrowser-arrowscrollbox {
+-   padding: 2px !important;
++#browser,
++#customization-container {
++  margin-bottom: var(--bottombar_height) !important;
++}
++
++/* No tab strip in popups, kiosk-like windows and full screen. */
++:root[popup-window] #browser,
++:root[chromehidden~="toolbar"] #browser,
++:root:has(#TabsToolbar[collapsed]) #browser,
++:root[inFullscreen] #browser,
++:root[inDOMFullscreen] #browser {
++  margin-bottom: 0px !important;
++}
++
++:root[inFullscreen] #TabsToolbar,
++:root[inDOMFullscreen] #TabsToolbar {
++  display: none !important;
+ }
+-*/
+ 
+ .notificationbox-stack {
+   padding: 0px !important;
+   border: 0px solid !important;
+   border-top: 2px solid !important;
+   border-left: 9px solid !important;
+-  border-image: url("image/toolbar_handle_notif.png") !important;
+-  border-image-slice: 2 0 2 9 !important;
++  border-image: url("image/toolbar_handle_notif.png") 2 0 2 9 !important;
++  background-color: var(--bg_color) !important;
+ }
+ 
+ .infobar {
+@@ -97,9 +192,11 @@ toolbar:not(#TabsToolbar):not(#toolbar-menubar):not(#nav-bar):not(:-moz-lwtheme)
+   border-radius: 0px !important;
+ }
+ 
+-#TabsToolbar-customization-target {
+-  width: 100vw !important;
++/* Sidebar (sidebar.revamp): square edges, no floating card. */
++#sidebar-box,
++#sidebar-box > .sidebar-browser-stack,
++#sidebar {
++  border-radius: 0px !important;
++  box-shadow: none !important;
++  outline: none !important;
+ }
+-/*
+-#main-window:not([chromehidden*="toolbar"]) #navigator-toolbox {padding-bottom: var(---height) !important;}
+-*/
+\ No newline at end of file
+diff --git a/Netscape4/chrome/urlbar.css b/Netscape4/chrome/urlbar.css
+index 32376b1..2ada718 100644
+--- a/Netscape4/chrome/urlbar.css
++++ b/Netscape4/chrome/urlbar.css
+@@ -1,259 +1,235 @@
+-@import "colors.css";
++/* Location bar: a white combo box with the Netscape drop-down button.
++ * Firefox 158: #urlbar-background / #urlbar-input-container became the
++ * classes .urlbar-background / .urlbar-input-container, the results view is
++ * a popover that no longer "breaks out", and the go button is a class. */
+ 
+ :root {
+-    --urlbarView-favicon-width: unset !important;
+-    --urlbar-height: unset !important;
++  --urlbar-height: 24px !important;
++  --urlbar-min-height: 24px !important;
++  --urlbar-container-padding-block: 0px !important;
++  --urlbar-padding-block: 0px !important;
++  --urlbar-margin-inline: 2px !important;
++  --urlbar-border-radius: 0px !important;
++  --urlbarview-border-radius: 0px !important;
++  --urlbar-inner-border-radius: 0px !important;
++  --urlbar-background-overhang-open: 0px !important;
++  --urlbar-input-growth-open-inline: 0px !important;
++  --urlbar-input-growth-open-block: 0px !important;
++  --urlbar-icon-fill-opacity: 1 !important;
++  --urlbar-box-background-color: transparent !important;
++  --urlbar-box-background-color-hover: transparent !important;
++  --urlbar-box-background-color-active: transparent !important;
++  --urlbar-box-background-color-focus: transparent !important;
++  --urlbarView-favicon-width: unset !important;
++}
++
++#urlbar-container {
++  padding-block: 0px !important;
++  align-items: center !important;
++}
++
++#urlbar {
++  min-height: var(--urlbar-height) !important;
++  height: var(--urlbar-height) !important;
++  color: var(--input_fg) !important;
++  font: unset !important;
++  box-shadow: none !important;
++  outline: none !important;
++}
++
++#urlbar > .urlbar-background,
++#urlbar[focused] > .urlbar-background,
++#urlbar[popover-open] > .urlbar-background {
++  inset: 0px !important;
++  clip-path: none !important;
++  background-color: transparent !important;
++  background-image: linear-gradient(var(--input_bg), var(--input_bg)) !important;
++  background-clip: padding-box !important;
++  border-radius: 0px !important;
++  box-shadow: none !important;
++  outline: none !important;
++  border-style: solid !important;
++  border-width: 2px 26px 2px 2px !important;
++  border-image: url("image/combobox4.png") 2 26 2 2 !important;
++}
++
++#urlbar[open] > .urlbar-background,
++#urlbar[popover-open] > .urlbar-background {
++  border-image: url("image/combobox4_pressed.png") 2 26 2 2 !important;
++}
++
++#urlbar > .urlbar-input-container {
++  margin: 0px !important;
++  padding: 2px 27px 2px 3px !important;
++  border: none !important;
++  border-radius: 0px !important;
++  outline: none !important;
++  height: 100% !important;
++  box-shadow: none !important;
++  animation: none !important;
++  --urlbar-component-gap: 2px;
+ }
+ 
+-#urlbar,
+-#urlbar-background,
+-#urlbar-input-container, 
+ #urlbar-input {
+-    box-shadow: none !important;
+-    animation: none !important;
+-    outline: unset !important;
+-    border-radius: 0px !important;
+-    font-size: unset !important;
+-    font-weight: unset !important;
+-    font-family: unset !important;
+-    height: unset !important;
+-    padding: unset !important;
+-    margin: unset !important;
+-    border: unset !important;
+-    height: unset !important;
+-    border: none !important;
+-    min-height: 24px !important;
+-    margin-top: -2px !important; /* < Adjust for padding*/
++  color: var(--input_fg) !important;
++  font-family: sans-serif !important;
++  padding: 0px 2px !important;
+ }
+ 
+-#urlbar,
+-#urlbar[focused="true"] {
+-    box-shadow: none !important;
+-    border: unset !important;
+-    outline: unset !important;
+-    padding: 1px !important;
++#urlbar-input::placeholder {
++  color: #505050 !important;
++  opacity: 1 !important;
+ }
+ 
+-#urlbar-input {
+-    margin-top: unset !important;
+-    min-height: unset !important;
+-    max-height: calc(var(--urlbar-height) -2px) !important;
+-}
+-
+-#remote-control-box {
+-    margin-top: 2px !important;
+-    min-height: unset !important;
+-    height: calc(var(--urlbar-height) + 2px) !important;
++#urlbar .urlbar-go-button {
++  display: none !important;
+ }
+ 
+-#urlbar-background {
+-    min-height: unset !important;
+-    margin-top: 1px !important;
+-    margin-bottom: 1px !important;
+-    margin-left: 1px !important;
+-    margin-right: 27px !important;
++/* Small flat icons inside the field (search-engine switcher, site
++ * identity, page actions) */
++#urlbar :is(.searchmode-switcher, #identity-icon-box, #identity-permission-box,
++            #tracking-protection-icon-container, #trust-icon-container,
++            .urlbar-page-action, #urlbar-zoom-button, #notification-popup-box) {
++  background: transparent !important;
++  border-radius: 0px !important;
++  box-shadow: none !important;
++  outline: none !important;
++  margin-block: 0px !important;
++  min-height: unset !important;
+ }
+ 
+-/* Disable Megabar Animation */
+-#urlbar [role=button] {
+-    background-color: inherit !important;
++#urlbar .searchmode-switcher {
++  --button-background-color: transparent !important;
++  --button-background-color-hover: transparent !important;
++  --button-background-color-active: transparent !important;
++  --button-background-color-selected: transparent !important;
++  --button-border-color: transparent !important;
++  --button-border-radius: 0px !important;
++  --button-padding: 0px 2px !important;
++  --button-text-color: var(--input_fg) !important;
++  height: 100% !important;
+ }
+ 
+-#urlbar-zoom-button {
+-   background: unset !important;
+-   margin: unset !important;
++/* The location bar fills the navigation bar, as in Netscape: the default
++ * flexible spaces around it shrink to nothing. */
++#urlbar-container {
++  flex-grow: 1000 !important;
++  max-width: none !important;
+ }
+ 
+-/* Adjust for smaller bar height, dropdown arrow button border */
+-#page-action-buttons {
+-    margin-right: 0px !important;
+-    min-height: unset !important;
+-    max-height: calc(var(--urlbar-height) - 4px) !important;
++#nav-bar toolbarspring {
++  min-width: 0px !important;
++  max-width: 0px !important;
+ }
+ 
+-* [role=button]:hover {
+-    border: unset !important;
+-    filter:drop-shadow(0px 0px 1px var(--selected_bg)) !important;
+-    background-color: inherit !important;
++#urlbar :is(.urlbar-page-action, .identity-box-button, #tracking-protection-icon-container,
++            #trust-icon-container, .searchmode-switcher):hover {
++  filter: drop-shadow(0px 0px 1px var(--selected_bg)) !important;
+ }
+ 
+-#urlbar-input-container,
+-#urlbar-input-container[focused="true"] {
+-    outline: none !important;
+-    border: 1px solid var(--border_bg) !important;
+-    border-color: unset !important;
+-    animation-name: none !important;
+-    animation: none !important;
+-    box-shadow: none !important;
+-    border-width: 2px 26px 2px 2px !important;
+-    border-image: url("image/combobox4.png") !important;
+-    border-image-slice: 2 26 2 2 !important; 
++#urlbar-zoom-button {
++  color: var(--input_fg) !important;
++  padding: 0px 4px !important;
+ }
+ 
+-#urlbar[open] > #urlbar-input-container {
+-    box-shadow: none !important;
+-    border-image: url("image/combobox4_pressed.png") !important;
+-    border-image-slice: 2 26 2 2 !important; 
++#urlbar-label-box {
++  border-radius: 0px !important;
+ }
+ 
+-#urlbar-go-button {
+-    visibility: collapse !important;
+- }
+-
+-#urlbar,
+-#urlbar[breakout][breakout-extend][breakout-extend-animate] {
+-    box-shadow: none !important;
+-    font-size: unset !important;
+-    font-weight: unset !important;
+-    font-family: unset !important;
+-    font-weight: unset !important; }
+-
+-/*
+-#main-window[uidensity="compact"] #urlbar, #main-window[uidensity="compact"] #urlbar-input-container
+-#main-window[uidensity="compact"] #urlbar[breakout][breakout-extend][breakout-extend-animate] {
+-    margin-top: -2px !important; }
+-*/
+-
+-#urlbar[breakout-extend] {
+-    box-shadow: none !important;
+-    font-family: unset !important;
+-    font-weight: unset !important;
+-    font-size: unset !important;
+-    top:calc((var(--urlbar-toolbar-height) - var(--urlbar-height)) / 2) !important;
+-    left:calc((var(--urlbar-toolbar-width) - var(--urlbar-width)) / 2) !important;
+-    width:100% !important }
+-
+-#urlbar-input-container,
+-#urlbar[breakout-extend] #urlbar-input-container {
+-    box-shadow: none !important;
+-    font-family: unset !important;
+-    font-weight: unset !important;
+-    font-size: unset !important;
+-    height: 100% !important; }
+-/*
+-#main-window[uidensity="compact"] #urlbar-input-container,
+-#main-window[uidensity="compact"] #urlbar[breakout-extend] #urlbar-input-container {
+-    margin-top: -1px !important;
+-    height: 100% !important;}
+-*/
++/* Results drop-down */
+ .urlbarView {
+-    padding: 0px !important;
+-    margin-top: -1px !important;
+-    box-shadow: none !important;
+-    margin-left:0px!important;
+-    width: calc(100% - 0px)!important;
+-    color: var(--menu_fg) !important;
+-    background-color: var(--input_bg) !important;
+-    border: 1px solid var(--border_bg) !important;
+-}
+-
+-#main-window[uidensity="compact"] .urlbarView {   
+-    margin-top: -1px !important;
++  margin: 0px !important;
++  padding: 0px !important;
++  border-radius: 0px !important;
++  box-shadow: none !important;
++  color: var(--menu_fg) !important;
++  background: var(--input_bg) !important;
++  border: 1px solid var(--border_bg) !important;
++  --urlbarview-border-radius: 0px;
++  --urlbarView-row-border-radius: 0px;
++  --urlbarView-margin-block: 0px;
++  --urlbarView-margin-inline: 0px;
++  --urlbarView-padding: 0px;
++}
++
++.urlbarView-background {
++  background: var(--input_bg) !important;
++  border-radius: 0px !important;
++  box-shadow: none !important;
++  border: 0px !important;
++}
++
++.urlbarView-body-outer,
++.urlbarView-body-inner,
++.urlbarView-results {
++  padding: 0px !important;
++  margin: 0px !important;
++  border: 0px !important;
+ }
+ 
+-.urlbarView-row .urlbarView-type-icon,
+-.urlbarView-row .urlbarView-favicon,.urlbarView-url,
+-.urlbarView-tags, .urlbarView-title-separator {
+-    max-height: 0px !important;
+-    visibility: collapse !important; }
+-
+-.urlbarView-row[has-action="true"] .urlbarView-action {
+-    margin-left: 4px !important;
+-    padding: 2px !important;
+-    padding-left: 4px !important;
+-    padding-right: 4px !important;
+-    border-radius: 0px !important;
+-    border: 1px solid var(--border_bg) !important;
+-    background: unset !important; }
+- 
+-/* Reduce row paddings to make them more compact */
+ .urlbarView-row {
+-    min-height: unset !important;
+-    padding: 0px !important;
+-    border-radius: 0 !important;
+-    font-weight: unset !important;
+-    font-size: unset !important;
+-    font-size: unset !important;
+-    border-bottom: 0px !important;
++  min-height: unset !important;
++  padding: 0px !important;
++  margin: 0px !important;
++  border-radius: 0px !important;
++  font: unset !important;
++  color: var(--input_fg) !important;
+ }
+ 
+-.urlbarView-title {
+-    width: calc(100%) !important;
++/* Group labels ("Firefox suggestions"...) need the row margins removed
++ * above; Netscape had a plain list. */
++.urlbarView-row[label]::before {
++  display: none !important;
+ }
+ 
+-.urlbarView-row:first-child {
+-  margin-top: -5px !important;
++.urlbarView-row-inner {
++  padding-block: 2px !important;
++  border-radius: 0px !important;
+ }
+ 
+-.urlbarView-row:hover,
+-.urlbarView-row:hover .urlbarView-url,
++.urlbarView-row:is(:hover, [selected]),
++.urlbarView-row:is(:hover, [selected]) > .urlbarView-row-inner,
+ .urlbarView-row[aria-selected="true"],
+-.urlbarView-row[aria-selected="true"] .urlbarView-url {
+-    background: unset !important;
+-    background-color: var(--selected_bg) !important;
+-    color: var(--selected_fg) !important;
+- }
+-
+- .urlbarView-row[aria-selected="true"][has-action="true"] .urlbarView-action,
+- .urlbarView-row[has-action="true"]:hover .urlbarView-action {
+-    color: var(--selected_fg) !important;
+-    border-color: var(--selected_fg) !important;
+- }
++.urlbarView-row[aria-selected="true"] > .urlbarView-row-inner {
++  background: var(--selected_bg) !important;
++  color: var(--selected_fg) !important;
++}
+ 
++.urlbarView-row:is(:hover, [selected], [aria-selected="true"]) :is(.urlbarView-url, .urlbarView-action, .urlbarView-title) {
++  color: var(--selected_fg) !important;
++}
+ 
+- .urlbarView-row-inner {
+-    padding-block: 2px !important;
+-    background-color: transparent !important;
+-    margin-left: -4px !important;
+-    margin-right: 4px !important;
+- }
++.urlbarView-url {
++  color: #000080 !important;
++}
+ 
+- .urlbarView-row-outer {
+-    padding-right: 2px !important;
+- }
+-/*
+- .urlbarView-row-inner {
+-   padding: 0px !important;
+-   padding-top: 1px !important;
+-   padding-bottom: 2px !important;
+-   padding-left: 5px !important;
+-   padding-right: 5px !important;
+-   border-radius: 0px !important;
+-}*/
++.urlbarView-action {
++  color: #404040 !important;
++}
+ 
+-/* Hide this time search with row */
++/* Search one-offs at the bottom of the list */
+ .search-one-offs {
+-    visibility: collapse !important;
++  display: none !important;
+ }
+ 
+ #cfr-label-container {
+-    margin-top: 2px !important;
+-    margin-bottom: 2px !important;
+-}
+-
+-#main-window[uidensity="compact"] #search-container {
+-  margin-left: 0px !important;
+-  border: 0px solid !important;
+-  border-left: 7px solid !important;
+-  border-image: url("image/toolbar_handle.png") !important;
+-  border-image-slice: 2 2 2 7 !important;
++  margin-top: 2px !important;
++  margin-bottom: 2px !important;
+ }
+ 
++/* Separate search bar, if the user adds it */
+ #searchbar {
+-    font-weight: unset !important;
+-    font-size: unset !important;
+-    font-size: unset !important;
+-    margin-left: 0px !important;
+-    animation-name: none !important;
+-    border: none !important;
+-    animation: none !important;
+-    border-radius: 0 !important;
+-    padding: 0px !important; 
+-    box-shadow: none !important;
+-    border: solid !important;
+-    border-width: 2px 2px 2px 2px !important;
+-    border-image: url("image/combobox.png") !important;
+-    border-image-slice: 2 2 2 2 !important; 
+-    min-height: 26px !important;
+-    height: 26px !important;
++  font: unset !important;
++  margin-left: 0px !important;
++  animation: none !important;
++  border-radius: 0px !important;
++  outline: none !important;
++  padding: 0px !important;
++  box-shadow: none !important;
++  background: var(--input_bg) !important;
++  border-style: solid !important;
++  border-width: 2px !important;
++  border-image: url("image/combobox.png") 2 !important;
++  min-height: 24px !important;
++  height: 24px !important;
+ }
+diff --git a/Netscape4/chrome/userChrome.css b/Netscape4/chrome/userChrome.css
+index 2c21677..39940a9 100644
+--- a/Netscape4/chrome/userChrome.css
++++ b/Netscape4/chrome/userChrome.css
+@@ -1,4 +1,5 @@
+ /* Widget themeing */
++@import "colors.css";
+ @import "icons.css";
+ @import "tabs.css";
+ @import "statusbar.css";
+@@ -8,8 +9,39 @@
+ @import "librarywin.css";
+ @import "findbar.css";
+ @import "downloads.css";
+-@import "colors.css";
++@import "menus.css";
+ 
++/* Firefox 158: always draw the chrome in light colors (the theme has no
++ * dark variant) and feed the Netscape palette to Firefox's own variables, so
++ * that the parts not restyled below (panels, sidebar, dialogs) match. */
++:root {
++  color-scheme: light !important;
++  --toolbox-background-color: var(--bg_color) !important;
++  --toolbox-background-color-inactive: var(--bg_color) !important;
++  --toolbox-text-color: var(--fg_color) !important;
++  --toolbox-text-color-inactive: var(--fg_color) !important;
++  --toolbar-background-color: var(--bg_color) !important;
++  --toolbar-bgcolor: var(--bg_color) !important;
++  --toolbar-text-color: var(--fg_color) !important;
++  --toolbar-color: var(--fg_color) !important;
++  --toolbar-field-background-color: var(--input_bg) !important;
++  --toolbar-field-focus-background-color: var(--input_bg) !important;
++  --toolbar-field-color: var(--input_fg) !important;
++  --toolbar-field-focus-color: var(--input_fg) !important;
++  --toolbarbutton-icon-fill: var(--fg_color) !important;
++  --toolbarbutton-border-radius: 0px !important;
++  --toolbarbutton-hover-background: transparent !important;
++  --toolbarbutton-active-background: transparent !important;
++  --chrome-content-separator-color: #404040 !important;
++  --arrowpanel-background: var(--menu_bg) !important;
++  --arrowpanel-color: var(--menu_fg) !important;
++  --arrowpanel-border-color: var(--border_bg) !important;
++  --arrowpanel-border-radius: 0px !important;
++  --panel-border-radius: 0px !important;
++  --sidebar-background-color: var(--bg_color) !important;
++  --sidebar-text-color: var(--fg_color) !important;
++  --focus-outline-color: var(--border_bg) !important;
++}
+ 
+ #main-window {
+    background-color: var(--bg_color) !important;
+-- 
+2.55.0
+

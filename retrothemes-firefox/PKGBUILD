@@ -7,17 +7,29 @@
 # Ficam de fora os diretórios JS/ e utils/: são do fx-autoconfig, que roda
 # JavaScript com privilégios a cada início do Firefox. Sem ele não fazem
 # nada; só servem para as barras de rolagem do Netscape4_alt.
+#
+# 0001-Netscape4-Firefox-158.patch: o Netscape4 foi feito para o Firefox
+# ~103; o patch troca os seletores que deixaram de existir (barras, abas no
+# rodapé, campo de endereço, barra de status, menus) para que ele volte a
+# ter a cara do screenshot no Firefox 158. Só CSS.
 pkgname=retrothemes-firefox
 _commit=dfc4eeacd2b1dab916f862a33c4af00906d963a8
 pkgver=0.r68.dfc4eea
-pkgrel=1
+pkgrel=2
 pkgdesc='Classic browser themes for Firefox (Netscape 4, Internet Explorer 5-8) as userChrome.css'
 arch=(any)
 url='https://github.com/matthewmx86/RetroThemesFirefox'
 license=('BSD-2-Clause')
 optdepends=('firefox')
-source=("RetroThemesFirefox-${_commit}.tar.gz::https://github.com/matthewmx86/RetroThemesFirefox/archive/${_commit}.tar.gz")
-sha256sums=('eafada76cf1828fc4d39294b7b7bcc98fc84b86575ccc516aec37412053693bb')
+source=("RetroThemesFirefox-${_commit}.tar.gz::https://github.com/matthewmx86/RetroThemesFirefox/archive/${_commit}.tar.gz"
+        0001-Netscape4-Firefox-158.patch)
+sha256sums=('eafada76cf1828fc4d39294b7b7bcc98fc84b86575ccc516aec37412053693bb'
+            '835f6fda4aacdee7df0e3257137f524236245a1d3f54513322649672075fc217')
+
+prepare() {
+  cd "RetroThemesFirefox-${_commit}"
+  patch -Np1 -i "${srcdir}/0001-Netscape4-Firefox-158.patch"
+}
 
 package() {
   cd "RetroThemesFirefox-${_commit}"
