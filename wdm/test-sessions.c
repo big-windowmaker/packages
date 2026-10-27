@@ -1,13 +1,14 @@
 /*
  * Testes da libwdm do wdm (lista de sessões de src/libwdm/sessions.c,
- * estado do pam_faillock de src/libwdm/faillock.c e WDMUnsetEnv), rodados
- * no check() do PKGBUILD:
+ * estado do pam_faillock de src/libwdm/faillock.c, lista de usuários de
+ * src/libwdm/users.c e WDMUnsetEnv), rodados no check() do PKGBUILD:
  *   cc -Iinclude $(pkg-config --cflags WINGs) test-sessions.c bin/libwdm.a \
  *      $(pkg-config --libs WINGs) -o test-sessions
  *   ./test-sessions <diretório temporário vazio>
  */
 #include <wdmsessions.h>
 #include <wdmfaillock.h>
+#include <wdmusers.h>
 #include <wdmlib.h>
 
 #include <stdint.h>
@@ -275,6 +276,87 @@ int main(int argc, char **argv)
 		CHECK(WDMFaillockMinutesLeft("maria", 0, conf, fl, now) == 0);	/* já desbloqueou */
 		put_tally(fl, "maria", recent, 3, now, 0);
 		CHECK(WDMFaillockMinutesLeft("maria", 0, conf, fl, now) == 0);	/* registros inválidos */
+	}
+
+	/* lista de usuários */
+	{
+		char pw[1024], sh[1024], defs[1024], shells[1024], acc[1024];
+		WDMUserSources src;
+		WDMUserList *ul;
+		char *last;
+		int k;
+
+		snprintf(pw, sizeof(pw), "%s/passwd", argv[1]);
+		snprintf(sh, sizeof(sh), "%s/shadow", argv[1]);
+		snprintf(defs, sizeof(defs), "%s/login.defs", argv[1]);
+		snprintf(shells, sizeof(shells), "%s/shells", argv[1]);
+		snprintf(acc, sizeof(acc), "%s/accounts", argv[1]);
+		mkdir(acc, 0755);
+		put(argv[1], "passwd",
+		    "root:x:0:0:root:/root:/bin/bash\n"
+		    "bin:x:1:1::/:/usr/bin/nologin\n"
+		    "maria:x:1000:1000:Maria da Silva,Sala 1,,:/home/maria:/bin/bash\n"
+		    "joao:x:1001:1001::/home/joao:/usr/bin/zsh\n"
+		    "travado:x:1002:1002:Travado:/home/t:/bin/bash\n"
+		    "expirado:x:1003:1003:Expirado:/home/e:/bin/bash\n"
+		    "peixe:x:1004:1004:Fish:/home/p:/usr/bin/fish\n"
+		    "semlogin:x:1005:1005:Sem login:/home/s:/sbin/nologin\n"
+		    "sistema:x:1006:1006:Sistema:/home/si:/bin/bash\n"
+		    "grande:x:70000:70000:UID alto:/home/g:/bin/bash\n"
+		    "ana:x:1007:1007:Ana:/home/ana:\n"
+		    "semsombra:x:1008:1008::/home/x:/bin/bash\n"
+		    "mesmo:x:1009:1009:mesmo:/home/m:/bin/bash\n"
+		    "maria:x:1010:1010:Duplicada:/home/d:/bin/bash\n");
+		put(argv[1], "shadow",
+		    "maria:$6$abc:19000:0:99999:7:::\n"
+		    "joao:$6$abc:19000:0:99999:7:::\n"
+		    "travado:!$6$abc:19000:0:99999:7:::\n"
+		    "expirado:$6$abc:19000:0:99999:7::1:\n"
+		    "ana:$6$abc:19000:0:99999:7:::\n"
+		    "mesmo:$6$abc:19000:0:99999:7:::\n");
+		put(argv[1], "login.defs", "# comentário\nUID_MIN\t\t\t 1000\nUID_MAX 60000\nGID_MIN 1000\n");
+		put(argv[1], "shells", "# shells\n/bin/sh\n/bin/bash\n/usr/bin/zsh\n/usr/bin/nologin\n");
+		put(acc, "sistema", "[User]\nSystemAccount=true\n");
+		put(acc, "maria", "[User]\nSession=big-wm\nSystemAccount=false\n");
+		memset(&src, 0, sizeof(src));
+		src.passwd = pw;
+		src.shadow = sh;
+		src.loginDefs = defs;
+		src.shells = shells;
+		src.accountsDir = acc;
+		src.today = 20000;
+		ul = WDMReadUsers(&src, 100);
+		for (k = 0; k < ul->count; k++)
+			printf("  usuário %-10s %s\n", ul->items[k].login, ul->items[k].label);
+		CHECK(ul->count == 5);
+		if (ul->count == 5) {
+			CHECK(strcmp(ul->items[0].label, "Ana (ana)") == 0);
+			CHECK(strcmp(ul->items[1].label, "joao") == 0);
+			CHECK(strcmp(ul->items[2].label, "Maria da Silva (maria)") == 0);
+			CHECK(strcmp(ul->items[2].realName, "Maria da Silva") == 0);
+			CHECK(ul->items[2].uid == 1000);	/* a primeira "maria" */
+			CHECK(strcmp(ul->items[3].label, "mesmo") == 0);
+			CHECK(strcmp(ul->items[4].label, "semsombra") == 0);
+		}
+		CHECK(WDMFindUser(ul, "maria") == 2);
+		CHECK(WDMFindUser(ul, "travado") == -1);
+		CHECK(WDMFindUser(ul, NULL) == -1);
+		WDMFreeUsers(ul);
+		ul = WDMReadUsers(&src, 4);	/* mais contas que o limite */
+		CHECK(ul->count == 0);
+		WDMFreeUsers(ul);
+		src.today = 0;			/* conta ainda não expirada */
+		ul = WDMReadUsers(&src, 100);
+		CHECK(WDMFindUser(ul, "expirado") >= 0);
+		WDMFreeUsers(ul);
+
+		CHECK(WDMLoadLastUser(state) == NULL);
+		CHECK(WDMSaveLastUser(state, "maria"));
+		last = WDMLoadLastUser(state);
+		CHECK(last && strcmp(last, "maria") == 0);
+		free(last);
+		CHECK(!WDMSaveLastUser(state, "../root"));
+		CHECK(WDMLoadUserSession(state, ".last-user") == NULL);	/* não é usuário */
 	}
 
 	/* WDMUnsetEnv: variável ausente não pode apagar o ambiente */
