@@ -1,7 +1,7 @@
 pkgbase = wdm
 	pkgdesc = WINGs Display Manager: login screen with the NeXT look, X11 and Wayland sessions
 	pkgver = 1.28
-	pkgrel = 13
+	pkgrel = 14
 	url = https://github.com/raorn/wdm
 	arch = x86_64
 	license = GPL-2.0-or-later AND X11
@@ -69,7 +69,7 @@ pkgbase = wdm
 	sha256sums = 0e8649c1a32be7c07ba4f06624ebe73d065671a013e4007e5cddbc27554ee67c
 	sha256sums = 2b283255df3416dd3b62d46ae2ffedba3946ab103455a2736cf4e9335f9bfd48
 	sha256sums = 64ef5a2ce80d9385e3a9e984349a36ae83a3349005509e8105d4f7065300cfe3
-	sha256sums = bb9ee62229ca4e218da041818a88441534a0c2a95a0cfc8c04d6975ded836912
+	sha256sums = 5404f913a87c43bf518b0b3089d5e538a52fd2b52183a394ef035bdd9037cb34
 	sha256sums = 3b7ece92f7a2b2f17a8c79368a4f6739d6c037ddd14bd7cae1f05b595e9318d7
 	sha256sums = 528ba401fbe95c3adc01a3381cad31d97ab3866ac080dbef10a53673b61ce61e
 

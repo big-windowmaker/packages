@@ -1,7 +1,12 @@
 [Unit]
 Description=WINGs Display Manager
 Documentation=man:wdm(1)
-Conflicts=getty@tty7.service plymouth-quit.service
+# Sem Conflicts=plymouth-quit.service (o LightDM e o GDM têm): eles mesmos
+# encerram o Plymouth ao assumir a tela, o wdm não. Com o conflito, o
+# plymouth-quit nunca rodava, o plymouth-quit-wait (TimeoutSec=0) esperava
+# para sempre, os gettys (inclusive o serial) não subiam e a tela ficava
+# preta com o Plymouth dono do DRM. Assim o Plymouth sai antes, como no SDDM.
+Conflicts=getty@tty7.service
 After=systemd-user-sessions.service getty@tty7.service plymouth-quit.service systemd-logind.service
 # Sem tela de login depois de 5 falhas em 2 minutos: o tty2 (Ctrl+Alt+F2)
 # continua disponível para recuperar o sistema.
