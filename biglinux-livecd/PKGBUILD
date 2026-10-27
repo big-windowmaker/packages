@@ -8,7 +8,7 @@
 
 pkgname=biglinux-livecd
 pkgver=26.10.26
-pkgrel=2
+pkgrel=3
 pkgdesc="BigLinux live-session setup and Calamares installer integration"
 arch=('any')
 url="https://github.com/biglinux/biglinux-livecd"
@@ -22,7 +22,9 @@ depends=(
     'dbus'
     'e2fsprogs'
     'gettext'
+    'glib2'
     'gtk4'
+    'hicolor-icon-theme'
     'libadwaita'
     'mtools'
     'python'
