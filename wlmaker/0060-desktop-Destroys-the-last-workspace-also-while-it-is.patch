@@ -1,0 +1,227 @@
+From dace1eb13635611feb640c99371ff606ee5a51a1 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 02:22:29 -0300
+Subject: [PATCH 60/73] desktop: Destroys the last workspace also while it is
+ the current one.
+
+The Clip's (and the root menu's) 'Destroy Last Workspace' did nothing when
+the last workspace was the current one, or had windows: Silently, there is
+no way to tell why. Like Window Maker, it now switches to the workspace
+before first. Windows still on the last workspace move to the one before.
+
+A context menu's item is triggered after the menu closed, so the menu's own
+window is no longer on the workspace that the action switches away from.
+
+New workspaces are named by their number, like on Window Maker ("Workspace
+3"), instead of "New".
+---
+ include/toolkit/desktop.h |  5 +--
+ src/action.c              | 22 ++++++++++++-
+ src/context_menu.c        |  4 ++-
+ src/i18n.c                |  1 +
+ src/toolkit/desktop.c     | 65 ++++++++++++++++++++++++++++++++++++---
+ 5 files changed, 88 insertions(+), 9 deletions(-)
+
+diff --git a/include/toolkit/desktop.h b/include/toolkit/desktop.h
+index ef29381..45e80f6 100644
+--- a/include/toolkit/desktop.h
++++ b/include/toolkit/desktop.h
+@@ -142,8 +142,9 @@ void wlmtk_desktop_remove_workspace(
+ wlmtk_workspace_t *wlmtk_desktop_get_current_workspace(wlmtk_desktop_t *desktop_ptr);
+ 
+ /**
+- * Destroys the last workspace -- if it's not the only remaining workspace, not
+- * the current workspace, and if there's no windows contained in it.
++ * Destroys the last workspace -- if it's not the only remaining workspace.
++ * Like Window Maker: If it is the current workspace, switches to the one
++ * before first. Windows on it are moved to the workspace before.
+  *
+  * @param desktop_ptr
+  */
+diff --git a/src/action.c b/src/action.c
+index 9a91c35..024f8b8 100644
+--- a/src/action.c
++++ b/src/action.c
+@@ -25,6 +25,7 @@
+ #include <libbase/plist.h>
+ #include <stdbool.h>
+ #include <stdint.h>
++#include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <wayland-server-core.h>
+@@ -38,6 +39,7 @@
+ #include "backend/backend.h"
+ #include "config.h"
+ #include "default_configuration.h"
++#include "i18n.h"
+ #include "idle.h"
+ #include "input/keyboard.h"
+ #include "input/manager.h"
+@@ -161,6 +163,15 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
+ 
+ /* == Exported methods ===================================================== */
+ 
++/* ------------------------------------------------------------------------- */
++/** Counts workspaces, for @ref wlmtk_desktop_for_each_workspace. */
++static void _wlmaker_action_count_workspace(
++    __UNUSED__ bs_dllist_node_t *dlnode_ptr,
++    void *ud_ptr)
++{
++    ++*(size_t*)ud_ptr;
++}
++
+ /* ------------------------------------------------------------------------- */
+ wlmaker_action_handle_t *wlmaker_action_bind_keys(
+     wlmaker_server_t *server_ptr,
+@@ -210,6 +221,8 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
+     wlmtk_workspace_t *workspace_ptr, *next_workspace_ptr;
+     wlmtk_window_t *window_ptr;
+     const char **argv;
++    size_t workspaces;
++    char name[64];
+ 
+     switch (action) {
+     case WLMAKER_ACTION_NONE:
+@@ -262,9 +275,16 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
+         break;
+ 
+     case WLMAKER_ACTION_WORKSPACE_ADD:
++        // Named like on Window Maker: By its number.
++        workspaces = 0;
++        wlmtk_desktop_for_each_workspace(
++            server_ptr->desktop_ptr, _wlmaker_action_count_workspace,
++            &workspaces);
++        snprintf(name, sizeof(name), "%s %zu",
++                 wlmaker_i18n("Workspace"), workspaces + 1);
+         workspace_ptr = wlmtk_workspace_create(
+             server_ptr->wlr_output_layout_ptr,
+-            "New",
++            name,
+             &server_ptr->style_ptr->tile);
+         if (NULL != workspace_ptr) {
+             wlmtk_desktop_add_workspace(server_ptr->desktop_ptr, workspace_ptr);
+diff --git a/src/context_menu.c b/src/context_menu.c
+index 481d31c..124d4d0 100644
+--- a/src/context_menu.c
++++ b/src/context_menu.c
+@@ -382,8 +382,10 @@ void _wlmaker_context_menu_item_handle_triggered(
+         listener_ptr, wlmaker_context_menu_item_t, triggered_listener);
+     wlmaker_context_menu_t *context_menu_ptr = item_ptr->context_menu_ptr;
+ 
+-    if (NULL != item_ptr->callback) item_ptr->callback(item_ptr->ud_ptr);
++    // Closes first: The menu's window is then off the workspace, which the
++    // callback may switch away from, or destroy.
+     _wlmaker_context_menu_close(context_menu_ptr);
++    if (NULL != item_ptr->callback) item_ptr->callback(item_ptr->ud_ptr);
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/i18n.c b/src/i18n.c
+index 6c81361..68f7cc8 100644
+--- a/src/i18n.c
++++ b/src/i18n.c
+@@ -53,6 +53,7 @@ static const wlmaker_i18n_entry_t _wlmaker_i18n_pt_br[] = {
+     { "Remove", "Remover" },
+     { "Restore Default Launchers", "Restaurar lançadores padrão" },
+     { "Dock-app", "Dockapp" },
++    { "Workspace", "Área" },
+     { NULL, NULL }
+ };
+ 
+diff --git a/src/toolkit/desktop.c b/src/toolkit/desktop.c
+index 79abf53..9e25395 100644
+--- a/src/toolkit/desktop.c
++++ b/src/toolkit/desktop.c
+@@ -388,14 +388,28 @@ wlmtk_workspace_t *wlmtk_desktop_get_current_workspace(wlmtk_desktop_t *desktop_
+ /* ------------------------------------------------------------------------- */
+ void wlmtk_desktop_destroy_last_workspace(wlmtk_desktop_t *desktop_ptr)
+ {
++    // Guard clause: Must have further workspaces.
++    if (1 >= bs_dllist_size(&desktop_ptr->workspaces)) return;
++
+     wlmtk_workspace_t *ws_ptr = wlmtk_workspace_from_dlnode(
+         desktop_ptr->workspaces.tail_ptr);
++    wlmtk_workspace_t *prev_ws_ptr = wlmtk_workspace_from_dlnode(
++        desktop_ptr->workspaces.tail_ptr->prev_ptr);
++
++    // Like Window Maker: On the last workspace, switch to the one before.
++    if (ws_ptr == desktop_ptr->current_workspace_ptr) {
++        _wlmtk_desktop_switch_to_workspace(desktop_ptr, prev_ws_ptr);
++    }
+ 
+-    // Guard clause: Must have further workspaces, not be current workspace,
+-    // and not have windows on that workspace.
+-    if (1 >= bs_dllist_size(&desktop_ptr->workspaces) ||
+-        ws_ptr == desktop_ptr->current_workspace_ptr ||
+-        !bs_dllist_empty(wlmtk_workspace_get_windows_dllist(ws_ptr))) return;
++    // Windows still on it go to the workspace before. Rather than refusing
++    // to destroy the workspace, without a way to tell why.
++    bs_dllist_t *windows_ptr = wlmtk_workspace_get_windows_dllist(ws_ptr);
++    while (!bs_dllist_empty(windows_ptr)) {
++        wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(
++            windows_ptr->head_ptr);
++        wlmtk_workspace_unmap_window(ws_ptr, window_ptr);
++        wlmtk_workspace_map_window(prev_ws_ptr, window_ptr);
++    }
+ 
+     wlmtk_desktop_remove_workspace(desktop_ptr, ws_ptr);
+     wlmtk_workspace_destroy(ws_ptr);
+@@ -893,6 +907,45 @@ void test_create_destroy(bs_test_t *test_ptr)
+     wlr_scene_node_destroy(&wlr_scene_ptr->tree.node);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Destroying the last workspace while it is the current one, with a window:
++ * Switches to the workspace before, and moves the window there.
++ */
++static void test_destroy_current_last(
++    bs_test_t *test_ptr,
++    wlmtk_desktop_t *desktop_ptr,
++    struct wlr_output_layout *wlr_output_layout_ptr)
++{
++    static const struct wlmtk_tile_style tstyle = {};
++    wlmtk_workspace_t *ws1_ptr = wlmtk_workspace_create(
++        wlr_output_layout_ptr, "1", &tstyle);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, ws1_ptr);
++    wlmtk_desktop_add_workspace(desktop_ptr, ws1_ptr);
++    wlmtk_workspace_t *ws2_ptr = wlmtk_workspace_create(
++        wlr_output_layout_ptr, "2", &tstyle);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, ws2_ptr);
++    wlmtk_desktop_add_workspace(desktop_ptr, ws2_ptr);
++    wlmtk_desktop_switch_to_next_workspace(desktop_ptr);
++    BS_TEST_VERIFY_EQ(
++        test_ptr, ws2_ptr, wlmtk_desktop_get_current_workspace(desktop_ptr));
++
++    wlmtk_window_t *w_ptr = wlmtk_test_window_create(NULL);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, w_ptr);
++    wlmtk_workspace_map_window(ws2_ptr, w_ptr);
++
++    wlmtk_desktop_destroy_last_workspace(desktop_ptr);
++    BS_TEST_VERIFY_EQ(test_ptr, 1, bs_dllist_size(&desktop_ptr->workspaces));
++    BS_TEST_VERIFY_EQ(
++        test_ptr, ws1_ptr, wlmtk_desktop_get_current_workspace(desktop_ptr));
++    BS_TEST_VERIFY_EQ(test_ptr, ws1_ptr, wlmtk_window_get_workspace(w_ptr));
++
++    wlmtk_workspace_unmap_window(ws1_ptr, w_ptr);
++    wlmtk_window_destroy(w_ptr);
++    wlmtk_desktop_remove_workspace(desktop_ptr, ws1_ptr);
++    wlmtk_workspace_destroy(ws1_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Exercises workspace adding and removal. */
+ void test_workspaces(bs_test_t *test_ptr)
+@@ -994,6 +1047,8 @@ void test_workspaces(bs_test_t *test_ptr)
+     BS_TEST_VERIFY_EQ(test_ptr, NULL, l.last_data_ptr);
+     BS_TEST_VERIFY_EQ(test_ptr, 0, l.calls);
+ 
++    test_destroy_current_last(test_ptr, desktop_ptr, wlr_output_layout_ptr);
++
+     wlmtk_util_disconnect_test_listener(&l);
+     wlmtk_desktop_destroy(desktop_ptr);
+     wlr_output_layout_destroy(wlr_output_layout_ptr);
+-- 
+2.55.0
+

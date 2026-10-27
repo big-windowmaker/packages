@@ -83,9 +83,38 @@
 #   0050  wlclient: posição do ponteiro nos cliques e evento de movimento
 #   0051  wlmmixer: barras coloridas proporcionais ao volume; clicar (ou
 #         arrastar) nas barras ajusta o volume naquele ponto (meio = 50%)
+#   (0052-0059 ficam livres para outra série em andamento)
+#   0060  "Destruir última área" funciona também na área atual (vai para a
+#         anterior, como no Window Maker) e leva as janelas dela junto; novas
+#         áreas recebem o número ("Área 3")
+#   0061  menus: caixas de seleção e botões de opção nos itens
+#   0062  submenus abrem para a esquerda quando não cabem à direita (e sobem
+#         para não passar da base), como no X11; menus dentro da área útil
+#   0063  menus maiores que a tela deslizam quando o ponteiro chega à borda
+#   0064  menus de contexto com submenus e itens de opção
+#   0065  clique direito em qualquer ponto do dockapp abre o menu dele (sem
+#         Alt), com "Mover para o lado direito/esquerdo/topo/base" do Clip
+#   0066  ações e "Preferências" de cada dockapp no menu, descritas em
+#         /usr/share/wlmaker/Dockapps.plist e gravadas em
+#         ~/.config/wlmaker/<dockapp>.plist
+#   0067  dockapps: preferências aplicadas na hora (inotify) e temas de cor
+#         (LCD verde clássico, âmbar, azul, cinza NeXT, alto contraste)
+#   0068  wlmcalclock: relógio analógico, 12/24 h, segundos, dois-pontos
+#         piscando, calendário em papel ou visor, ano, fuso horário, comando
+#         ao clicar
+#   0069  wlmcpugraph, wlmmemgraph, wlmnetgraph: tema, intervalo, gráfico
+#         preenchido ou só linha, texto, comando ao clicar; por núcleo ou
+#         total; swap e porcentagem; interface, taxas e bits por segundo
+#   0070  wlmmixer: tema, porcentagem, clique silencia, roda do mouse, passo,
+#         volume máximo, programa de volume (clique do meio ou menu)
+#   0071  wlmclock: tema
+#   0072  menus de contexto recebem o teclado: Esc fecha
+#   0073  painéis que ocupam uma borda inteira (o Dock com Abas em "Largura
+#         Total") são arranjados primeiro e vão de ponta a ponta; Clip e
+#         Dock ficam no que sobra
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=8
+pkgrel=9
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -116,7 +145,7 @@ makedepends=(
 )
 checkdepends=(desktop-file-utils)
 optdepends=(
-  'pavucontrol: mixer completo, aberto pelo clique direito no wlmmixer'
+  'pavucontrol: mixer completo, aberto pelo clique do meio ou pelo menu do wlmmixer'
   'pipewire-pulse: servidor de som para o wlmmixer'
 )
 _patches=(
@@ -171,6 +200,20 @@ _patches=(
   0049-clip-Adds-Clip.Icon-to-the-state-for-the-Clip-s-imag.patch
   0050-wlclient-Reports-the-pointer-s-position-and-its-moti.patch
   0051-apps-Makes-wlmmixer-s-volume-meter-interactive.patch
+  0060-desktop-Destroys-the-last-workspace-also-while-it-is.patch
+  0061-toolkit-Adds-check-box-and-radio-button-indicators-t.patch
+  0062-toolkit-Opens-submenus-to-the-left-when-there-is-no-.patch
+  0063-menu_scroll-Scrolls-menus-that-extend-beyond-the-scr.patch
+  0064-context_menu-Adds-submenus-and-items-with-check-boxe.patch
+  0065-icon_manager-Opens-a-dock-app-s-menu-on-a-right-clic.patch
+  0066-dockapp_prefs-Adds-the-dock-apps-own-actions-and-pre.patch
+  0067-apps-Adds-wlm_settings-for-the-DockApps-preferences-.patch
+  0068-apps-Gives-wlmcalclock-preferences-Themes-analog-clo.patch
+  0069-apps-Gives-the-graph-DockApps-preferences-Themes-sty.patch
+  0070-apps-Gives-wlmmixer-preferences-and-leaves-the-right.patch
+  0071-apps-Lets-wlmclock-follow-the-Theme-preference.patch
+  0072-context_menu-Gives-the-menu-keyboard-focus-so-Escape.patch
+  0073-layer-Arranges-panels-spanning-a-full-edge-first-lik.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -231,7 +274,21 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             '0ee92f3fdb6cc2e16d3914034957ededd0cf54c8430e9397b070d7a446da7da1'
             '2344de2c80127ab08ef56efeb11b28862fe5a1571057589454e7f20c7784b638'
             '76cb1a2f5cf4a9f78d9bd47c1f308a3f07ddc980f60d8404a9b553145f509329'
-            '8de67c7f0f3b94e72f3edbac321d06976d0eeda20cfa6cbae6be1c921e861ba3')
+            '8de67c7f0f3b94e72f3edbac321d06976d0eeda20cfa6cbae6be1c921e861ba3'
+            'ee66f8d309b3298ce5422b6064f3bec9a711abb6144d053565236ccfa99b1663'
+            'bef1356503eeb392a0b4951ee4bd022240dd2c365b5edeb5aca5af35caef16e3'
+            '7ac6d2727761368e322af067add749e0957caca48212e128691937c76c91c831'
+            '1b4877b6f88516c15b6672def684bc86e1a3f8e7b53bbe66df568539ea09f334'
+            '63ce764e79213fbc519e3681f20167f22391bcf18c7af225199d636e6aaf5b5d'
+            '3e15687f07a99fc42a0c1ccab512011ca3b90584b8c1e02367c86f050a71b90c'
+            'f269215cc68a64a65794e1bf79a70514ada1e6d9ab4964ff43dc049fa021cc7c'
+            'd38b2c84b0177392a71c61c18f1533ece2d1c10e405add3bae99e5d9f6280ed3'
+            '61c5e3a25e1db8cdcf312c179504d372bfcbbea6561ad6b3dfa52e49159dd71c'
+            '0bbe428e0009f41b01a94e8631404d032a662211ba9f254fa1c878f2d0816d22'
+            '802a19b077bec56e2b959d7163a29442ade73adbc29809805c876988f6ff6440'
+            'f7eb782d6970f84cb7457cfd6a20215450e8b1dd48517ad4f14eb5ef2839f212'
+            '23fe8a291f73dda14486f0777a50e6537c239e94cdba42757dd308822cdbf1da'
+            '4f93b4316533c04f269908b0a6dcdd889422521dc4ed0044bffba4733845781d')
 
 prepare() {
   cd wlmaker
