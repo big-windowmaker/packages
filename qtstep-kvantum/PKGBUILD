@@ -1,0 +1,91 @@
+# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+
+# Temas Kvantum do QTStep (andbgr): os aplicativos Qt com a cara do
+# NeXTSTEP/OpenStep/Window Maker. O repositório traz só o modelo
+# (QTStep.source) e as cores de cada variação; o make_theme.sh dele gera os
+# temas trocando as cores do modelo. O build faz a mesma troca (mesmo
+# algoritmo: cor do modelo -> marcador -> cor da variação), sem os passos do
+# script que mexem em ~/.local/share/color-schemes.
+#
+# O tema padrão da sessão Big WindowMaker é o QTStepOpenStep, o da captura
+# screenshots/kvantum.png do projeto (fundo #aaaaaa, campos #aaaaaa,
+# seleção branca). O big-wm-firstrun o escolhe quando o usuário ainda não
+# tem ~/.config/Kvantum/kvantum.kvconfig.
+pkgname=qtstep-kvantum
+_commit=36dc0d37d7159e3562f370a6a697124e379cf665
+pkgver=0.r23.36dc0d3
+pkgrel=1
+pkgdesc='QTStep: NeXTSTEP/OpenStep/Window Maker look for Qt apps (Kvantum themes and KDE color schemes)'
+arch=(any)
+url='https://github.com/andbgr/QTStep'
+license=('GPL-3.0-only')
+depends=(kvantum)
+source=("QTStep-${_commit}.tar.gz::https://github.com/andbgr/QTStep/archive/${_commit}.tar.gz")
+sha256sums=('5c245ecf71758a1fa87764b0d796b3761ae85abc205fcdd6d401be1eb054e3c3')
+
+build() {
+  local src="${srcdir}/QTStep-${_commit}/kvantum/QTStep.source"
+  local out="${srcdir}/themes"
+  rm -rf "${out}"
+  mkdir -p "${out}"
+
+  local -A model
+  local key val
+  while read -r key val; do
+    model[${key}]=${val}
+  done < "${src}/colors"
+
+  local colors variant name file
+  for colors in "${src}"/colors.*; do
+    variant=${colors##*/colors.}
+    name="QTStep${variant// /}"
+    local -A theme=()
+    while read -r key val; do
+      theme[${key}]=${val}
+    done < "${colors}"
+    for key in "${!model[@]}"; do
+      if [[ -z ${theme[${key}]:-} ]]; then
+        echo "${colors}: falta a cor ${key}" >&2
+        return 1
+      fi
+    done
+
+    mkdir -p "${out}/${name}"
+    cp "${src}/QTStep.source.kvconfig" "${out}/${name}/${name}.kvconfig"
+    cp "${src}/QTStep.source.svg" "${out}/${name}/${name}.svg"
+    for file in "${out}/${name}"/*; do
+      for key in "${!model[@]}"; do
+        sed -i "s/${model[${key}]}/PLACEHOLDER-${key}-PLACEHOLDER/g" "${file}"
+      done
+      for key in "${!model[@]}"; do
+        sed -i "s/PLACEHOLDER-${key}-PLACEHOLDER/${theme[${key}]}/g" "${file}"
+      done
+      if grep -q PLACEHOLDER "${file}"; then
+        echo "${file}: sobrou marcador" >&2
+        return 1
+      fi
+    done
+    unset theme
+  done
+}
+
+check() {
+  local themes="${srcdir}/themes"
+  # O tema padrão tem de existir e ter as cores da captura do projeto.
+  grep -qx 'window.color=#aaaaaa' "${themes}/QTStepOpenStep/QTStepOpenStep.kvconfig"
+  grep -qx 'base.color=#aaaaaa' "${themes}/QTStepOpenStep/QTStepOpenStep.kvconfig"
+  grep -qx 'highlight.color=#ffffff' "${themes}/QTStepOpenStep/QTStepOpenStep.kvconfig"
+  # Nenhuma cor do modelo (verde/vermelho/amarelo de marcação) pode sobrar.
+  ! grep -q '#ffff80\|#008000\|#800000' "${themes}/QTStepOpenStep/QTStepOpenStep.svg"
+}
+
+package() {
+  local dir
+  for dir in "${srcdir}"/themes/*/; do
+    install -Dm644 -t "${pkgdir}/usr/share/Kvantum/$(basename "${dir}")" "${dir}"*
+  done
+  install -Dm644 -t "${pkgdir}/usr/share/color-schemes" \
+    "${srcdir}/QTStep-${_commit}"/color-schemes/*.colors
+  install -Dm644 "${srcdir}/QTStep-${_commit}/README.md" \
+    "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

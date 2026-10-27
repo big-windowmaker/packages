@@ -1,0 +1,12 @@
+pkgbase = retrothemes-firefox
+	pkgdesc = Classic browser themes for Firefox (Netscape 4, Internet Explorer 5-8) as userChrome.css
+	pkgver = 0.r68.dfc4eea
+	pkgrel = 1
+	url = https://github.com/matthewmx86/RetroThemesFirefox
+	arch = any
+	license = BSD-2-Clause
+	optdepends = firefox
+	source = RetroThemesFirefox-dfc4eeacd2b1dab916f862a33c4af00906d963a8.tar.gz::https://github.com/matthewmx86/RetroThemesFirefox/archive/dfc4eeacd2b1dab916f862a33c4af00906d963a8.tar.gz
+	sha256sums = eafada76cf1828fc4d39294b7b7bcc98fc84b86575ccc516aec37412053693bb
+
+pkgname = retrothemes-firefox

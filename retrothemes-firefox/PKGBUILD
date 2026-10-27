@@ -1,0 +1,36 @@
+# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+
+# Temas retrô do Firefox (matthewmx86): Netscape 4 e Internet Explorer 5 a 8,
+# feitos com userChrome.css. A sessão Big WindowMaker coloca o Netscape4 no
+# perfil do Firefox (big-wm-firstrun) e liga as folhas de estilo do usuário.
+#
+# Ficam de fora os diretórios JS/ e utils/: são do fx-autoconfig, que roda
+# JavaScript com privilégios a cada início do Firefox. Sem ele não fazem
+# nada; só servem para as barras de rolagem do Netscape4_alt.
+pkgname=retrothemes-firefox
+_commit=dfc4eeacd2b1dab916f862a33c4af00906d963a8
+pkgver=0.r68.dfc4eea
+pkgrel=1
+pkgdesc='Classic browser themes for Firefox (Netscape 4, Internet Explorer 5-8) as userChrome.css'
+arch=(any)
+url='https://github.com/matthewmx86/RetroThemesFirefox'
+license=('BSD-2-Clause')
+optdepends=('firefox')
+source=("RetroThemesFirefox-${_commit}.tar.gz::https://github.com/matthewmx86/RetroThemesFirefox/archive/${_commit}.tar.gz")
+sha256sums=('eafada76cf1828fc4d39294b7b7bcc98fc84b86575ccc516aec37412053693bb')
+
+package() {
+  cd "RetroThemesFirefox-${_commit}"
+  local dest="${pkgdir}/usr/share/${pkgname}" chrome theme
+  while IFS= read -r -d '' chrome; do
+    theme=${chrome%/chrome}
+    theme=${theme#./}
+    mkdir -p "${dest}/${theme}"
+    cp -r --no-preserve=ownership "${chrome}" "${dest}/${theme}/"
+    rm -rf "${dest}/${theme}/chrome/JS" "${dest}/${theme}/chrome/utils"
+  done < <(find . -type d -name chrome -print0)
+  find "${dest}" -type d -exec chmod 755 {} +
+  find "${dest}" -type f -exec chmod 644 {} +
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}
