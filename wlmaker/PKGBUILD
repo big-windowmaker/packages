@@ -298,7 +298,11 @@ package() {
   # O wlmdock (Dock/Clip) e o próprio wlmaker são partes da sessão, não
   # aplicativos: abertos pelo rofi ou pelos menus, criavam um segundo Dock
   # ou um compositor aninhado (visto na VM: dois ladrilhos do logo no Dock).
-  for _desktop in "$pkgdir"/usr/share/applications/{wlmaker,wlmdock}.desktop; do
+  # A sessão "WaylandMaker" (wlmaker sem a configuração do Big WindowMaker:
+  # sem Dock, dockapps nem bandeja) também sai da tela de login, ao lado de
+  # "Big WindowMaker (Wayland)" ela só confundia (escolhida por engano na VM).
+  for _desktop in "$pkgdir"/usr/share/applications/{wlmaker,wlmdock}.desktop \
+    "$pkgdir"/usr/share/wayland-sessions/wlmaker.desktop; do
     [[ -e $_desktop ]] || continue
     grep -q '^NoDisplay=' "$_desktop" ||
       sed -i '0,/^\[Desktop Entry\]$/s//[Desktop Entry]\nNoDisplay=true/' "$_desktop"
