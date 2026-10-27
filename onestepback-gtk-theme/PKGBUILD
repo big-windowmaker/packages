@@ -8,14 +8,16 @@
 pkgname=onestepback-gtk-theme
 _name=OneStepBack
 pkgver=0.997
-pkgrel=2
+pkgrel=3
 pkgdesc='GTK 2/3/4 theme with the embossed gray look of NeXTSTEP'
 arch=(any)
 url='http://www.vide.memoire.free.fr/pages/onestepback/onestepback.php'
 license=('GPL-3.0-only')
 optdepends=('gtk-engine-murrine: GTK 2 applications')
-source=("http://www.vide.memoire.free.fr/pages/onestepback/${_name}-v${pkgver}.zip")
-sha256sums=('b81ea97e74e430a78fef5ac0be7d6894925e08bf38db6d944f9bb11bbdaccb01')
+source=("http://www.vide.memoire.free.fr/pages/onestepback/${_name}-v${pkgver}.zip"
+        libadwaita.css)
+sha256sums=('b81ea97e74e430a78fef5ac0be7d6894925e08bf38db6d944f9bb11bbdaccb01'
+            'bf04110932c2bee712c92c764bd9464f265e932eb3b53d357ed93bc2ece437a2')
 
 # Terminais GTK 4 (VTE) transparentes, como o AshyTerm: o VTE pinta o fundo
 # do widget com @text_view_bg numa folha de estilo própria, de prioridade
@@ -25,10 +27,34 @@ sha256sums=('b81ea97e74e430a78fef5ac0be7d6894925e08bf38db6d944f9bb11bbdaccb01')
 # a regra do VTE é ignorada, como no libadwaita. Nada mais no gtk-4.0 usa
 # essa cor. O gtk-3.0 fica como está: lá ela dá as cores do tema ao
 # gnome-terminal (GTK 3).
+#
+# Aplicativos libadwaita (Big Audio Player, Big Video Player, Big Recorder)
+# com fundo transparente: com GTK_THEME definido o libadwaita não carrega a
+# folha de estilo dele, e as cores nomeadas que esses aplicativos usam no
+# próprio CSS (window.background { background-color: @window_bg_color },
+# popovers com @popover_bg_color...) ficam indefinidas, o que o GTK pinta
+# como transparente. O libadwaita.css acrescenta ao gtk-4.0 essas cores e as
+# variáveis --*-color com os cinzas do OneStepBack. Nenhuma regra do tema
+# usa esses nomes, então o resto da aparência não muda.
 prepare() {
   cd "${_name}"
   sed -i '/^@define-color text_view_bg /d' gtk-4.0/gtk.css
-  ! grep -q text_view_bg gtk-4.0/gtk.css
+  # "background-color: @darker_color;;" (linha 155): o GTK avisa
+  # "Empty declaration" a cada aplicativo GTK 4 que abre.
+  sed -i 's/;;$/;/' gtk-4.0/gtk.css
+  # As cores do libadwaita.css são nomes novos: o tema não define nenhuma.
+  local name
+  for name in $(sed -n 's/^@define-color \([a-z_]*\) .*/\1/p' "${srcdir}/libadwaita.css"); do
+    if grep -q "^@define-color ${name} " gtk-4.0/gtk.css; then
+      echo "o tema já define @${name}" >&2
+      return 1
+    fi
+  done
+  cat "${srcdir}/libadwaita.css" >> gtk-4.0/gtk.css
+  if grep -Eq '@define-color[[:space:]]+text_view_bg' gtk-4.0/gtk.css; then
+    return 1
+  fi
+  grep -q '^@define-color window_bg_color ' gtk-4.0/gtk.css
 }
 
 package() {

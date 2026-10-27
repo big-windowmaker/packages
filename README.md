@@ -25,6 +25,7 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
 | [`big-dockapps/`](big-dockapps/PKGBUILD) | `libdockapp`, `wmcpuload`, `wmbattery`, `wmusic`, `wmshutdown`, `wmmoonclock`, `wmcube`, `wmudmount`, `wmnet`, `wmclock`, `wmmemload`, `wmsystemtray`, `pclock`, `wmwifi`, `minidock`, `minicontrol`, `wmapmload`, `mountapp` | `20260412` | [window-maker/dockapps](https://github.com/window-maker/dockapps) fixado no commit `251e851`; `wmudmount` (3.0), `wmsystemtray` (1.4) e `mountapp` (3.0) vêm dos tarballs do SourceForge; `minidock` (1.9) e `minicontrol` (0.2) da Zenwalk; `wmapmload` (0.3.4) do site do autor. |
 | [`biglinux-livecd/`](biglinux-livecd/PKGBUILD) | `biglinux-livecd` | `26.10.26` | **Temporário**, só para as ISOs de teste: branch `window-maker` de [big-windowmaker/biglinux-livecd](https://github.com/big-windowmaker/biglinux-livecd), com o suporte à sessão live do Window Maker proposto ao upstream. Sai daqui quando a mudança estiver no `biglinux-stable`. |
 | [`gtk-nocsd/`](gtk-nocsd/PKGBUILD) | `gtk-nocsd` | `4.8` | Release 4.8 do [MorsMortium/gtk-nocsd](https://codeberg.org/MorsMortium/gtk-nocsd) (Codeberg). Tira a CSD das janelas GTK 3/4 e libadwaita; carregado pela sessão X11 do big-wm. |
+| [`onestepback-gtk-theme/`](onestepback-gtk-theme/PKGBUILD) | `onestepback-gtk-theme` | `0.997` | Zip da 0.997 do [site do autor](http://www.vide.memoire.free.fr/pages/onestepback/onestepback.php). Tema GTK 2/3/4 NeXTSTEP da sessão (`GTK_THEME` no big-wm), com dois ajustes no `gtk-4.0`. |
 
 ### Observações
 
@@ -108,6 +109,16 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
 - **biglinux-livecd**: as dependências de execução só existem nos
   repositórios BigLinux, então o diretório tem `.ci-nodeps`: o CI compila sem
   resolver dependências e pula o teste de instalação.
+- **onestepback-gtk-theme**: o `prepare()` ajusta só o `gtk-4.0/gtk.css`.
+  Apaga a cor `text_view_bg`, para os terminais VTE (AshyTerm) ficarem
+  translúcidos, e acrescenta o [`libadwaita.css`](onestepback-gtk-theme/libadwaita.css):
+  com `GTK_THEME` definido o libadwaita não carrega a folha de estilo dele,
+  e os aplicativos que usam `@window_bg_color`, `@popover_bg_color` ou
+  `var(--window-bg-color)` no próprio CSS (Big Audio Player, Big Video
+  Player, Big Recorder) abriam com o fundo transparente. O arquivo define
+  essas cores e variáveis com os cinzas do tema, sem mudar nenhuma regra
+  dele. Também tira o `;;` da linha 155 (`background-color: @darker_color;;`),
+  que fazia o GTK 4 avisar "Empty declaration" em todo aplicativo.
 
 ## Política
 
