@@ -1,0 +1,616 @@
+From 5ac30bf934c01d7bfe8f9464dcfd85c0fb7d9e09 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 16:04:40 -0300
+Subject: [PATCH] config: Adds pointer acceleration, double-click time and
+ sloppy focus.
+
+Settings Window Maker's preferences offer, which wlmaker lacked:
+
+ - 'Mouse' section, for all pointer devices: libinput's acceleration speed
+   ('AccelSpeed', -1.0 to 1.0) and profile ('AccelProfile', Adaptive or
+   Flat). Window Maker sets the speed with 'xset m'. Without the section,
+   libinput's defaults apply.
+ - 'Mouse.DoubleClickTime': The time between the clicks of a double-click on
+   the title bar (which shades the window), fixed at 300 ms before. Set via
+   wlmtk_titlebar_set_double_click_msec().
+ - 'FocusMode': Click (the default), or Sloppy: A window gets activated (not
+   raised) when the pointer enters it, like Window Maker's 'sloppy' focus.
+   The desktop gets wlmtk_desktop_set_focus_follows_pointer().
+
+'WindowPlacement', 'FocusMode' and the double-click time are applied by
+wlmaker_server_configure_desktop().
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ etc/Config.plist             | 15 ++++++
+ include/toolkit/desktop.h    | 15 ++++++
+ include/toolkit/titlebar.h   | 11 +++++
+ src/input/manager.c          |  3 ++
+ src/input/pointer.c          | 93 ++++++++++++++++++++++++++++++++++++
+ src/input/pointer.h          | 12 +++++
+ src/server.c                 | 57 ++++++++++++++++------
+ src/server.h                 | 12 +++++
+ src/toolkit/desktop.c        | 71 +++++++++++++++++++++++++++
+ src/toolkit/titlebar_title.c | 14 +++++-
+ src/toolkit/window.c         | 34 +++++++++++++
+ 11 files changed, 321 insertions(+), 16 deletions(-)
+
+diff --git a/etc/Config.plist b/etc/Config.plist
+index bff8640..7acc3c0 100644
+--- a/etc/Config.plist
++++ b/etc/Config.plist
+@@ -38,6 +38,18 @@
+         NaturalScrolling = Enabled;
+     };
+ 
++    // Optional: Pointer acceleration of all pointer devices (mice and
++    // touchpads). Without this section, libinput's defaults apply.
++    // Mouse = {
++    //     // From "-1.0" (slowest) to "1.0" (fastest). Quote negative values.
++    //     AccelSpeed = 0.0;
++    //     // Adaptive or Flat.
++    //     AccelProfile = Adaptive;
++    //     // Maximum time between the clicks of a double-click on a title
++    //     // bar, in milliseconds. 300 if not set.
++    //     DoubleClickTime = 300;
++    // };
++
+     Cursor = {
+         // Optional. If set: A keyboard modifier that will emulate a mouse
+         // right-button click, if the modifier is held while the left button
+@@ -129,6 +141,9 @@
+     // usable area of the output under the pointer, `Smart` (the default, if
+     // not set) fills free spots row by row.
+     WindowPlacement = Center;
++    // Optional: Which window gets the keyboard focus. `Click` (the default)
++    // activates a window when clicked, `Sloppy` when the pointer enters it.
++    FocusMode = Click;
+     // Optional array: Commands to start once wlmaker is running.
+     Autostart = (
+         // TODO(kaeser@gubbe.ch): Add wlmdock.
+diff --git a/include/toolkit/desktop.h b/include/toolkit/desktop.h
+index dd23dac..68f760c 100644
+--- a/include/toolkit/desktop.h
++++ b/include/toolkit/desktop.h
+@@ -313,6 +313,21 @@ void wlmtk_desktop_set_window_placement(
+ wlmtk_window_placement_t wlmtk_desktop_get_window_placement(
+     wlmtk_desktop_t *desktop_ptr);
+ 
++/**
++ * Sets whether windows get activated when the pointer enters them
++ * ("focus follows pointer", Window Maker's 'sloppy' focus). Default: false,
++ * windows get activated by a click.
++ *
++ * @param desktop_ptr
++ * @param follows
++ */
++void wlmtk_desktop_set_focus_follows_pointer(
++    wlmtk_desktop_t *desktop_ptr,
++    bool follows);
++
++/** @return Whether windows get activated when the pointer enters them. */
++bool wlmtk_desktop_get_focus_follows_pointer(wlmtk_desktop_t *desktop_ptr);
++
+ /** Unit test cases. */
+ extern const bs_test_set_t wlmtk_desktop_test_set;
+ 
+diff --git a/include/toolkit/titlebar.h b/include/toolkit/titlebar.h
+index 37d6a1c..bf89597 100644
+--- a/include/toolkit/titlebar.h
++++ b/include/toolkit/titlebar.h
+@@ -138,6 +138,17 @@ wlmtk_element_t *wlmtk_titlebar_element(wlmtk_titlebar_t *titlebar_ptr);
+ extern const bspl_desc_t wlmtk_titlebar_style_desc[];
+ 
+ /** Unit test cases. */
++/** Default maximum time between two clicks of a double-click, in ms. */
++#define WLMTK_TITLEBAR_DOUBLE_CLICK_MSEC 300
++
++/**
++ * Sets the maximum time between two clicks on a title bar to be taken as
++ * double-click. Applies to all title bars.
++ *
++ * @param msec                Time in milliseconds. 0 restores the default.
++ */
++void wlmtk_titlebar_set_double_click_msec(uint32_t msec);
++
+ extern const bs_test_set_t wlmtk_titlebar_test_set;
+ 
+ #ifdef __cplusplus
+diff --git a/src/input/manager.c b/src/input/manager.c
+index 660f4c7..e5bdc69 100644
+--- a/src/input/manager.c
++++ b/src/input/manager.c
+@@ -183,6 +183,9 @@ static const bspl_desc_t _wlmim_manager_config[] = {
+     BSPL_DESC_DICT("Touchpad", false,
+                    wlmim_t, pointer_options, pointer_options,
+                    wlmim_pointer_options_desc),
++    BSPL_DESC_DICT("Mouse", false,
++                   wlmim_t, pointer_options, pointer_options.mouse.present,
++                   wlmim_mouse_options_desc),
+     BSPL_DESC_DICT("Cursor", false,
+                    wlmim_t, cursor_options, cursor_options,
+                    wlmim_cursor_options_desc),
+diff --git a/src/input/pointer.c b/src/input/pointer.c
+index 4fe8aa2..55933ca 100644
+--- a/src/input/pointer.c
++++ b/src/input/pointer.c
+@@ -109,8 +109,36 @@ const bspl_desc_t wlmim_pointer_options_desc[] = {
+     BSPL_DESC_SENTINEL()
+ };
+ 
++static const bspl_enum_desc_t _wlmim_pointer_accel_profiles[] = {
++    BSPL_ENUM("Adaptive", LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE),
++    BSPL_ENUM("Flat", LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT),
++    BSPL_ENUM_SENTINEL()
++};
++
++const bspl_desc_t wlmim_mouse_options_desc[] = {
++    BSPL_DESC_DOUBLE(
++        "AccelSpeed",
++        false,
++        struct wlmim_pointer_options,
++        mouse.accel_speed,
++        mouse.accel_speed,
++        0.0),
++    BSPL_DESC_ENUM(
++        "AccelProfile",
++        false,
++        struct wlmim_pointer_options,
++        mouse.accel_profile,
++        mouse.accel_profile,
++        LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE,
++        _wlmim_pointer_accel_profiles),
++    BSPL_DESC_SENTINEL()
++};
++
+ /* == Exported methods ===================================================== */
+ 
++static void _wlmim_pointer_apply_mouse(
++    struct libinput_device *lid_ptr,
++    const struct wlmim_pointer_options *options_ptr);
+ void _wlmim_pointer_apply(
+     wlmim_pointer_t *pointer_ptr,
+     const struct wlmim_pointer_options *options_ptr);
+@@ -163,6 +191,8 @@ void _wlmim_pointer_apply(
+     if (!wlr_input_device_is_libinput(p->wlr_input_device_ptr)) return;
+     lid_ptr = wlr_libinput_get_device_handle(p->wlr_input_device_ptr);
+ 
++    _wlmim_pointer_apply_mouse(lid_ptr, options_ptr);
++
+     // Guard clause: Ignore non-touchpad pointers.
+     if (0 >= libinput_device_config_tap_get_finger_count(lid_ptr)) return;
+ 
+@@ -261,13 +291,45 @@ void _wlmim_pointer_apply(
+ }
+ 
+ 
++/* ------------------------------------------------------------------------- */
++/** Applies the 'Mouse' options (acceleration) to a pointer device. */
++void _wlmim_pointer_apply_mouse(
++    struct libinput_device *lid_ptr,
++    const struct wlmim_pointer_options *options_ptr)
++{
++    if (!options_ptr->mouse.present ||
++        !libinput_device_config_accel_is_available(lid_ptr)) return;
++
++    double speed = BS_MAX(-1.0, BS_MIN(1.0, options_ptr->mouse.accel_speed));
++    enum libinput_config_status s = libinput_device_config_accel_set_speed(
++        lid_ptr, speed);
++    if (LIBINPUT_CONFIG_STATUS_SUCCESS != s) {
++        bs_log(BS_WARNING,
++               "Failed libinput_device_config_accel_set_speed(%p, %f)",
++               lid_ptr, speed);
++    }
++
++    if (libinput_device_config_accel_get_profiles(lid_ptr) &
++        options_ptr->mouse.accel_profile) {
++        s = libinput_device_config_accel_set_profile(
++            lid_ptr, options_ptr->mouse.accel_profile);
++        if (LIBINPUT_CONFIG_STATUS_SUCCESS != s) {
++            bs_log(BS_WARNING,
++                   "Failed libinput_device_config_accel_set_profile(%p, %d)",
++                   lid_ptr, options_ptr->mouse.accel_profile);
++        }
++    }
++}
++
+ /* == Unit Tests =========================================================== */
+ 
+ static void _wlmim_pointer_test_parse(bs_test_t *test_ptr);
++static void _wlmim_pointer_test_parse_mouse(bs_test_t *test_ptr);
+ 
+ /** Unit test cases. */
+ static const bs_test_case_t wlmim_pointer_test_cases[] = {
+     { true, "parse", _wlmim_pointer_test_parse },
++    { true, "parse_mouse", _wlmim_pointer_test_parse_mouse },
+     BS_TEST_CASE_SENTINEL()
+ };
+ 
+@@ -310,4 +372,35 @@ void _wlmim_pointer_test_parse(bs_test_t *test_ptr)
+     bspl_dict_unref(d);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Tests decoding the 'Mouse' section. */
++void _wlmim_pointer_test_parse_mouse(bs_test_t *test_ptr)
++{
++    bspl_dict_t *d = bspl_dict_from_object(
++        bspl_create_object_from_plist_string(
++            "{ AccelSpeed = \"-0.5\"; AccelProfile = Flat; }"));
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++
++    struct wlmim_pointer_options o = {};
++    BS_TEST_VERIFY_TRUE(
++        test_ptr,
++        bspl_decode_dict(d, wlmim_mouse_options_desc, &o));
++    BS_TEST_VERIFY_TRUE(test_ptr, -0.5 == o.mouse.accel_speed);
++    BS_TEST_VERIFY_EQ(
++        test_ptr, LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT, o.mouse.accel_profile);
++    bspl_dict_unref(d);
++
++    // Defaults: libinput's.
++    d = bspl_dict_from_object(bspl_create_object_from_plist_string("{}"));
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++    BS_TEST_VERIFY_TRUE(
++        test_ptr,
++        bspl_decode_dict(d, wlmim_mouse_options_desc, &o));
++    BS_TEST_VERIFY_TRUE(test_ptr, 0.0 == o.mouse.accel_speed);
++    BS_TEST_VERIFY_EQ(
++        test_ptr, LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE,
++        o.mouse.accel_profile);
++    bspl_dict_unref(d);
++}
++
+ /* == End of pointer.c ===================================================== */
+diff --git a/src/input/pointer.h b/src/input/pointer.h
+index c7a0708..4b79c5f 100644
+--- a/src/input/pointer.h
++++ b/src/input/pointer.h
+@@ -49,6 +49,16 @@ struct wlmim_pointer_options {
+         /** Natural scrolling, where the content is "moved" by touchpad. */
+         bool                  natural_scrolling;
+     } touchpad;
++
++    /** Pointer motion, for all pointer devices (the 'Mouse' section). */
++    struct {
++        /** Whether 'Mouse' is configured. Otherwise, libinput's defaults. */
++        bool                  present;
++        /** Acceleration speed, from -1.0 (slowest) to 1.0 (fastest). */
++        double                accel_speed;
++        /** Acceleration profile: Adaptive or Flat. */
++        enum libinput_config_accel_profile accel_profile;
++    } mouse;
+ };
+ 
+ /** Forward declaration: Pointer handle. */
+@@ -78,6 +88,8 @@ bool wlmim_pointer_enabled(wlmim_pointer_t *pointer_ptr);
+ 
+ /** Plist descriptor for the "Touchpad" section. */
+ extern const bspl_desc_t wlmim_pointer_options_desc[];
++/** Descriptor of the 'Mouse' section, decodes into wlmim_pointer_options. */
++extern const bspl_desc_t wlmim_mouse_options_desc[];
+ 
+ /** Unit test set for pointers. */
+ extern const bs_test_set_t wlmim_pointer_test_set;
+diff --git a/src/server.c b/src/server.c
+index 8ad114f..ef573e9 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -187,20 +187,7 @@ wlmaker_server_t *wlmaker_server_create(
+         wlmaker_server_destroy(server_ptr);
+         return NULL;
+     }
+-    const char *placement_ptr = bspl_dict_get_string_value(
+-        server_ptr->config_dict_ptr, "WindowPlacement");
+-    if (NULL != placement_ptr) {
+-        if (0 == strcasecmp(placement_ptr, "Center")) {
+-            wlmtk_desktop_set_window_placement(
+-                server_ptr->desktop_ptr, WLMTK_WINDOW_PLACEMENT_CENTER);
+-        } else if (0 == strcasecmp(placement_ptr, "Smart")) {
+-            wlmtk_desktop_set_window_placement(
+-                server_ptr->desktop_ptr, WLMTK_WINDOW_PLACEMENT_SMART);
+-        } else {
+-            bs_log(BS_WARNING, "Unknown WindowPlacement \"%s\", using Smart.",
+-                   placement_ptr);
+-        }
+-    }
++    wlmaker_server_configure_desktop(server_ptr, server_ptr->config_dict_ptr);
+ 
+     // root element wrapper.
+     server_ptr->root_ptr = wlmtk_root_create(
+@@ -387,6 +374,48 @@ wlmaker_server_t *wlmaker_server_create(
+     return server_ptr;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmaker_server_configure_desktop(
++    wlmaker_server_t *server_ptr,
++    bspl_dict_t *config_dict_ptr)
++{
++    const char *placement_ptr = bspl_dict_get_string_value(
++        config_dict_ptr, "WindowPlacement");
++    wlmtk_window_placement_t placement = WLMTK_WINDOW_PLACEMENT_SMART;
++    if (NULL != placement_ptr) {
++        if (0 == strcasecmp(placement_ptr, "Center")) {
++            placement = WLMTK_WINDOW_PLACEMENT_CENTER;
++        } else if (0 != strcasecmp(placement_ptr, "Smart")) {
++            bs_log(BS_WARNING, "Unknown WindowPlacement \"%s\", using Smart.",
++                   placement_ptr);
++        }
++    }
++    wlmtk_desktop_set_window_placement(server_ptr->desktop_ptr, placement);
++
++    const char *focus_ptr = bspl_dict_get_string_value(
++        config_dict_ptr, "FocusMode");
++    bool follows = false;
++    if (NULL != focus_ptr) {
++        if (0 == strcasecmp(focus_ptr, "Sloppy")) {
++            follows = true;
++        } else if (0 != strcasecmp(focus_ptr, "Click")) {
++            bs_log(BS_WARNING, "Unknown FocusMode \"%s\", using Click.",
++                   focus_ptr);
++        }
++    }
++    wlmtk_desktop_set_focus_follows_pointer(server_ptr->desktop_ptr, follows);
++
++    uint64_t msec = 0;
++    bspl_dict_t *mouse_dict_ptr = bspl_dict_get_dict(config_dict_ptr, "Mouse");
++    const char *msec_ptr = bspl_dict_get_string_value(
++        mouse_dict_ptr, "DoubleClickTime");
++    if (NULL != msec_ptr && !bs_strconvert_uint64(msec_ptr, &msec, 10)) {
++        bs_log(BS_WARNING, "Invalid Mouse.DoubleClickTime \"%s\"", msec_ptr);
++        msec = 0;
++    }
++    wlmtk_titlebar_set_double_click_msec(msec);
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
+ {
+diff --git a/src/server.h b/src/server.h
+index 28d25d0..13d2aff 100644
+--- a/src/server.h
++++ b/src/server.h
+@@ -230,6 +230,18 @@ wlmaker_server_t *wlmaker_server_create(
+  */
+ void wlmaker_server_destroy(wlmaker_server_t *server_ptr);
+ 
++/**
++ * Applies the desktop's settings from the configuration: 'WindowPlacement'
++ * (Smart or Center) and 'FocusMode' (Click, or Sloppy: windows get
++ * activated when the pointer enters them).
++ *
++ * @param server_ptr
++ * @param config_dict_ptr
++ */
++void wlmaker_server_configure_desktop(
++    wlmaker_server_t *server_ptr,
++    bspl_dict_t *config_dict_ptr);
++
+ /**
+  * Activates the task list.
+  *
+diff --git a/src/toolkit/desktop.c b/src/toolkit/desktop.c
+index 6e23d5b..37f3865 100644
+--- a/src/toolkit/desktop.c
++++ b/src/toolkit/desktop.c
+@@ -89,6 +89,8 @@ struct _wlmtk_desktop_t {
+     struct wlr_output_layout  *wlr_output_layout_ptr;
+     /** Policy for placing new windows. */
+     wlmtk_window_placement_t  window_placement;
++    /** Whether windows get activated when the pointer enters them. */
++    bool                      focus_follows_pointer;
+ };
+ 
+ static void _wlmtk_desktop_switch_to_workspace(
+@@ -625,6 +627,20 @@ wlmtk_window_placement_t wlmtk_desktop_get_window_placement(
+     return desktop_ptr->window_placement;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmtk_desktop_set_focus_follows_pointer(
++    wlmtk_desktop_t *desktop_ptr,
++    bool follows)
++{
++    desktop_ptr->focus_follows_pointer = follows;
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmtk_desktop_get_focus_follows_pointer(wlmtk_desktop_t *desktop_ptr)
++{
++    return desktop_ptr->focus_follows_pointer;
++}
++
+ /* ------------------------------------------------------------------------- */
+ wlmtk_element_t *wlmtk_desktop_element(wlmtk_desktop_t *desktop_ptr)
+ {
+@@ -897,11 +913,13 @@ bool _wlmtk_desktop_workspace_set_style(
+ 
+ static void test_create_destroy(bs_test_t *test_ptr);
+ static void test_workspaces(bs_test_t *test_ptr);
++static void test_focus_follows_pointer(bs_test_t *test_ptr);
+ 
+ /** Test cases */
+ static const bs_test_case_t _wlmtk_desktop_test_cases[] = {
+     { 1, "create_destroy", test_create_destroy },
+     { 1, "workspaces", test_workspaces },
++    { 1, "focus_follows_pointer", test_focus_follows_pointer },
+     BS_TEST_CASE_SENTINEL()
+ };
+ 
+@@ -971,6 +989,59 @@ static void test_destroy_current_last(
+     wlmtk_workspace_destroy(ws1_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Activates windows on pointer entry, only with focus-follows-pointer. */
++void test_focus_follows_pointer(bs_test_t *test_ptr)
++{
++    struct wlr_scene *wlr_scene_ptr = wlr_scene_create();
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, wlr_scene_ptr);
++    struct wl_display *wl_display_ptr = wl_display_create();
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, wl_display_ptr);
++    struct wlr_output_layout *wlr_output_layout_ptr =
++        wlr_output_layout_create(wl_display_ptr);
++    struct wlmtk_desktop_style ds = {};
++    wlmtk_desktop_t *desktop_ptr = wlmtk_desktop_create(
++        wlr_scene_ptr, &ds, wlr_output_layout_ptr);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, desktop_ptr);
++    static const struct wlmtk_tile_style tstyle = {};
++    wlmtk_workspace_t *ws_ptr = wlmtk_workspace_create(
++        wlr_output_layout_ptr, "1", &tstyle);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, ws_ptr);
++    wlmtk_desktop_add_workspace(desktop_ptr, ws_ptr);
++
++    wlmtk_window_t *w1_ptr = wlmtk_test_window_create(NULL);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, w1_ptr);
++    wlmtk_workspace_map_window(ws_ptr, w1_ptr);
++    wlmtk_window_t *w2_ptr = wlmtk_test_window_create(NULL);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, w2_ptr);
++    wlmtk_workspace_map_window(ws_ptr, w2_ptr);
++    wlmtk_workspace_activate_window(ws_ptr, w1_ptr);
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_activated(w1_ptr));
++
++    // Default: Click to focus. Entering w2 doesn't activate it.
++    BS_TEST_VERIFY_FALSE(
++        test_ptr, wlmtk_desktop_get_focus_follows_pointer(desktop_ptr));
++    wl_signal_emit(&wlmtk_window_element(w2_ptr)->events.pointer_enter, NULL);
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_activated(w1_ptr));
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_window_is_activated(w2_ptr));
++
++    // Focus follows pointer: Entering w2 activates it.
++    wlmtk_desktop_set_focus_follows_pointer(desktop_ptr, true);
++    wl_signal_emit(&wlmtk_window_element(w2_ptr)->events.pointer_enter, NULL);
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_window_is_activated(w1_ptr));
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_activated(w2_ptr));
++
++    wlmtk_workspace_unmap_window(ws_ptr, w2_ptr);
++    wlmtk_window_destroy(w2_ptr);
++    wlmtk_workspace_unmap_window(ws_ptr, w1_ptr);
++    wlmtk_window_destroy(w1_ptr);
++    wlmtk_desktop_remove_workspace(desktop_ptr, ws_ptr);
++    wlmtk_workspace_destroy(ws_ptr);
++    wlmtk_desktop_destroy(desktop_ptr);
++    wl_display_destroy(wl_display_ptr);
++    wlr_scene_node_destroy(&wlr_scene_ptr->tree.node);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Exercises workspace adding and removal. */
+ void test_workspaces(bs_test_t *test_ptr)
+diff --git a/src/toolkit/titlebar_title.c b/src/toolkit/titlebar_title.c
+index 836ffdf..646d46c 100644
+--- a/src/toolkit/titlebar_title.c
++++ b/src/toolkit/titlebar_title.c
+@@ -41,6 +41,7 @@
+ #include "primitives.h"
+ #include "style.h"
+ #include "test.h"  // IWYU pragma: keep
++#include "titlebar.h"
+ #include "tile.h"
+ #include "workspace.h"
+ 
+@@ -86,9 +87,11 @@ struct wlr_buffer *title_create_buffer(
+ 
+ /**
+  * Maximum time between two left-button presses on the title, to be taken as
+- * a double-click (which toggles shading the window).
++ * a double-click (which toggles shading the window). See
++ * @ref wlmtk_titlebar_set_double_click_msec.
+  */
+-static const uint32_t _wlmtk_titlebar_title_double_click_msec = 300;
++static uint32_t _wlmtk_titlebar_title_double_click_msec =
++    WLMTK_TITLEBAR_DOUBLE_CLICK_MSEC;
+ 
+ /* == Data ================================================================= */
+ 
+@@ -186,6 +189,13 @@ wlmtk_element_t *wlmtk_titlebar_title_element(
+     return &titlebar_title_ptr->super_buffer.super_element;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmtk_titlebar_set_double_click_msec(uint32_t msec)
++{
++    _wlmtk_titlebar_title_double_click_msec =
++        0 < msec ? msec : WLMTK_TITLEBAR_DOUBLE_CLICK_MSEC;
++}
++
+ /* == Local (static) methods =============================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/toolkit/window.c b/src/toolkit/window.c
+index 47d44ed..04fd8e9 100644
+--- a/src/toolkit/window.c
++++ b/src/toolkit/window.c
+@@ -142,6 +142,8 @@ struct _wlmtk_window_t {
+     bool                      placed;
+     /** Whether this window is currently activated (has keyboard focus). */
+     bool                      activated;
++    /** Listener for `pointer_enter` of the window's element. */
++    struct wl_listener        pointer_enter_listener;
+ };
+ 
+ /** Type-safe holder for the window style's reference counter. */
+@@ -182,6 +184,10 @@ static void _wlmtk_window_menu_request_close_handler(
+ 
+ static void _wlmtk_window_style_destroy(bs_ref_t *ref_ptr);
+ 
++static void _wlmtk_window_handle_pointer_enter(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
++
+ static void _wlmtk_window_request_fullscreen_size(
+     wlmtk_window_t *window_ptr,
+     bool fullscreen);
+@@ -259,6 +265,10 @@ wlmtk_window_t *wlmtk_window_create(
+     window_ptr->orig_super_element_vmt = wlmtk_element_extend(
+         &window_ptr->bordered.super_container.super_element,
+         &window_element_vmt);
++    wlmtk_util_connect_listener_signal(
++        &window_ptr->bordered.super_container.super_element.events.pointer_enter,
++        &window_ptr->pointer_enter_listener,
++        _wlmtk_window_handle_pointer_enter);
+ 
+     wlmtk_element_extend(
+         &window_ptr->content_container.super_element,
+@@ -300,6 +310,7 @@ error:
+ /* ------------------------------------------------------------------------- */
+ void wlmtk_window_destroy(wlmtk_window_t *window_ptr)
+ {
++    wlmtk_util_disconnect_listener(&window_ptr->pointer_enter_listener);
+     wlmtk_window_set_server_side_decorated(window_ptr, false);
+ 
+     if (NULL != window_ptr->window_menu_ptr) {
+@@ -1311,6 +1322,29 @@ void _wlmtk_window_request_fullscreen_size(wlmtk_window_t *window_ptr,
+     wl_signal_emit(&window_ptr->events.request_size, &desired_size);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Handles `pointer_enter` of the window's element: With focus follows
++ * pointer, activates the window (without raising it), like Window Maker's
++ * 'sloppy' focus.
++ *
++ * @param listener_ptr
++ * @param data_ptr
++ */
++void _wlmtk_window_handle_pointer_enter(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmtk_window_t *window_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmtk_window_t, pointer_enter_listener);
++    wlmtk_workspace_t *workspace_ptr = window_ptr->workspace_ptr;
++    if (NULL == workspace_ptr || window_ptr->activated) return;
++    wlmtk_desktop_t *desktop_ptr = wlmtk_workspace_get_desktop(workspace_ptr);
++    if (NULL == desktop_ptr ||
++        !wlmtk_desktop_get_focus_follows_pointer(desktop_ptr)) return;
++    wlmtk_workspace_activate_window(workspace_ptr, window_ptr);
++}
++
+ /* == Unit Tests =========================================================== */
+ 
+ static void test_create_destroy(bs_test_t *test_ptr);
+-- 
+2.55.0
+
