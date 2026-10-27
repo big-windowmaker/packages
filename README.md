@@ -121,6 +121,10 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
   configuração ou de hardware: `wmweather` (código ICAO do aeroporto, ex.
   `wmweather -s SBGR -m`, e rede), `wmsun` (`-lat`/`-lon`, longitude
   positiva a oeste) e `wmcpufreq` (driver cpufreq: não abre em VM sem ele).
+  O `wmusic` leva um patch próprio: segue o player MPRIS que está tocando (o
+  primeiro da lista, muitas vezes o Firefox parado, escondia o player de
+  verdade) e não congela mais quando o comando do player (`-c`, `xmms` por
+  padrão) não abre um player MPRIS.
 - **biglinux-livecd**: as dependências de execução só existem nos
   repositórios BigLinux, então o diretório tem `.ci-nodeps`: o CI compila sem
   resolver dependências e pula o teste de instalação.
