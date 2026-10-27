@@ -114,9 +114,24 @@
 #         Dock ficam no que sobra
 #   0074  wlmdock não liga mais na libxcb (namcap: "Unused shared library
 #         libxcb.so.1"): carregar a configuração puxava o compositor inteiro
+#   0075-0079: para o big-wm-wprefs-sync levar as configurações do WPrefs ao
+#   wlmaker (branch feature/wprefs-reload do fork)
+#   0075  ações WorkspaceSwitchTo e WindowToWorkspace (área N), como as teclas
+#         Workspace1Key... e MoveToWorkspace1Key... do Window Maker, e
+#         WindowToggleShaded (ShadeKey)
+#   0076  cantos ativos: as ações dos cantos de baixo estavam trocadas (o
+#         "BottomLeftEnter = LockScreen" bloqueava no canto direito); ações
+#         com argumento, como nos atalhos: (ShellExecute, "comando")
+#   0077  'Justify' (Left, Center, Right) no estilo da barra de título
+#         (TitleJustify do Window Maker)
+#   0078  seção 'Mouse' do Config.plist: aceleração do ponteiro (AccelSpeed,
+#         AccelProfile, como o "xset m" do WPrefs) e DoubleClickTime;
+#         'FocusMode = Sloppy': a janela sob o ponteiro recebe o foco
+#   0079  recarrega Config.plist, tema, atalhos, teclado, mouse, cantos e menu
+#         raiz com SIGHUP ou a ação ReloadConfiguration, sem sair da sessão
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=10
+pkgrel=11
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -217,6 +232,11 @@ _patches=(
   0072-context_menu-Gives-the-menu-keyboard-focus-so-Escape.patch
   0073-layer-Arranges-panels-spanning-a-full-edge-first-lik.patch
   0074-config-Defines-the-task-list-style-descriptor-with-t.patch
+  0075-action-Adds-workspace-by-number-actions-and-WindowTo.patch
+  0076-corner-Fixes-the-swapped-bottom-corners-permits-acti.patch
+  0077-titlebar-Adds-Justify-to-the-title-bar-style-Left-Ce.patch
+  0078-config-Adds-pointer-acceleration-double-click-time-a.patch
+  0079-server-Reloads-the-configuration-on-SIGHUP-or-the-Re.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -292,7 +312,12 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'f7eb782d6970f84cb7457cfd6a20215450e8b1dd48517ad4f14eb5ef2839f212'
             '23fe8a291f73dda14486f0777a50e6537c239e94cdba42757dd308822cdbf1da'
             '4f93b4316533c04f269908b0a6dcdd889422521dc4ed0044bffba4733845781d'
-            '94c2dff6a504c3c152aa35c61befedb288d0e8f692580d7df78d4ef43ce36da5')
+            '94c2dff6a504c3c152aa35c61befedb288d0e8f692580d7df78d4ef43ce36da5'
+            'ac02222e7351d84b36060e5c17eba52e69c12cb255dee354078c6a7895e62429'
+            '7284229939c9ab6e22a187aa6cd74530408460a2ef76f6ec0ce5279a923c1fdb'
+            '7289b875c1feb43204366afaad1beed649cd2544e9226d643edb6578ac3b290b'
+            '1775e982b7978afbbf0c1f0fb8a60d706a6c5b3f4c2873d11164616200bb4ea5'
+            '947cd0a56cb56dc7ce7e4c2433b6c0b87bf8764fc9b9f8e0e059686f99948ae7')
 
 prepare() {
   cd wlmaker

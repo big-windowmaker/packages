@@ -1,0 +1,779 @@
+From 0f0860724a0cfc5e384ff372b5cb29ec5ccc42c1 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 27 Oct 2026 15:52:54 -0300
+Subject: [PATCH] server: Reloads the configuration on SIGHUP, or the
+ ReloadConfiguration action.
+
+Changing the configuration, the theme or the root menu required restarting
+wlmaker, and with it the session. Configuration tools (eg. a converter of
+Window Maker's preferences) had no way to apply their changes.
+
+wlmaker_server_reload() re-reads the configuration file (the same that was
+found on start, or --config_file) and applies:
+ - KeyBindings: Replaced, if all of them bind; else the current ones stay.
+ - Keyboard (XKB layout, repeat), Touchpad and Mouse: Applied to the devices.
+ - WindowPlacement, FocusMode, Mouse.DoubleClickTime.
+ - HotCorner.
+ - The theme (--theme_file or 'ThemeFile'), as ThemeLoadFromFile does.
+ - The root menu (--root_menu_file, or the default), unless it is open.
+Anything failing to load keeps the current setting. Outputs, decoration
+mode, screen lock, autostart and the state's workspaces still apply only on
+start. The cursor's MoveWindowModifier applies to windows created
+afterwards.
+
+SIGHUP triggers the reload; the signal stays unblocked in launched
+programs. The action 'ReloadConfiguration' (eg. for a key binding or a
+menu item) runs it from an idle callback, since it replaces the key binding
+or menu item that triggered it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/action.c        |  26 ++++++++---
+ src/action.h        |  13 ++++++
+ src/corner.c        |  60 ++++++++++++++++++++++++
+ src/corner.h        |  12 +++++
+ src/input/manager.c | 109 ++++++++++++++++++++++++++++++++++++++++++++
+ src/input/manager.h |  15 ++++++
+ src/input/pointer.c |  10 ++++
+ src/input/pointer.h |  11 +++++
+ src/root_menu.c     |  34 ++++++++++++++
+ src/root_menu.h     |  14 ++++++
+ src/server.c        |  66 +++++++++++++++++++++++++++
+ src/server.h        |  24 ++++++++++
+ src/wlmaker.c       |  53 +++++++++++++++++++--
+ 13 files changed, 437 insertions(+), 10 deletions(-)
+
+diff --git a/src/action.c b/src/action.c
+index 2483c7d..a664b14 100644
+--- a/src/action.c
++++ b/src/action.c
+@@ -89,10 +89,8 @@ static bool _wlmaker_keybindings_bind_item(
+ static bool _wlmaker_action_bound_callback(
+     const struct wlmim_keybinding_combo *binding_ptr);
+ 
+-static bool _wlmaker_action_theme_load_from_file(
+-    wlmaker_server_t *server_ptr,
+-    const char *fname_ptr);
+ 
++static void _wlmaker_action_reload_idle(void *data_ptr);
+ static bool _wlmaker_action_workspace_index(
+     const char *arg_ptr,
+     size_t *index_ptr);
+@@ -142,6 +140,7 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
+     BSPL_ENUM("RootMenu", WLMAKER_ACTION_ROOT_MENU),
+ 
+     BSPL_ENUM("ThemeLoadFromFile", WLMAKER_ACTION_THEME_LOAD_FROM_FILE),
++    BSPL_ENUM("ReloadConfiguration", WLMAKER_ACTION_RELOAD_CONFIGURATION),
+ 
+     BSPL_ENUM("OutputMagnify", WLMAKER_ACTION_OUTPUT_MAGNIFY),
+     BSPL_ENUM("OutputReduce", WLMAKER_ACTION_OUTPUT_REDUCE),
+@@ -480,7 +479,16 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
+         break;
+ 
+     case WLMAKER_ACTION_THEME_LOAD_FROM_FILE:
+-        _wlmaker_action_theme_load_from_file(server_ptr, arg_ptr);
++        wlmaker_action_theme_load_from_file(server_ptr, arg_ptr);
++        break;
++
++    case WLMAKER_ACTION_RELOAD_CONFIGURATION:
++        // Deferred: The key binding (or menu item) running this action
++        // gets replaced by the reload.
++        wl_event_loop_add_idle(
++            wl_display_get_event_loop(server_ptr->wl_display_ptr),
++            _wlmaker_action_reload_idle,
++            server_ptr);
+         break;
+ 
+     case WLMAKER_ACTION_OUTPUT_MAGNIFY:
+@@ -698,6 +706,13 @@ bool _wlmaker_action_bound_callback(
+     return true;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Idle callback for ReloadConfiguration. */
++void _wlmaker_action_reload_idle(void *data_ptr)
++{
++    wlmaker_server_reload(data_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Parses the workspace number of WorkspaceSwitchTo and WindowToWorkspace.
+@@ -724,8 +739,7 @@ bool _wlmaker_action_workspace_index(const char *arg_ptr, size_t *index_ptr)
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+-/** Loads a theme file and applies it. */
+-bool _wlmaker_action_theme_load_from_file(
++bool wlmaker_action_theme_load_from_file(
+     wlmaker_server_t *server_ptr,
+     const char *fname_ptr)
+ {
+diff --git a/src/action.h b/src/action.h
+index 2ec3f0b..9f43243 100644
+--- a/src/action.h
++++ b/src/action.h
+@@ -72,6 +72,7 @@ typedef enum {
+     WLMAKER_ACTION_ROOT_MENU,
+ 
+     WLMAKER_ACTION_THEME_LOAD_FROM_FILE,
++    WLMAKER_ACTION_RELOAD_CONFIGURATION,
+ 
+     WLMAKER_ACTION_OUTPUT_MAGNIFY,
+     WLMAKER_ACTION_OUTPUT_REDUCE,
+@@ -133,6 +134,18 @@ void wlmaker_action_execute(
+     wlmaker_action_t action,
+     void *arg_ptr);
+ 
++/**
++ * Loads a theme file and applies it to the windows, menus and cursor.
++ *
++ * @param server_ptr
++ * @param fname_ptr           Theme file, or NULL for the default theme.
++ *
++ * @return true on success.
++ */
++bool wlmaker_action_theme_load_from_file(
++    wlmaker_server_t *server_ptr,
++    const char *fname_ptr);
++
+ /** Unit test set. */
+ extern const bs_test_set_t   wlmaker_action_test_set;
+ 
+diff --git a/src/corner.c b/src/corner.c
+index e0b227d..833b755 100644
+--- a/src/corner.c
++++ b/src/corner.c
+@@ -247,6 +247,38 @@ wlmaker_corner_t *wlmaker_corner_create(
+     return corner_ptr;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++bool wlmaker_corner_reconfigure(
++    wlmaker_corner_t *corner_ptr,
++    bspl_dict_t *hot_corner_config_dict_ptr)
++{
++    wlmaker_corner_t *new_ptr = logged_calloc(1, sizeof(wlmaker_corner_t));
++    if (NULL == new_ptr) return false;
++    if (!bspl_decode_dict(
++            hot_corner_config_dict_ptr,
++            _wlmaker_corner_config_desc,
++            new_ptr)) {
++        bs_log(BS_WARNING, "Failed to parse 'HotCorner' dict.");
++        free(new_ptr);
++        return false;
++    }
++
++    // Takes over the configured values (and the arguments' ownership).
++    bspl_decoded_destroy(_wlmaker_corner_config_desc, corner_ptr);
++    corner_ptr->trigger_delay_msec = new_ptr->trigger_delay_msec;
++    corner_ptr->top_left_enter_action = new_ptr->top_left_enter_action;
++    corner_ptr->top_left_leave_action = new_ptr->top_left_leave_action;
++    corner_ptr->top_right_enter_action = new_ptr->top_right_enter_action;
++    corner_ptr->top_right_leave_action = new_ptr->top_right_leave_action;
++    corner_ptr->bottom_left_enter_action = new_ptr->bottom_left_enter_action;
++    corner_ptr->bottom_left_leave_action = new_ptr->bottom_left_leave_action;
++    corner_ptr->bottom_right_enter_action = new_ptr->bottom_right_enter_action;
++    corner_ptr->bottom_right_leave_action =
++        new_ptr->bottom_right_leave_action;
++    free(new_ptr);
++    return true;
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmaker_corner_destroy(wlmaker_corner_t *corner_ptr)
+ {
+@@ -613,6 +645,34 @@ void _wlmaker_corner_test(bs_test_t *test_ptr)
+     BS_TEST_VERIFY_EQ(
+         test_ptr, NULL, _wlmaker_corner_action(c_ptr, WLR_EDGE_TOP, true));
+ 
++    // Reconfiguring replaces the actions; an invalid dict keeps them.
++    bspl_object_t *new_obj_ptr = bspl_create_object_from_plist_string(
++        "{ TriggerDelay = 250; TopLeftEnter = (ShellExecute, \"a\"); }");
++    BS_TEST_VERIFY_TRUE(
++        test_ptr,
++        wlmaker_corner_reconfigure(c_ptr, bspl_dict_from_object(new_obj_ptr)));
++    bspl_object_unref(new_obj_ptr);
++    BS_TEST_VERIFY_EQ(test_ptr, 250, c_ptr->trigger_delay_msec);
++    BS_TEST_VERIFY_STREQ(
++        test_ptr, "a",
++        _wlmaker_corner_action(
++            c_ptr, WLR_EDGE_TOP | WLR_EDGE_LEFT, true)->arg_ptr);
++    BS_TEST_VERIFY_EQ(
++        test_ptr, WLMAKER_ACTION_NONE,
++        _wlmaker_corner_action(
++            c_ptr, WLR_EDGE_BOTTOM | WLR_EDGE_LEFT, true)->action);
++    new_obj_ptr = bspl_create_object_from_plist_string(
++        "{ TriggerDelay = 100; TopLeftEnter = NotAnAction; }");
++    BS_TEST_VERIFY_FALSE(
++        test_ptr,
++        wlmaker_corner_reconfigure(c_ptr, bspl_dict_from_object(new_obj_ptr)));
++    bspl_object_unref(new_obj_ptr);
++    BS_TEST_VERIFY_EQ(test_ptr, 250, c_ptr->trigger_delay_msec);
++    // Restores the test's configuration.
++    BS_TEST_VERIFY_TRUE(
++        test_ptr,
++        wlmaker_corner_reconfigure(c_ptr, bspl_dict_from_object(obj_ptr)));
++
+     BS_TEST_VERIFY_EQ(
+         test_ptr, 0, c_ptr->current_corner);
+ 
+diff --git a/src/corner.h b/src/corner.h
+index 7beae5f..6bb8530 100644
+--- a/src/corner.h
++++ b/src/corner.h
+@@ -58,6 +58,18 @@ wlmaker_corner_t *wlmaker_corner_create(
+     struct wl_signal *cursor_position_updated_ptr,
+     wlmaker_server_t *server_ptr);
+ 
++/**
++ * Re-reads the hot corners' configuration ('HotCorner' dict).
++ *
++ * @param corner_ptr
++ * @param hot_corner_config_dict_ptr
++ *
++ * @return false on error, then the current configuration stays.
++ */
++bool wlmaker_corner_reconfigure(
++    wlmaker_corner_t *corner_ptr,
++    bspl_dict_t *hot_corner_config_dict_ptr);
++
+ /**
+  * Destroys the hot-corner handler.
+  *
+diff --git a/src/input/manager.c b/src/input/manager.c
+index e5bdc69..d335602 100644
+--- a/src/input/manager.c
++++ b/src/input/manager.c
+@@ -156,6 +156,9 @@ static void _wlmim_device_update_capabilities(
+ static void _wlmim_device_configure_keyboard(
+     bs_dllist_node_t *dlnode_ptr,
+     void *ud_ptr);
++static void _wlmim_device_configure_pointer(
++    bs_dllist_node_t *dlnode_ptr,
++    void *ud_ptr);
+ static bool _wlmim_process_keybinding(
+     bs_dllist_node_t *dlnode_ptr,
+     void *ud_ptr);
+@@ -388,6 +391,45 @@ void wlmim_input_manager_set_keymap(
+         input_manager_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++bool wlmim_input_manager_reconfigure(
++    wlmim_t *input_manager_ptr,
++    bspl_dict_t *config_dict_ptr)
++{
++    struct xkb_keymap *xkb_keymap_ptr = wlmim_keyboard_xkb_from_config(
++        config_dict_ptr);
++    if (NULL == xkb_keymap_ptr) {
++        bs_log(BS_WARNING, "Failed to load the keymap from the configuration.");
++        return false;
++    }
++
++    wlmim_t *new_ptr = logged_calloc(1, sizeof(*new_ptr));
++    if (NULL == new_ptr) {
++        xkb_keymap_unref(xkb_keymap_ptr);
++        return false;
++    }
++    if (!bspl_decode_dict(config_dict_ptr, _wlmim_manager_config, new_ptr)) {
++        bs_log(BS_WARNING, "Failed to decode the input configuration.");
++        free(new_ptr);
++        xkb_keymap_unref(xkb_keymap_ptr);
++        return false;
++    }
++    input_manager_ptr->keyboard_options = new_ptr->keyboard_options;
++    input_manager_ptr->pointer_options = new_ptr->pointer_options;
++    input_manager_ptr->cursor_options = new_ptr->cursor_options;
++    bspl_decoded_destroy(_wlmim_manager_config, new_ptr);
++    free(new_ptr);
++
++    // Applies the keymap and the keyboard options to all keyboards.
++    wlmim_input_manager_set_keymap(input_manager_ptr, xkb_keymap_ptr);
++    xkb_keymap_unref(xkb_keymap_ptr);
++    bs_dllist_for_each(
++        &input_manager_ptr->devices,
++        _wlmim_device_configure_pointer,
++        input_manager_ptr);
++    return true;
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmim_input_manager_set_repeat_info(
+     wlmim_t *input_manager_ptr,
+@@ -758,6 +800,28 @@ void _wlmim_device_configure_keyboard(
+     }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Configures devices of type pointer. Iterator for `bs_dllist_for_each`.
++ *
++ * @param dlnode_ptr
++ * @param ud_ptr              Points to a @ref wlmim_t.
++ */
++void _wlmim_device_configure_pointer(
++    bs_dllist_node_t *dlnode_ptr,
++    void *ud_ptr)
++{
++    struct wlmim_device *device_ptr = BS_CONTAINER_OF(
++        dlnode_ptr, struct wlmim_device, dlnode);
++    wlmim_t *input_manager_ptr = ud_ptr;
++
++    if (device_ptr->wlr_input_device_ptr->type == WLR_INPUT_DEVICE_POINTER) {
++        wlmim_pointer_configure(
++            device_ptr->handle_ptr,
++            &input_manager_ptr->pointer_options);
++    }
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Process one keybinding, as iterator to `bs_dllist_all`.
+@@ -808,8 +872,11 @@ void _wlmim_unbind_node(
+ static void _wlmim_test_bind(bs_test_t *test_ptr);
+ 
+ /** Test cases for the input manager. */
++static void _wlmim_test_reconfigure(bs_test_t *test_ptr);
++
+ static const bs_test_case_t   _wlmim_test_cases[] = {
+     { true, "bind", _wlmim_test_bind },
++    { true, "reconfigure", _wlmim_test_reconfigure },
+     BS_TEST_CASE_SENTINEL()
+ };
+ 
+@@ -876,4 +943,46 @@ void _wlmim_test_bind(bs_test_t *test_ptr)
+     wlmim_unbind_key(&im, kb1_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Tests re-reading the configuration. */
++void _wlmim_test_reconfigure(bs_test_t *test_ptr)
++{
++    wlmim_t *im_ptr = wlmim_input_manager_create(
++        NULL, NULL, NULL, NULL, NULL, NULL, NULL);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, im_ptr);
++
++    bspl_dict_t *d = bspl_dict_from_object(
++        bspl_create_object_from_plist_string(
++            "{"
++            "Keyboard = { Repeat = { Delay = 250; Rate = 40; };"
++            "  XkbRMLVO = { Rules = evdev; Model = pc105; Layout = us;"
++            "    Variant = \"\"; Options = \"\"; }; };"
++            "Mouse = { AccelSpeed = 0.5; };"
++            "Cursor = { MoveWindowModifier = Logo; };"
++            "}"));
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmim_input_manager_reconfigure(im_ptr, d));
++    BS_TEST_VERIFY_EQ(test_ptr, 250, im_ptr->keyboard_options.repeat.delay);
++    BS_TEST_VERIFY_EQ(test_ptr, 40, im_ptr->keyboard_options.repeat.rate);
++    BS_TEST_VERIFY_TRUE(test_ptr, im_ptr->pointer_options.mouse.present);
++    BS_TEST_VERIFY_TRUE(
++        test_ptr, 0.5 == im_ptr->pointer_options.mouse.accel_speed);
++    BS_TEST_VERIFY_EQ(
++        test_ptr, WLR_MODIFIER_LOGO,
++        wlmim_cursor_options(im_ptr)->move_window_modifier);
++    BS_TEST_VERIFY_NEQ(test_ptr, NULL, im_ptr->xkb_keymap_ptr);
++    bspl_dict_unref(d);
++
++    // An invalid configuration keeps the current one.
++    d = bspl_dict_from_object(
++        bspl_create_object_from_plist_string(
++            "{ Keyboard = { Repeat = { Delay = Slow; }; }; }"));
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmim_input_manager_reconfigure(im_ptr, d));
++    BS_TEST_VERIFY_EQ(test_ptr, 250, im_ptr->keyboard_options.repeat.delay);
++    bspl_dict_unref(d);
++
++    wlmim_input_manager_destroy(im_ptr);
++}
++
+ /* == End of manager.c ===================================================== */
+diff --git a/src/input/manager.h b/src/input/manager.h
+index 8456eaf..b137b11 100644
+--- a/src/input/manager.h
++++ b/src/input/manager.h
+@@ -182,6 +182,21 @@ void wlmim_input_manager_set_keymap(
+     wlmim_t *input_manager_ptr,
+     struct xkb_keymap *xkb_keymap_ptr);
+ 
++/**
++ * Re-reads the input sections of the configuration ('Keyboard', 'Touchpad',
++ * 'Mouse', 'Cursor') and applies them to the devices: Keymap and repeat
++ * rate to the keyboards, acceleration and touchpad options to the pointers.
++ * The cursor's modifiers apply to windows created afterwards.
++ *
++ * @param input_manager_ptr
++ * @param config_dict_ptr
++ *
++ * @return false on error, then the current configuration stays.
++ */
++bool wlmim_input_manager_reconfigure(
++    wlmim_t *input_manager_ptr,
++    bspl_dict_t *config_dict_ptr);
++
+ /**
+  * Sets repeat information for all keyboards of the input manager.
+  *
+diff --git a/src/input/pointer.c b/src/input/pointer.c
+index 55933ca..43039e3 100644
+--- a/src/input/pointer.c
++++ b/src/input/pointer.c
+@@ -170,6 +170,16 @@ bool wlmim_pointer_enabled(wlmim_pointer_t *pointer_ptr)
+     return pointer_ptr->enabled;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmim_pointer_configure(
++    wlmim_pointer_t *pointer_ptr,
++    const struct wlmim_pointer_options *options_ptr)
++{
++    bool enabled = pointer_ptr->enabled;
++    _wlmim_pointer_apply(pointer_ptr, options_ptr);
++    pointer_ptr->enabled = enabled;
++}
++
+ /* == Local (static) methods =============================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/input/pointer.h b/src/input/pointer.h
+index 4b79c5f..f2154db 100644
+--- a/src/input/pointer.h
++++ b/src/input/pointer.h
+@@ -86,6 +86,17 @@ void wlmim_pointer_destroy(wlmim_pointer_t *pointer_ptr);
+ /** @return @ref wlmim_pointer_t::enabled. */
+ bool wlmim_pointer_enabled(wlmim_pointer_t *pointer_ptr);
+ 
++/**
++ * (Re)applies the options to the pointer device. Whether a touchpad is
++ * enabled only applies when the device is added.
++ *
++ * @param pointer_ptr
++ * @param options_ptr
++ */
++void wlmim_pointer_configure(
++    wlmim_pointer_t *pointer_ptr,
++    const struct wlmim_pointer_options *options_ptr);
++
+ /** Plist descriptor for the "Touchpad" section. */
+ extern const bspl_desc_t wlmim_pointer_options_desc[];
+ /** Descriptor of the 'Mouse' section, decodes into wlmim_pointer_options. */
+diff --git a/src/root_menu.c b/src/root_menu.c
+index b02a6d2..0312217 100644
+--- a/src/root_menu.c
++++ b/src/root_menu.c
+@@ -303,6 +303,40 @@ void wlmaker_root_menu_destroy(wlmaker_root_menu_t *root_menu_ptr)
+     free(root_menu_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++bool wlmaker_root_menu_reload(
++    wlmaker_server_t *server_ptr,
++    const char *arg_root_menu_file_ptr)
++{
++    wlmaker_root_menu_t *old_ptr = server_ptr->root_menu_ptr;
++    if (NULL != old_ptr &&
++        NULL != wlmtk_window_get_workspace(old_ptr->window_ptr)) {
++        bs_log(BS_WARNING, "Root menu is open, not reloading it.");
++        return false;
++    }
++
++    // wlmaker_root_menu_create() registers the new menu with the server.
++    server_ptr->root_menu_ptr = NULL;
++    wlmaker_root_menu_t *new_ptr = wlmaker_root_menu_create(
++        server_ptr,
++        arg_root_menu_file_ptr,
++        wlmtk_window_style_to_ref(server_ptr->style_ptr->window_style_ptr),
++        wlmtk_menu_style_to_ref(server_ptr->style_ptr->menu_style_ptr));
++    if (NULL == new_ptr) {
++        bs_log(BS_WARNING, "Failed to reload the root menu, keeping it.");
++        server_ptr->root_menu_ptr = old_ptr;
++        return false;
++    }
++    wlmtk_menu_set_open(wlmaker_root_menu_menu(new_ptr), false);
++
++    if (NULL != old_ptr) {
++        server_ptr->root_menu_ptr = old_ptr;
++        wlmaker_root_menu_destroy(old_ptr);
++    }
++    server_ptr->root_menu_ptr = new_ptr;
++    return true;
++}
++
+ /* ------------------------------------------------------------------------- */
+ wlmtk_window_t *wlmaker_root_menu_window(wlmaker_root_menu_t *root_menu_ptr)
+ {
+diff --git a/src/root_menu.h b/src/root_menu.h
+index f24cfe4..4506ee1 100644
+--- a/src/root_menu.h
++++ b/src/root_menu.h
+@@ -57,6 +57,20 @@ wlmaker_root_menu_t *wlmaker_root_menu_create(
+  */
+ void wlmaker_root_menu_destroy(wlmaker_root_menu_t *root_menu_ptr);
+ 
++/**
++ * Replaces the server's root menu with one loaded anew, eg. after the menu
++ * file changed. Uses the server's current styles. Does nothing while the
++ * root menu is open.
++ *
++ * @param server_ptr
++ * @param arg_root_menu_file_ptr  As for @ref wlmaker_root_menu_create.
++ *
++ * @return true if replaced. On error, the current root menu stays.
++ */
++bool wlmaker_root_menu_reload(
++    wlmaker_server_t *server_ptr,
++    const char *arg_root_menu_file_ptr);
++
+ /** @return the window holding the root menu. */
+ wlmtk_window_t *wlmaker_root_menu_window(wlmaker_root_menu_t *root_menu_ptr);
+ 
+diff --git a/src/server.c b/src/server.c
+index ef573e9..2d5569e 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -42,6 +42,8 @@
+ #include <wlr/types/wlr_xdg_activation_v1.h>
+ #undef WLR_USE_UNSTABLE
+ 
++#include "action.h"
++#include "default_configuration.h"
+ #include "input/manager.h"
+ #include "task_list.h"
+ #include "toolkit/toolkit.h"
+@@ -374,6 +376,70 @@ wlmaker_server_t *wlmaker_server_create(
+     return server_ptr;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++bool wlmaker_server_reload(wlmaker_server_t *server_ptr)
++{
++    bs_log(BS_INFO, "Reloading configuration, theme and root menu.");
++    bspl_object_t *object_ptr = wlmaker_config_object_load(
++        server_ptr->files_ptr,
++        "wlmaker config",
++        server_ptr->config_fname_ptr,
++        "Config.plist",
++        embedded_binary_default_configuration_data,
++        embedded_binary_default_configuration_size);
++    bspl_dict_t *config_dict_ptr = bspl_dict_from_object(object_ptr);
++    if (NULL == config_dict_ptr) {
++        bs_log(BS_ERROR, "Failed to reload the configuration, keeping it.");
++        if (NULL != object_ptr) bspl_object_unref(object_ptr);
++        return false;
++    }
++    bool rv = true;
++
++    // Key bindings: The new ones replace the current, if they all bind.
++    wlmaker_action_handle_t *handle_ptr = wlmaker_action_bind_keys(
++        server_ptr,
++        bspl_dict_get_dict(config_dict_ptr, wlmaker_action_config_dict_key),
++        server_ptr->options_ptr->bind_with_logo);
++    if (NULL == handle_ptr) {
++        bs_log(BS_WARNING, "Failed to bind keys, keeping the key bindings.");
++        rv = false;
++    } else {
++        if (NULL != server_ptr->action_handle_ptr) {
++            wlmaker_action_unbind_keys(server_ptr->action_handle_ptr);
++        }
++        server_ptr->action_handle_ptr = handle_ptr;
++    }
++
++    if (!wlmim_input_manager_reconfigure(
++            server_ptr->input_manager_ptr, config_dict_ptr)) rv = false;
++    wlmaker_server_configure_desktop(server_ptr, config_dict_ptr);
++    bspl_dict_t *corner_dict_ptr = bspl_dict_get_dict(
++        config_dict_ptr, "HotCorner");
++    if (NULL != server_ptr->corner_ptr && NULL != corner_dict_ptr &&
++        !wlmaker_corner_reconfigure(server_ptr->corner_ptr, corner_dict_ptr)) {
++        rv = false;
++    }
++
++    bspl_dict_unref(server_ptr->config_dict_ptr);
++    server_ptr->config_dict_ptr = config_dict_ptr;
++
++    // Theme: As on start, the `--theme_file` argument or 'ThemeFile'.
++    const char *theme_fname_ptr = server_ptr->theme_fname_ptr;
++    if (NULL == theme_fname_ptr) {
++        theme_fname_ptr = bspl_dict_get_string_value(
++            config_dict_ptr, "ThemeFile");
++    }
++    if (!wlmaker_action_theme_load_from_file(server_ptr, theme_fname_ptr)) {
++        bs_log(BS_WARNING, "Failed to reload the theme, keeping it.");
++        rv = false;
++    }
++
++    // Root menu, after the theme: It takes the current styles.
++    if (!wlmaker_root_menu_reload(
++            server_ptr, server_ptr->root_menu_fname_ptr)) rv = false;
++    return rv;
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmaker_server_configure_desktop(
+     wlmaker_server_t *server_ptr,
+diff --git a/src/server.h b/src/server.h
+index 13d2aff..9f0cf1e 100644
+--- a/src/server.h
++++ b/src/server.h
+@@ -85,6 +85,14 @@ struct _wlmaker_server_t {
+     wlm_util_files_t           *files_ptr;
+     /** The `--state_file` argument, or NULL. Where state gets stored. */
+     char                      *state_fname_ptr;
++    /** The `--config_file` argument, or NULL. Re-read when reloading. */
++    const char                *config_fname_ptr;
++    /** The `--theme_file` argument, or NULL. Re-read when reloading. */
++    const char                *theme_fname_ptr;
++    /** The `--root_menu_file` argument, or NULL. Re-read when reloading. */
++    const char                *root_menu_fname_ptr;
++    /** The bound key bindings. Replaced when reloading. */
++    struct _wlmaker_action_handle_t *action_handle_ptr;
+     /** Configuration dictionnary. */
+     bspl_dict_t               *config_dict_ptr;
+     /** Copy of the options. */
+@@ -230,6 +238,22 @@ wlmaker_server_t *wlmaker_server_create(
+  */
+ void wlmaker_server_destroy(wlmaker_server_t *server_ptr);
+ 
++/**
++ * Reloads the configuration file and applies what can change while running:
++ * Key bindings, keyboard (layout, repeat), pointer (acceleration, touchpad),
++ * 'WindowPlacement', 'FocusMode', the hot corners, the theme (windows,
++ * menus, cursor) and the root menu. Triggered by SIGHUP or the action
++ * 'ReloadConfiguration'. What fails to load keeps its current setting.
++ *
++ * Other settings (outputs, decoration mode, screen lock, autostart, the
++ * state's workspaces) apply when wlmaker starts.
++ *
++ * @param server_ptr
++ *
++ * @return true if everything was reloaded.
++ */
++bool wlmaker_server_reload(wlmaker_server_t *server_ptr);
++
+ /**
+  * Applies the desktop's settings from the configuration: 'WindowPlacement'
+  * (Smart or Center) and 'FocusMode' (Click, or Sloppy: windows get
+diff --git a/src/wlmaker.c b/src/wlmaker.c
+index 3bf0329..91d3a3b 100644
+--- a/src/wlmaker.c
++++ b/src/wlmaker.c
+@@ -25,6 +25,8 @@
+ #include <basedir.h>
+ #include <libbase/libbase.h>
+ #include <libbase/plist.h>
++#include <pthread.h>
++#include <signal.h>
+ #include <stdbool.h>
+ #include <stdint.h>
+ #include <stdio.h>
+@@ -135,6 +137,9 @@ static const bs_arg_t wlmaker_args[] = {
+     BS_ARG_SENTINEL()
+ };
+ 
++/** Event source for SIGHUP, which reloads the configuration. */
++static struct wl_event_source *wlmaker_sighup_event_source_ptr = NULL;
++
+ /** References auto-started subprocesses. */
+ static bs_ptr_stack_t         wlmaker_subprocess_stack;
+ 
+@@ -215,6 +220,24 @@ bool create_workspaces(
+     return rv;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Handles SIGHUP: Reloads configuration, theme, key bindings and menu. */
++static int _wlmaker_handle_sighup(__UNUSED__ int signal_number, void *data_ptr)
++{
++    wlmaker_server_reload(data_ptr);
++    return 0;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Unblocks SIGHUP in forked processes: Only wlmaker monitors it. */
++static void _wlmaker_atfork_child(void)
++{
++    sigset_t signal_set;
++    sigemptyset(&signal_set);
++    sigaddset(&signal_set, SIGHUP);
++    sigprocmask(SIG_UNBLOCK, &signal_set, NULL);
++}
++
+ /* == Main program ========================================================= */
+ /** The main program. */
+ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+@@ -263,7 +286,6 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+ 
+     bspl_dict_t *config_dict_ptr = wlmaker_config_load(
+         files_ptr, wlmaker_arg_config_file_ptr);
+-    if (NULL != wlmaker_arg_config_file_ptr) free(wlmaker_arg_config_file_ptr);
+     if (NULL == config_dict_ptr) {
+         fprintf(stderr, "Failed to load & initialize configuration.\n");
+         return EXIT_FAILURE;
+@@ -293,6 +315,10 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+     // Kept, for storing changes (eg. a Dock moved to another corner).
+     server_ptr->state_fname_ptr = wlmaker_arg_state_file_ptr;
+     wlmaker_arg_state_file_ptr = NULL;
++    // Kept, for reloading.
++    server_ptr->config_fname_ptr = wlmaker_arg_config_file_ptr;
++    server_ptr->theme_fname_ptr = wlmaker_arg_theme_file_ptr;
++    server_ptr->root_menu_fname_ptr = wlmaker_arg_root_menu_file_ptr;
+ 
+     // TODO(kaeser@gubbe.ch): Uh, that's ugly...
+     server_ptr->root_menu_ptr = wlmaker_root_menu_create(
+@@ -307,15 +333,28 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+         wlmaker_root_menu_menu(server_ptr->root_menu_ptr),
+         false);
+ 
+-    wlmaker_action_handle_t *action_handle_ptr = wlmaker_action_bind_keys(
++    server_ptr->action_handle_ptr = wlmaker_action_bind_keys(
+         server_ptr,
+         bspl_dict_get_dict(config_dict_ptr, wlmaker_action_config_dict_key),
+         wlmaker_server_options.bind_with_logo);
+-    if (NULL == action_handle_ptr) {
++    if (NULL == server_ptr->action_handle_ptr) {
+         bs_log(BS_ERROR, "Failed to bind keys.");
+         return EXIT_FAILURE;
+     }
+ 
++    // SIGHUP reloads the configuration. The signal is blocked for regular
++    // delivery: Not for launched programs.
++    wlmaker_sighup_event_source_ptr = wl_event_loop_add_signal(
++        wl_display_get_event_loop(server_ptr->wl_display_ptr),
++        SIGHUP,
++        _wlmaker_handle_sighup,
++        server_ptr);
++    if (NULL == wlmaker_sighup_event_source_ptr) {
++        bs_log(BS_WARNING, "Failed wl_event_loop_add_signal(SIGHUP): "
++               "Reloading by signal is not available.");
++    }
++    pthread_atfork(NULL, NULL, _wlmaker_atfork_child);
++
+     if (!create_workspaces(state_dict_ptr, server_ptr)) {
+         return EXIT_FAILURE;
+     }
+@@ -360,7 +399,12 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+ 
+     if (NULL != task_list_ptr) wlmaker_task_list_destroy(task_list_ptr);
+     if (NULL != clip_ptr) wlmaker_clip_destroy(clip_ptr);
+-    wlmaker_action_unbind_keys(action_handle_ptr);
++    if (NULL != wlmaker_sighup_event_source_ptr) {
++        wl_event_source_remove(wlmaker_sighup_event_source_ptr);
++        wlmaker_sighup_event_source_ptr = NULL;
++    }
++    wlmaker_action_unbind_keys(server_ptr->action_handle_ptr);
++    server_ptr->action_handle_ptr = NULL;
+     bspl_array_unref(server_ptr->root_menu_array_ptr);
+     wlmaker_server_destroy(server_ptr);
+ 
+@@ -370,6 +414,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+     }
+     bs_ptr_stack_fini(&wlmaker_subprocess_stack);
+ 
++    if (NULL != wlmaker_arg_config_file_ptr) free(wlmaker_arg_config_file_ptr);
+     bspl_decoded_destroy(wlmaker_config_style_desc, &style);
+     bspl_dict_unref(config_dict_ptr);
+     bspl_dict_unref(state_dict_ptr);
+-- 
+2.55.0
+
