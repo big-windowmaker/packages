@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r80.g7481afe
-	pkgrel = 7
+	pkgrel = 8
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -77,6 +77,8 @@ pkgbase = wlmaker
 	source = 0047-i18n-Adds-a-small-translation-table-for-menu-items-w.patch
 	source = 0048-dock-Keeps-a-main-tile-on-the-Dock-restores-default-.patch
 	source = 0049-clip-Adds-Clip.Icon-to-the-state-for-the-Clip-s-imag.patch
+	source = 0050-wlclient-Reports-the-pointer-s-position-and-its-moti.patch
+	source = 0051-apps-Makes-wlmmixer-s-volume-meter-interactive.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
 	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
@@ -129,5 +131,7 @@ pkgbase = wlmaker
 	sha256sums = c47c568096c6f9fc225b3b6328dbb029d64c65b4b08e066d3d6fdcbdb23ae340
 	sha256sums = 0ee92f3fdb6cc2e16d3914034957ededd0cf54c8430e9397b070d7a446da7da1
 	sha256sums = 2344de2c80127ab08ef56efeb11b28862fe5a1571057589454e7f20c7784b638
+	sha256sums = 76cb1a2f5cf4a9f78d9bd47c1f308a3f07ddc980f60d8404a9b553145f509329
+	sha256sums = 8de67c7f0f3b94e72f3edbac321d06976d0eeda20cfa6cbae6be1c921e861ba3
 
 pkgname = wlmaker
