@@ -1,0 +1,2805 @@
+From f11a08ab60e5c7f05f96caa2783655dc89f3d969 Mon Sep 17 00:00:00 2001
+From: ruscher <teste@hemofilia.org.br>
+Date: Mon, 26 Oct 2026 20:03:00 -0300
+Subject: [PATCH 41/41] dock: Moves the Dock and Clip like Window Maker, and
+ adds the launcher menu.
+
+Dock and Clip can be dragged to another corner of the output: Edge
+left/right by the horizontal half, anchor top/bottom by the vertical half
+the pointer is released in; a horizontal dock keeps its orientation. The
+Clip previews the corner while dragging; its dock-apps follow. The Dock
+(the layer surface of namespace 'wlmdock') is dragged by the compositor:
+Beyond a threshold of 8 pixels, wlmdock loses the pointer and does not
+launch. Dock and Clip don't share a corner: The other one takes the moved
+one's former corner. The new Edge and Anchor are stored in the state file,
+and wlmdock re-reads its position on SIGUSR1, which wlmaker sends. The
+Clip's menu has items to move it to the other side or end, too.
+
+wlmdock gets a right-click menu for launchers, drawn on its surface which
+grows for it: Launch, Kill (processes it launched), Remove (stored in the
+state; for the Clip's launchers, wlmdock signals wlmaker to update the room
+it leaves), and moving the Dock to the other side or end (not into the
+Clip's corner). It closes when the pointer leaves the surface, or on a
+click elsewhere. Areas without content are transparent now, not black.
+'wlmdock --clip' uses the layer namespace 'wlmdock-clip'.
+
+Unit tests for the quadrant to Edge/Anchor mapping, the corner conflict
+resolution and the Edge/Anchor plist coding.
+---
+ doc/config.md                 |  16 +-
+ src/CMakeLists.txt            |   2 +
+ src/clip.c                    | 406 +++++++++++++++++++++++
+ src/clip.h                    |  16 +
+ src/dock/CMakeLists.txt       |   2 +
+ src/dock/container_surface.c  |  30 ++
+ src/dock/launcher.c           |  82 +++++
+ src/dock/launcher.h           |  26 ++
+ src/dock/subcompositor.c      |  71 ++--
+ src/dock/subcompositor.h      |  16 +-
+ src/dock/tilebox.c            |  56 ++++
+ src/dock/tilebox.h            |  33 ++
+ src/dock_position.c           | 260 +++++++++++++++
+ src/dock_position.h           | 127 +++++++
+ src/layer_panel.c             | 172 +++++++++-
+ src/server.c                  |   4 +
+ src/server.h                  |   2 +
+ src/util/subprocess_monitor.c |   8 +
+ src/util/subprocess_monitor.h |  11 +
+ src/wlclient/wlclient.c       |  30 +-
+ src/wlclient/wlclient.h       |  17 +
+ src/wlmaker.c                 |   4 +-
+ src/wlmdock.c                 | 605 +++++++++++++++++++++++++++++++++-
+ tests/wlmaker_test.c          |   2 +
+ 24 files changed, 1969 insertions(+), 29 deletions(-)
+ create mode 100644 src/dock_position.c
+ create mode 100644 src/dock_position.h
+
+diff --git a/doc/config.md b/doc/config.md
+index 0412900..1b1d9f7 100644
+--- a/doc/config.md
++++ b/doc/config.md
+@@ -201,7 +201,8 @@ holds the workspaces, and the setup of the *Dock* (`wlmdock`) and the *Clip*.
+ 
+   Dock-apps can be re-arranged by dragging them with the left mouse button,
+   while holding the `MoveWindowModifier` (see @ref config_file, default
+-  `Alt`). The resulting order is stored in `Dockapps.plist`, in the user's
++  `Alt`) or on the tile's border; or with *Move Up* / *Move Down* from the
++  tile's menu (right button, same conditions). The resulting order is stored in `Dockapps.plist`, in the user's
+   configuration directory (`~/.config/wlmaker/`). When that file exists, it
+   takes precedence over `Dockapps`. Remove it to return to `Dockapps`.
+ 
+@@ -214,6 +215,12 @@ holds the workspaces, and the setup of the *Dock* (`wlmdock`) and the *Clip*.
+ * *Optional* `Margin`: For `wlmdock --clip` only: Distance of the launchers
+   from the anchor, in pixels. Defaults to one tile, ie. right below the Clip.
+ 
++The Clip can be dragged to another corner of the output with the left mouse
++button (not on its workspace buttons), or moved with *Move to …* from its
++menu (right button). The new `Edge` and `Anchor` are stored in the state file
++(the `--state_file`, or `~/.config/wlmaker/State.plist`). If the Dock is in
++that corner, the Dock moves to where the Clip was.
++
+ Example:
+ 
+ ```
+@@ -242,3 +249,10 @@ Read by `wlmdock` (without `--clip`).
+     as running only while processes it launched itself are alive.
+ 
+ * *Optional* `Margin`: Distance from the anchor, in pixels. Defaults to 0.
++
++The Dock can be dragged to another corner with the left mouse button: Moving
++the pointer by more than a few pixels with the button held drags it, a click
++launches. Its launchers' menu (right button) offers *Launch*, *Kill* (for
++processes it launched), *Remove* (stored in the state file) and moving it to
++the other side or end. Changes are stored in the state file; `wlmdock` re-reads
++its position on `SIGUSR1`, which wlmaker sends after moving it.
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index c8cef35..cc0310c 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -33,6 +33,7 @@ set(public_header_files
+   config.h
+   context_menu.h
+   corner.h
++  dock_position.h
+   dockapps.h
+   icon_manager.h
+   idle.h
+@@ -59,6 +60,7 @@ target_sources(wlmaker_lib PRIVATE
+   config.c
+   context_menu.c
+   corner.c
++  dock_position.c
+   dockapps.c
+   icon_manager.c
+   idle.c
+diff --git a/src/clip.c b/src/clip.c
+index d55f766..7001ae5 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -22,16 +22,22 @@
+ #include "clip.h"
+ 
+ #include <cairo.h>
++#include <inttypes.h>
+ #include <libbase/libbase.h>
+ #include <libbase/plist.h>
+ #include <linux/input-event-codes.h>
++#include <pthread.h>
+ #include <stdbool.h>
+ #include <stdio.h>
++#include <signal.h>
+ #include <stdlib.h>
++#include <string.h>
+ #include <sys/stat.h>
++#include <sys/types.h>
+ #include <wayland-server-core.h>
+ #include <wayland-util.h>
+ #define WLR_USE_UNSTABLE
++#include <wlr/types/wlr_cursor.h>
+ #include <wlr/types/wlr_output.h>
+ #include <wlr/types/wlr_output_layout.h>
+ #include <wlr/util/edges.h>
+@@ -42,6 +48,8 @@
+ #include "backend/output_config.h"
+ #include "context_menu.h"
+ #include "dockapps.h"
++#include "dock_position.h"
++#include "input/manager.h"
+ #include "toolkit/toolkit.h"
+ #include "util/files.h"
+ 
+@@ -95,6 +103,21 @@ struct _wlmaker_clip_t {
+     /** Whether the 'next' button had been pressed. */
+     bool                      next_button_pressed;
+ 
++    /** Whether the left button is held on the Clip: It may become a drag. */
++    bool                      drag_pending;
++    /** Whether the Clip is being dragged to another corner. */
++    bool                      dragging;
++    /** Pointer position where the button was pressed, in layout coords. */
++    double                    drag_start_x;
++    /** Pointer position where the button was pressed, in layout coords. */
++    double                    drag_start_y;
++    /** Corner for the live preview while dragging, applied when idle. */
++    wlmaker_dock_place_t      preview_place;
++    /** Applies @ref wlmaker_clip_t::preview_place, from the event loop. */
++    struct wl_event_source    *preview_event_source_ptr;
++    /** Monitors SIGUSR1: `wlmdock --clip` changed the Clip's launchers. */
++    struct wl_event_source    *sigusr1_event_source_ptr;
++
+     /** Listener for @ref wlmtk_desktop_events_t::workspace_changed. */
+     struct wl_listener        workspace_changed_listener;
+     /** Listener for wlr_output_layout::events.change. */
+@@ -121,6 +144,24 @@ static bool _wlmaker_clip_update_tiles(
+     wlmaker_clip_t *clip_ptr,
+     const struct wlmtk_tile_style *tile_style_ptr);
+ static void _wlmaker_clip_apply_button_state(wlmaker_clip_t *clip_ptr);
++static bool _wlmaker_clip_pointer_accepts_motion(
++    wlmtk_element_t *element_ptr,
++    wlmtk_pointer_motion_event_t *motion_event_ptr);
++static void _wlmaker_clip_pointer_grab_cancel(wlmtk_element_t *element_ptr);
++static void _wlmaker_clip_end_drag(wlmaker_clip_t *clip_ptr);
++static void _wlmaker_clip_apply_preview(void *data_ptr);
++static int _wlmaker_clip_handle_sigusr1(int signal_number, void *data_ptr);
++static bool _wlmaker_clip_set_spacers(
++    wlmaker_clip_t *clip_ptr,
++    size_t spacers,
++    const struct wlmtk_tile_style *tile_style_ptr);
++static void _wlmaker_clip_atfork_child(void);
++static bool _wlmaker_clip_place_at_cursor(
++    wlmaker_clip_t *clip_ptr,
++    wlmaker_dock_place_t *place_ptr);
++static void _wlmaker_clip_set_place(
++    wlmtk_dock_t *dock_ptr,
++    wlmaker_dock_place_t place);
+ static void _wlmaker_clip_open_menu(wlmaker_clip_t *clip_ptr);
+ static bool _wlmaker_clip_update_spacers(
+     wlmaker_clip_t *clip_ptr,
+@@ -159,8 +200,13 @@ static void _wlmaker_clip_handle_theme_changed(
+ static const wlmtk_element_vmt_t _wlmaker_clip_element_vmt = {
+     .pointer_axis = _wlmaker_clip_pointer_axis,
+     .pointer_button = _wlmaker_clip_pointer_button,
++    .pointer_accepts_motion = _wlmaker_clip_pointer_accepts_motion,
++    .pointer_grab_cancel = _wlmaker_clip_pointer_grab_cancel,
+ };
+ 
++/** Distance the pointer must move with the button held, to start a drag. */
++static const double _wlmaker_clip_drag_threshold = 8;
++
+ /** TODO: Replace this. */
+ typedef struct {
+     /** Positioning data. */
+@@ -369,6 +415,19 @@ wlmaker_clip_t *wlmaker_clip_create(
+     }
+     server_ptr->dockapps_ptr = clip_ptr->dockapps_ptr;
+ 
++    // `wlmdock --clip` signals when the Clip's launchers were changed. The
++    // signal is blocked for regular delivery: Not for launched programs.
++    clip_ptr->sigusr1_event_source_ptr = wl_event_loop_add_signal(
++        wl_display_get_event_loop(server_ptr->wl_display_ptr),
++        SIGUSR1,
++        _wlmaker_clip_handle_sigusr1,
++        clip_ptr);
++    static bool atfork_registered = false;
++    if (!atfork_registered &&
++        0 == pthread_atfork(NULL, NULL, _wlmaker_clip_atfork_child)) {
++        atfork_registered = true;
++    }
++
+     server_ptr->clip_dock_ptr = clip_ptr->wlmtk_dock_ptr;
+     bs_log(BS_INFO, "Created clip %p", clip_ptr);
+     return clip_ptr;
+@@ -379,6 +438,16 @@ void wlmaker_clip_destroy(wlmaker_clip_t *clip_ptr)
+ {
+     if (NULL != clip_ptr->server_ptr) {
+         wlmaker_context_menu_cancel(clip_ptr->server_ptr, clip_ptr);
++    }
++    if (NULL != clip_ptr->preview_event_source_ptr) {
++        wl_event_source_remove(clip_ptr->preview_event_source_ptr);
++        clip_ptr->preview_event_source_ptr = NULL;
++    }
++    if (NULL != clip_ptr->sigusr1_event_source_ptr) {
++        wl_event_source_remove(clip_ptr->sigusr1_event_source_ptr);
++        clip_ptr->sigusr1_event_source_ptr = NULL;
++    }
++    if (NULL != clip_ptr->server_ptr) {
+         clip_ptr->server_ptr->clip_dock_ptr = NULL;
+         clip_ptr->server_ptr->dockapps_ptr = NULL;
+     }
+@@ -452,6 +521,82 @@ void wlmaker_clip_destroy(wlmaker_clip_t *clip_ptr)
+     free(clip_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmaker_clip_move_dock(
++    wlmaker_server_t *server_ptr,
++    const char *section_ptr,
++    wlmaker_dock_place_t place)
++{
++    bool is_clip = (0 == strcmp(section_ptr, "Clip"));
++    const char *other_section_ptr = is_clip ? "Dock" : "Clip";
++
++    bspl_dict_t *state_dict_ptr = wlmaker_state_load(
++        server_ptr->files_ptr, server_ptr->state_fname_ptr);
++    wlmaker_dock_place_t from = {}, other = {};
++    bool have_from = wlmaker_dock_place_decode(
++        bspl_dict_get_dict(state_dict_ptr, section_ptr), &from);
++    bool have_other = wlmaker_dock_place_decode(
++        bspl_dict_get_dict(state_dict_ptr, other_section_ptr), &other);
++    bspl_dict_unref(state_dict_ptr);
++
++    // The Clip is live: That's where it comes from, if it was dragged.
++    if (is_clip && NULL != server_ptr->clip_dock_ptr) {
++        const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
++            server_ptr->clip_dock_ptr);
++        if (!have_from) from = (wlmaker_dock_place_t){
++                pos_ptr->edge, pos_ptr->anchor };
++        have_from = true;
++    }
++    bool other_moved = have_from && have_other &&
++        wlmaker_dock_place_resolve(place, from, &other);
++
++    bs_log(BS_INFO, "Moving %s to corner 0x%"PRIx32"%s", section_ptr,
++           wlmaker_dock_place_corner(place),
++           other_moved ? ", swapping with the other dock" : "");
++    bspl_dict_t *d = wlmaker_dock_place_encode(place);
++    if (NULL != d) {
++        wlmaker_state_store_section(server_ptr->files_ptr,
++                                    server_ptr->state_fname_ptr,
++                                    section_ptr, d);
++        bspl_dict_unref(d);
++    }
++    if (other_moved) {
++        d = wlmaker_dock_place_encode(other);
++        if (NULL != d) {
++            wlmaker_state_store_section(server_ptr->files_ptr,
++                                        server_ptr->state_fname_ptr,
++                                        other_section_ptr, d);
++            bspl_dict_unref(d);
++        }
++    }
++
++    if (NULL != server_ptr->clip_dock_ptr) {
++        if (is_clip) _wlmaker_clip_set_place(server_ptr->clip_dock_ptr, place);
++        if (!is_clip && other_moved) {
++            _wlmaker_clip_set_place(server_ptr->clip_dock_ptr, other);
++        }
++    }
++
++    // wlmdock (the Dock, and the Clip's launchers) re-reads the state file
++    // on SIGUSR1.
++    struct wl_list *clients_ptr = wl_display_get_client_list(
++        server_ptr->wl_display_ptr);
++    struct wl_client *wl_client_ptr;
++    wl_client_for_each(wl_client_ptr, clients_ptr) {
++        char *name_ptr = wlmaker_dockapps_client_name(wl_client_ptr);
++        if (NULL == name_ptr) continue;
++        if (0 == strcmp(name_ptr, "wlmdock")) {
++            pid_t pid = 0;
++            wl_client_get_credentials(wl_client_ptr, &pid, NULL, NULL);
++            if (1 < pid && 0 != kill(pid, SIGUSR1)) {
++                bs_log(BS_WARNING | BS_ERRNO, "Failed kill(%"PRIdMAX
++                       ", SIGUSR1)", (intmax_t)pid);
++            }
++        }
++        free(name_ptr);
++    }
++}
++
+ /* == Local (static) methods =============================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -513,6 +658,21 @@ bool _wlmaker_clip_pointer_button(
+ 
+     if (BTN_LEFT != button_event_ptr->button) return true;
+ 
++    // Releasing the button that was held on the Clip (not on its buttons):
++    // Ends a drag, and places the Clip in that corner.
++    if (clip_ptr->drag_pending &&
++        WLMTK_BUTTON_UP == button_event_ptr->type) {
++        bool dragging = clip_ptr->dragging;
++        wlmaker_dock_place_t place;
++        bool placed = dragging &&
++            _wlmaker_clip_place_at_cursor(clip_ptr, &place);
++        _wlmaker_clip_end_drag(clip_ptr);
++        if (placed) {
++            wlmaker_clip_move_dock(clip_ptr->server_ptr, "Clip", place);
++        }
++        return true;
++    }
++
+     switch (button_event_ptr->type) {
+     case WLMTK_BUTTON_DOWN:
+         // Pointer button tressed. Translate to button press if in area.
+@@ -524,6 +684,18 @@ bool _wlmaker_clip_pointer_button(
+                    clip_ptr->pointer_inside_prev_button) {
+             clip_ptr->next_button_pressed = false;
+             clip_ptr->prev_button_pressed = true;
++        } else if (NULL != element_ptr->parent_container_ptr &&
++                   NULL != clip_ptr->server_ptr->input_manager_ptr) {
++            // Elsewhere on the Clip: Moving it with the button held drags
++            // the Clip to another corner, like on Window Maker.
++            struct wlr_cursor *c = wlmim_wlr_cursor(
++                clip_ptr->server_ptr->input_manager_ptr);
++            clip_ptr->drag_pending = true;
++            clip_ptr->dragging = false;
++            clip_ptr->drag_start_x = c->x;
++            clip_ptr->drag_start_y = c->y;
++            wlmtk_container_pointer_grab(
++                element_ptr->parent_container_ptr, element_ptr);
+         }
+         break;
+ 
+@@ -590,6 +762,30 @@ static void _wlmaker_clip_menu_destroy_last(void *ud_ptr)
+         ud_ptr, WLMAKER_ACTION_WORKSPACE_DESTROY_LAST, NULL);
+ }
+ 
++/** Moves the Clip to the corner `corner` XOR `flip`. */
++static void _wlmaker_clip_flip(wlmaker_clip_t *clip_ptr, uint32_t flip)
++{
++    const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
++        clip_ptr->wlmtk_dock_ptr);
++    wlmaker_dock_place_t place = { pos_ptr->edge, pos_ptr->anchor };
++    place = wlmaker_dock_place_from_corner(
++        wlmaker_dock_place_corner(place) ^ flip,
++        wlmaker_dock_place_vertical(place));
++    wlmaker_clip_move_dock(clip_ptr->server_ptr, "Clip", place);
++}
++
++/** Context menu callback: Moves the Clip to the other side. */
++static void _wlmaker_clip_menu_flip_side(void *ud_ptr)
++{
++    _wlmaker_clip_flip(ud_ptr, WLR_EDGE_LEFT | WLR_EDGE_RIGHT);
++}
++
++/** Context menu callback: Moves the Clip to the other end (top/bottom). */
++static void _wlmaker_clip_menu_flip_end(void *ud_ptr)
++{
++    _wlmaker_clip_flip(ud_ptr, WLR_EDGE_TOP | WLR_EDGE_BOTTOM);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Opens the Clip's right-click menu: Workspace navigation and management.
+@@ -627,6 +823,18 @@ void _wlmaker_clip_open_menu(wlmaker_clip_t *clip_ptr)
+             cm_ptr, "Destroy Last Workspace", _wlmaker_clip_menu_destroy_last,
+             server_ptr);
+     }
++    // Moving the Clip to another corner. Like dragging it.
++    const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
++        clip_ptr->wlmtk_dock_ptr);
++    uint32_t corner = pos_ptr->edge | pos_ptr->anchor;
++    rv = rv && wlmaker_context_menu_add_item(
++        cm_ptr,
++        (corner & WLR_EDGE_LEFT) ? "Move to Right Side" : "Move to Left Side",
++        _wlmaker_clip_menu_flip_side, clip_ptr);
++    rv = rv && wlmaker_context_menu_add_item(
++        cm_ptr,
++        (corner & WLR_EDGE_TOP) ? "Move to Bottom" : "Move to Top",
++        _wlmaker_clip_menu_flip_end, clip_ptr);
+     if (!rv) {
+         wlmaker_context_menu_destroy(cm_ptr);
+         return;
+@@ -1102,6 +1310,204 @@ bool _wlmaker_clip_update_spacers(
+     return rv;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Applies `place` to the dock, keeping its other positioning parameters. */
++void _wlmaker_clip_set_place(
++    wlmtk_dock_t *dock_ptr,
++    wlmaker_dock_place_t place)
++{
++    wlmtk_dock_positioning_t pos = *wlmtk_dock_get_positioning(dock_ptr);
++    if (pos.edge == place.edge && pos.anchor == place.anchor) return;
++    pos.edge = place.edge;
++    pos.anchor = place.anchor;
++    if (!wlmtk_dock_set_positioning(dock_ptr, &pos)) {
++        bs_log(BS_WARNING, "Failed to move dock %p to edge 0x%"PRIx32
++               ", anchor 0x%"PRIx32, dock_ptr, place.edge, place.anchor);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Computes the Clip's place for the quadrant the pointer is in. */
++bool _wlmaker_clip_place_at_cursor(
++    wlmaker_clip_t *clip_ptr,
++    wlmaker_dock_place_t *place_ptr)
++{
++    wlmaker_server_t *server_ptr = clip_ptr->server_ptr;
++    struct wlr_cursor *c = wlmim_wlr_cursor(server_ptr->input_manager_ptr);
++    struct wlr_output *wlr_output_ptr = wlr_output_layout_output_at(
++        server_ptr->wlr_output_layout_ptr, c->x, c->y);
++    if (NULL == wlr_output_ptr) return false;
++    struct wlr_box box;
++    wlr_output_layout_get_box(
++        server_ptr->wlr_output_layout_ptr, wlr_output_ptr, &box);
++    const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
++        clip_ptr->wlmtk_dock_ptr);
++    *place_ptr = wlmaker_dock_place_at(
++        &box, c->x, c->y,
++        wlmaker_dock_place_vertical(
++            (wlmaker_dock_place_t){ pos_ptr->edge, pos_ptr->anchor }));
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Implements @ref wlmtk_element_vmt_t::pointer_accepts_motion: With the
++ * button held, starts dragging beyond a threshold; while dragging, moves the
++ * Clip to the corner of the quadrant the pointer is in (a live preview).
++ */
++bool _wlmaker_clip_pointer_accepts_motion(
++    wlmtk_element_t *element_ptr,
++    wlmtk_pointer_motion_event_t *motion_event_ptr)
++{
++    wlmaker_clip_t *clip_ptr = BS_CONTAINER_OF(
++        element_ptr, wlmaker_clip_t,
++        super_tile.super_container.super_element);
++
++    if (clip_ptr->drag_pending) {
++        struct wlr_cursor *c = wlmim_wlr_cursor(
++            clip_ptr->server_ptr->input_manager_ptr);
++        double dx = c->x - clip_ptr->drag_start_x;
++        double dy = c->y - clip_ptr->drag_start_y;
++        if (!clip_ptr->dragging &&
++            dx * dx + dy * dy >=
++            _wlmaker_clip_drag_threshold * _wlmaker_clip_drag_threshold) {
++            clip_ptr->dragging = true;
++        }
++        wlmaker_dock_place_t place;
++        const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
++            clip_ptr->wlmtk_dock_ptr);
++        if (clip_ptr->dragging &&
++            _wlmaker_clip_place_at_cursor(clip_ptr, &place) &&
++            (place.edge != pos_ptr->edge || place.anchor != pos_ptr->anchor) &&
++            NULL == clip_ptr->preview_event_source_ptr) {
++            // Not while dispatching the pointer event: Moving re-adds tiles.
++            clip_ptr->preview_place = place;
++            clip_ptr->preview_event_source_ptr = wl_event_loop_add_idle(
++                wl_display_get_event_loop(
++                    clip_ptr->server_ptr->wl_display_ptr),
++                _wlmaker_clip_apply_preview,
++                clip_ptr);
++        }
++    }
++
++    return clip_ptr->orig_super_element_vmt.pointer_accepts_motion(
++        element_ptr, motion_event_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Moves the Clip to the preview's corner, and keeps the drag going. */
++void _wlmaker_clip_apply_preview(void *data_ptr)
++{
++    wlmaker_clip_t *clip_ptr = data_ptr;
++    clip_ptr->preview_event_source_ptr = NULL;
++    if (!clip_ptr->dragging) return;
++
++    // Re-adding the tile cancels the pointer grab: Restore it.
++    _wlmaker_clip_set_place(clip_ptr->wlmtk_dock_ptr, clip_ptr->preview_place);
++    clip_ptr->drag_pending = true;
++    clip_ptr->dragging = true;
++    wlmtk_element_t *element_ptr = wlmtk_tile_element(&clip_ptr->super_tile);
++    if (NULL != element_ptr->parent_container_ptr) {
++        wlmtk_container_pointer_grab(
++            element_ptr->parent_container_ptr, element_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Implements @ref wlmtk_element_vmt_t::pointer_grab_cancel. Ends a drag. */
++void _wlmaker_clip_pointer_grab_cancel(wlmtk_element_t *element_ptr)
++{
++    wlmaker_clip_t *clip_ptr = BS_CONTAINER_OF(
++        element_ptr, wlmaker_clip_t,
++        super_tile.super_container.super_element);
++    clip_ptr->drag_pending = false;
++    clip_ptr->dragging = false;
++    clip_ptr->orig_super_element_vmt.pointer_grab_cancel(element_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Ends a (pending) drag: Releases the pointer grab. */
++void _wlmaker_clip_end_drag(wlmaker_clip_t *clip_ptr)
++{
++    wlmtk_element_t *element_ptr = wlmtk_tile_element(&clip_ptr->super_tile);
++    clip_ptr->drag_pending = false;
++    clip_ptr->dragging = false;
++    if (NULL != clip_ptr->preview_event_source_ptr) {
++        wl_event_source_remove(clip_ptr->preview_event_source_ptr);
++        clip_ptr->preview_event_source_ptr = NULL;
++    }
++    if (NULL != element_ptr->parent_container_ptr) {
++        wlmtk_container_pointer_grab_release(
++            element_ptr->parent_container_ptr, element_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Unblocks SIGUSR1 in forked processes: Only wlmaker monitors it. */
++void _wlmaker_clip_atfork_child(void)
++{
++    sigset_t signal_set;
++    sigemptyset(&signal_set);
++    sigaddset(&signal_set, SIGUSR1);
++    sigprocmask(SIG_UNBLOCK, &signal_set, NULL);
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Handles SIGUSR1, sent by `wlmdock --clip` when it changed the Clip's
++ * launchers (eg. one was removed): Updates the room left for them.
++ */
++int _wlmaker_clip_handle_sigusr1(__UNUSED__ int signal_number, void *data_ptr)
++{
++    wlmaker_clip_t *clip_ptr = data_ptr;
++    wlmaker_server_t *server_ptr = clip_ptr->server_ptr;
++    bspl_dict_t *state_dict_ptr = wlmaker_state_load(
++        server_ptr->files_ptr, server_ptr->state_fname_ptr);
++    bspl_array_t *launchers_ptr = bspl_dict_get_array(
++        bspl_dict_get_dict(state_dict_ptr, "Clip"), "Launchers");
++    size_t spacers = NULL != launchers_ptr ? bspl_array_size(launchers_ptr) : 0;
++    bspl_dict_unref(state_dict_ptr);
++
++    bs_log(BS_INFO, "Clip %p: Room for %zu launchers.", clip_ptr, spacers);
++    _wlmaker_clip_set_spacers(clip_ptr, spacers, &server_ptr->style_ptr->tile);
++    return 0;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Sets the number of empty tiles after the Clip, for its launchers. */
++bool _wlmaker_clip_set_spacers(
++    wlmaker_clip_t *clip_ptr,
++    size_t spacers,
++    const struct wlmtk_tile_style *tile_style_ptr)
++{
++    if (spacers == clip_ptr->spacer_tiles) return true;
++
++    for (size_t i = 0; i < clip_ptr->spacer_tiles; ++i) {
++        wlmtk_tile_t *t_ptr = &clip_ptr->spacer_tiles_ptr[i];
++        if (NULL != wlmtk_tile_element(t_ptr)->parent_container_ptr) {
++            wlmtk_dock_remove_tile(clip_ptr->wlmtk_dock_ptr, t_ptr);
++        }
++        wlmtk_tile_fini(t_ptr);
++    }
++    if (NULL != clip_ptr->spacer_tiles_ptr) free(clip_ptr->spacer_tiles_ptr);
++    clip_ptr->spacer_tiles_ptr = NULL;
++    clip_ptr->spacer_tiles = 0;
++    if (0 == spacers) return true;
++
++    clip_ptr->spacer_tiles_ptr = logged_calloc(spacers, sizeof(wlmtk_tile_t));
++    if (NULL == clip_ptr->spacer_tiles_ptr) return false;
++    for (size_t i = 0; i < spacers; ++i) {
++        wlmtk_tile_t *t_ptr = &clip_ptr->spacer_tiles_ptr[i];
++        if (!wlmtk_tile_init(t_ptr, tile_style_ptr)) break;
++        clip_ptr->spacer_tiles = i + 1;
++        wlmtk_element_set_visible(wlmtk_tile_element(t_ptr), true);
++        // Right after the Clip, before the dock-apps.
++        wlmtk_dock_add_tile(clip_ptr->wlmtk_dock_ptr, t_ptr);
++        wlmtk_dock_move_tile(clip_ptr->wlmtk_dock_ptr, t_ptr, 1 + i);
++    }
++    return _wlmaker_clip_update_spacers(clip_ptr, tile_style_ptr);
++}
++
+ /* == Unit tests =========================================================== */
+ 
+ static void test_draw_tile(bs_test_t *test_ptr);
+diff --git a/src/clip.h b/src/clip.h
+index f20b8e8..2d0ec36 100644
+--- a/src/clip.h
++++ b/src/clip.h
+@@ -34,6 +34,7 @@
+ typedef struct _wlmaker_clip_t wlmaker_clip_t;
+ 
+ #include "config.h"
++#include "dock_position.h"
+ #include "server.h"
+ 
+ #ifdef __cplusplus
+@@ -61,6 +62,21 @@ wlmaker_clip_t *wlmaker_clip_create(
+  */
+ void wlmaker_clip_destroy(wlmaker_clip_t *clip_ptr);
+ 
++/**
++ * Moves the Dock (state section "Dock", shown by `wlmdock`) or the Clip to
++ * another corner, keeping both out of the same one (the other one takes the
++ * moved one's former corner). Stores the result in the state file, moves the
++ * Clip, and tells `wlmdock` processes to re-read their position.
++ *
++ * @param server_ptr
++ * @param section_ptr         "Dock" or "Clip".
++ * @param place
++ */
++void wlmaker_clip_move_dock(
++    wlmaker_server_t *server_ptr,
++    const char *section_ptr,
++    wlmaker_dock_place_t place);
++
+ /** Unit test set. */
+ extern const bs_test_set_t wlmaker_clip_test_set;
+ 
+diff --git a/src/dock/CMakeLists.txt b/src/dock/CMakeLists.txt
+index 814add6..1a9e5d2 100644
+--- a/src/dock/CMakeLists.txt
++++ b/src/dock/CMakeLists.txt
+@@ -18,6 +18,7 @@ cmake_minimum_required(VERSION 3.13)
+ include(WaylandProtocol)
+ 
+ pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client>=1.22.0)
++pkg_check_modules(PIXMAN REQUIRED IMPORTED_TARGET pixman-1)
+ pkg_get_variable(wayland_protocol_dir wayland-protocols pkgdatadir)
+ 
+ add_library(wlmdock_lib STATIC)
+@@ -48,6 +49,7 @@ target_include_directories(
+ )
+ target_link_libraries(
+   wlmdock_lib
++  PkgConfig::PIXMAN
+   libbase
+   wlmclient_lib
+   wlmaker_lib
+diff --git a/src/dock/container_surface.c b/src/dock/container_surface.c
+index 6d90d4c..6ec90b3 100644
+--- a/src/dock/container_surface.c
++++ b/src/dock/container_surface.c
+@@ -20,6 +20,7 @@
+ 
+ #include "container_surface.h"
+ 
++#include <drm_fourcc.h>
+ #include <libbase/libbase.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
+@@ -35,6 +36,7 @@
+ #include <wlr/types/wlr_output.h>
+ #include <wlr/types/wlr_output_layout.h>
+ #include <wlr/types/wlr_scene.h>
++#include <wlr/interfaces/wlr_buffer.h>
+ #include <wlr/types/wlr_seat.h>
+ #undef WLR_USE_UNSTABLE
+ 
+@@ -53,6 +55,12 @@ struct wlmdock_container_surface {
+ 
+     /** The local scene graph, to represent all from @ref container. */
+     struct wlr_scene          *wlr_scene_ptr;
++    /**
++     * A fully transparent buffer below everything, marked as opaque: The
++     * scene would otherwise clear areas without content (eg. beside the menu)
++     * to opaque black. This one gets copied into the output's buffer.
++     */
++    struct wlr_scene_buffer   *transparent_buffer_ptr;
+     /** For `events.frame` of @ref wlr_output_ptr. */
+     struct wl_listener        output_frame_listener;
+     /** For `events.destroy` of @ref wlr_output_ptr. */
+@@ -99,6 +107,12 @@ struct wlmdock_container_surface *wlmdock_container_surface_create(
+         return NULL;
+     }
+ 
++    container_surface_ptr->transparent_buffer_ptr = wlr_scene_buffer_create(
++        &container_surface_ptr->wlr_scene_ptr->tree, NULL);
++    if (NULL == container_surface_ptr->transparent_buffer_ptr) {
++        wlmdock_container_surface_destroy(container_surface_ptr);
++        return NULL;
++    }
+     if (!wlmtk_container_init_attached(
+             &container_surface_ptr->container,
+             &container_surface_ptr->wlr_scene_ptr->tree)) {
+@@ -222,6 +236,8 @@ void wlmdock_container_surface_commit_size(
+     wlr_output_state_init(&state);
+     wlr_output_state_set_enabled(&state, width > 0 && height > 0);
+     wlr_output_state_set_custom_mode(&state, width, height, 0);
++    // With alpha: Areas without content are transparent.
++    wlr_output_state_set_render_format(&state, DRM_FORMAT_ARGB8888);
+     if (!wlr_output_commit_state(
+             container_surface_ptr->wlr_output_ptr, &state)) {
+         // Report once: The dock will not be visible.
+@@ -235,6 +251,20 @@ void wlmdock_container_surface_commit_size(
+     }
+     wlr_output_state_finish(&state);
+ 
++    // Transparent where there is no content.
++    struct wlr_buffer *wlr_buffer_ptr = bs_gfxbuf_create_wlr_buffer(
++        width, height);
++    if (NULL != wlr_buffer_ptr) {
++        wlr_scene_buffer_set_buffer(
++            container_surface_ptr->transparent_buffer_ptr, wlr_buffer_ptr);
++        wlr_buffer_drop(wlr_buffer_ptr);
++        pixman_region32_t region;
++        pixman_region32_init_rect(&region, 0, 0, width, height);
++        wlr_scene_buffer_set_opaque_region(
++            container_surface_ptr->transparent_buffer_ptr, &region);
++        pixman_region32_fini(&region);
++    }
++
+     if (!wlr_scene_output_commit(
+             container_surface_ptr->wlr_scene_output_ptr, NULL)) {
+         bs_log(BS_WARNING, "Failed wlr_scene_output_commit(%p, NULL)",
+diff --git a/src/dock/launcher.c b/src/dock/launcher.c
+index 9810469..62c9556 100644
+--- a/src/dock/launcher.c
++++ b/src/dock/launcher.c
+@@ -26,11 +26,13 @@
+ #include <libbase/plist.h>
+ #include <libbase/signal.h>
+ #include <linux/input-event-codes.h>
++#include <signal.h>
+ #include <stdbool.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <sys/stat.h>
++#include <sys/types.h>
+ 
+ #include "toplevel.h"
+ #include "toolkit/toolkit.h"
+@@ -73,6 +75,13 @@ struct _wlmdock_launcher_t {
+ 
+     /** Listener for @ref wlmdock_toplevel_tracker_events::app_id_changed. */
+     struct bs_listener        app_id_changed_listener;
++
++    /** The plist dict the launcher was created from. */
++    bspl_dict_t               *dict_ptr;
++    /** Handler for a right-click. */
++    wlmdock_launcher_menu_handler_t menu_handler;
++    /** Argument for @ref wlmdock_launcher_t::menu_handler. */
++    void                      *menu_handler_ud_ptr;
+ };
+ 
+ /** Plist descroptor for a launcher. */
+@@ -148,6 +157,7 @@ wlmdock_launcher_t *wlmdock_launcher_create_from_plist(
+         wlmdock_launcher_destroy(launcher_ptr);
+         return NULL;
+     }
++    launcher_ptr->dict_ptr = bspl_dict_ref(dict_ptr);
+ 
+      if (!wlmtk_tile_init(&launcher_ptr->super_tile, style_ptr)) {
+          return NULL;
+@@ -296,6 +306,11 @@ void wlmdock_launcher_destroy(wlmdock_launcher_t *launcher_ptr)
+         launcher_ptr->tracker_ptr = NULL;
+     }
+ 
++    if (NULL != launcher_ptr->dict_ptr) {
++        bspl_dict_unref(launcher_ptr->dict_ptr);
++        launcher_ptr->dict_ptr = NULL;
++    }
++
+     wlmtk_tile_fini(&launcher_ptr->super_tile);
+     free(launcher_ptr);
+ }
+@@ -306,6 +321,65 @@ wlmtk_tile_t *wlmdock_launcher_tile(wlmdock_launcher_t *launcher_ptr)
+     return &launcher_ptr->super_tile;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++wlmdock_launcher_t *wlmdock_launcher_from_tile(wlmtk_tile_t *tile_ptr)
++{
++    if (wlmtk_tile_element(tile_ptr)->vmt.destroy !=
++        _wlmdock_launcher_element_destroy) return NULL;
++    return BS_CONTAINER_OF(tile_ptr, wlmdock_launcher_t, super_tile);
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmdock_launcher_set_menu_handler(
++    wlmdock_launcher_t *launcher_ptr,
++    wlmdock_launcher_menu_handler_t handler,
++    void *ud_ptr)
++{
++    launcher_ptr->menu_handler = handler;
++    launcher_ptr->menu_handler_ud_ptr = ud_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmdock_launcher_launch(wlmdock_launcher_t *launcher_ptr)
++{
++    _wlmdock_launcher_start(launcher_ptr);
++    _wlmdock_launcher_update_overlay(launcher_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmdock_launcher_has_processes(wlmdock_launcher_t *launcher_ptr)
++{
++    return NULL != bs_ptr_set_any(launcher_ptr->subprocesses_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmdock_launcher_kill(wlmdock_launcher_t *launcher_ptr)
++{
++    // The set has no iterator: Move all over to `others`, and back.
++    bs_ptr_set_t *others_ptr = bs_ptr_set_create();
++    if (NULL == others_ptr) return;
++    struct wlm_util_subprocess *sp_ptr;
++    while (NULL != (sp_ptr = bs_ptr_set_any(launcher_ptr->subprocesses_ptr))) {
++        pid_t pid = wlm_util_subprocess_pid(sp_ptr);
++        if (1 < pid && 0 != kill(pid, SIGTERM)) {
++            bs_log(BS_WARNING | BS_ERRNO, "Failed kill(%d, SIGTERM)", (int)pid);
++        }
++        bs_ptr_set_erase(launcher_ptr->subprocesses_ptr, sp_ptr);
++        bs_ptr_set_insert(others_ptr, sp_ptr);
++    }
++    while (NULL != (sp_ptr = bs_ptr_set_any(others_ptr))) {
++        bs_ptr_set_erase(others_ptr, sp_ptr);
++        bs_ptr_set_insert(launcher_ptr->subprocesses_ptr, sp_ptr);
++    }
++    bs_ptr_set_destroy(others_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++bspl_dict_t *wlmdock_launcher_dict(wlmdock_launcher_t *launcher_ptr)
++{
++    return launcher_ptr->dict_ptr;
++}
++
+ /* == Local (static) methods =============================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -402,6 +476,14 @@ bool _wlmdock_launcher_pointer_button(
+         element_ptr, wlmdock_launcher_t,
+         super_tile.super_container.super_element);
+ 
++    if (BTN_RIGHT == button_event_ptr->button &&
++        WLMTK_BUTTON_DOWN == button_event_ptr->type &&
++        NULL != launcher_ptr->menu_handler) {
++        launcher_ptr->menu_handler(launcher_ptr,
++                                   launcher_ptr->menu_handler_ud_ptr);
++        return true;
++    }
++
+     if (BTN_LEFT != button_event_ptr->button) return true;
+     if (WLMTK_BUTTON_CLICK != button_event_ptr->type) return true;
+ 
+diff --git a/src/dock/launcher.h b/src/dock/launcher.h
+index b0b2c24..fb3cb77 100644
+--- a/src/dock/launcher.h
++++ b/src/dock/launcher.h
+@@ -65,6 +65,32 @@ void wlmdock_launcher_destroy(wlmdock_launcher_t *launcher_ptr);
+ /** @return A pointer to the @ref wlmtk_tile_t superclass of `launcher_ptr`. */
+ wlmtk_tile_t *wlmdock_launcher_tile(wlmdock_launcher_t *launcher_ptr);
+ 
++/** @return The launcher for the tile `tile_ptr`, if it is one. Else NULL. */
++wlmdock_launcher_t *wlmdock_launcher_from_tile(wlmtk_tile_t *tile_ptr);
++
++/** Handler for a right-click on the launcher, eg. to open its menu. */
++typedef void (*wlmdock_launcher_menu_handler_t)(
++    wlmdock_launcher_t *launcher_ptr,
++    void *ud_ptr);
++
++/** Sets the handler for a right-click on the launcher. */
++void wlmdock_launcher_set_menu_handler(
++    wlmdock_launcher_t *launcher_ptr,
++    wlmdock_launcher_menu_handler_t handler,
++    void *ud_ptr);
++
++/** Launches (another instance of) the launcher's application. */
++void wlmdock_launcher_launch(wlmdock_launcher_t *launcher_ptr);
++
++/** @return Whether processes launched by the launcher are running. */
++bool wlmdock_launcher_has_processes(wlmdock_launcher_t *launcher_ptr);
++
++/** Terminates (SIGTERM) the processes launched by the launcher. */
++void wlmdock_launcher_kill(wlmdock_launcher_t *launcher_ptr);
++
++/** @return The plist dict the launcher was created from. */
++bspl_dict_t *wlmdock_launcher_dict(wlmdock_launcher_t *launcher_ptr);
++
+ /** Unit test set. */
+ extern const bs_test_set_t wlmdock_launcher_test_set;
+ 
+diff --git a/src/dock/subcompositor.c b/src/dock/subcompositor.c
+index 3274c75..f932775 100644
+--- a/src/dock/subcompositor.c
++++ b/src/dock/subcompositor.c
+@@ -55,6 +55,8 @@ struct _wlmdock_subcompositor_t {
+     struct zwlr_layer_shell_v1 *zwlr_layer_shell_ptr;
+     /** The positioning data. */
+     wlmtk_dock_positioning_t  positioning;
++    /** Namespace of the layer surface. */
++    char                      *namespace_ptr;
+ 
+     /** The wayland display. */
+     struct wl_display *wl_display_ptr;
+@@ -107,6 +109,8 @@ static void _wlmdock_subcompositor_stop(
+ 
+ static void _wlmdock_subcompositor_request_size(
+     wlmdock_subcompositor_t *subcompositor_ptr);
++static void _wlmdock_subcompositor_apply_positioning(
++    wlmdock_subcompositor_t *subcompositor_ptr);
+ 
+ static void _wlmdock_subcompositor_handle_wlclient_keymap(
+     struct wl_listener *listener_ptr,
+@@ -153,11 +157,17 @@ wlmdock_subcompositor_t *wlmdock_subcompositor_create(
+     struct zwlr_layer_shell_v1 *zwlr_layer_shell_ptr,
+     struct wlmim_cursor_style *cursor_style_ptr,
+     wlmtk_container_t *container_ptr,
+-    const wlmtk_dock_positioning_t *positioning_ptr)
++    const wlmtk_dock_positioning_t *positioning_ptr,
++    const char *namespace_ptr)
+ {
+     wlmdock_subcompositor_t *subcompositor_ptr = logged_calloc(
+         1, sizeof(*subcompositor_ptr));
+     if (NULL == subcompositor_ptr) return NULL;
++    subcompositor_ptr->namespace_ptr = logged_strdup(namespace_ptr);
++    if (NULL == subcompositor_ptr->namespace_ptr) {
++        free(subcompositor_ptr);
++        return NULL;
++    }
+     subcompositor_ptr->wl_display_ptr = wl_display_ptr;
+     subcompositor_ptr->zwlr_layer_shell_ptr = zwlr_layer_shell_ptr;
+     subcompositor_ptr->positioning = *positioning_ptr;
+@@ -283,9 +293,22 @@ void wlmdock_subcompositor_destroy(wlmdock_subcompositor_t *subcompositor_ptr)
+     wlmtk_util_disconnect_listener(
+         &subcompositor_ptr->wlclient_keyboard_repeat_info_listener);
+ 
++    free(subcompositor_ptr->namespace_ptr);
+     free(subcompositor_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmdock_subcompositor_set_positioning(
++    wlmdock_subcompositor_t *subcompositor_ptr,
++    const wlmtk_dock_positioning_t *positioning_ptr)
++{
++    subcompositor_ptr->positioning = *positioning_ptr;
++    if (NULL == subcompositor_ptr->zwlr_layer_surface_ptr) return;
++    _wlmdock_subcompositor_apply_positioning(subcompositor_ptr);
++    // The compositor configures the surface for the new position.
++    wl_surface_commit(subcompositor_ptr->wl_surface_ptr);
++}
++
+ 
+ /* == Local (static) methods =============================================== */
+ 
+@@ -309,7 +332,7 @@ bool _wlmdock_subcompositor_start(wlmdock_subcompositor_t *subcompositor_ptr)
+             subcompositor_ptr->wl_surface_ptr,
+             NULL,  // Let compositor choose output.
+             ZWLR_LAYER_SHELL_V1_LAYER_TOP,
+-            "wlmdock");
++            subcompositor_ptr->namespace_ptr);
+     if (NULL == subcompositor_ptr->zwlr_layer_surface_ptr) {
+         bs_log(BS_ERROR, "Failed zwlr_layer_shell_v1_get_layer_surface(...)");
+         _wlmdock_subcompositor_stop(subcompositor_ptr);
+@@ -319,24 +342,7 @@ bool _wlmdock_subcompositor_start(wlmdock_subcompositor_t *subcompositor_ptr)
+     // Configure.
+     zwlr_layer_surface_v1_set_size(
+         subcompositor_ptr->zwlr_layer_surface_ptr, 64, 64);
+-    zwlr_layer_surface_v1_set_anchor(
+-        subcompositor_ptr->zwlr_layer_surface_ptr,
+-        subcompositor_ptr->positioning.anchor |
+-        subcompositor_ptr->positioning.edge);
+-    zwlr_layer_surface_v1_set_exclusive_zone(
+-        subcompositor_ptr->zwlr_layer_surface_ptr,
+-        subcompositor_ptr->positioning.overlay ? -1 : 64);
+-    zwlr_layer_surface_v1_set_exclusive_edge(
+-        subcompositor_ptr->zwlr_layer_surface_ptr,
+-        subcompositor_ptr->positioning.edge);
+-    int m = subcompositor_ptr->positioning.margin;
+-    uint32_t anchor = subcompositor_ptr->positioning.anchor;
+-    zwlr_layer_surface_v1_set_margin(
+-        subcompositor_ptr->zwlr_layer_surface_ptr,
+-        anchor == WLR_EDGE_TOP ? m : 0,
+-        anchor == WLR_EDGE_RIGHT ? m : 0,
+-        anchor == WLR_EDGE_BOTTOM ? m : 0,
+-        anchor == WLR_EDGE_LEFT ? m : 0);
++    _wlmdock_subcompositor_apply_positioning(subcompositor_ptr);
+     wl_surface_commit(subcompositor_ptr->wl_surface_ptr);
+ 
+     if (0 != zwlr_layer_surface_v1_add_listener(
+@@ -386,6 +392,31 @@ void _wlmdock_subcompositor_stop(wlmdock_subcompositor_t *subcompositor_ptr)
+     }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Sets the layer surface's anchor, exclusive zone and margin. */
++void _wlmdock_subcompositor_apply_positioning(
++    wlmdock_subcompositor_t *subcompositor_ptr)
++{
++    zwlr_layer_surface_v1_set_anchor(
++        subcompositor_ptr->zwlr_layer_surface_ptr,
++        subcompositor_ptr->positioning.anchor |
++        subcompositor_ptr->positioning.edge);
++    zwlr_layer_surface_v1_set_exclusive_zone(
++        subcompositor_ptr->zwlr_layer_surface_ptr,
++        subcompositor_ptr->positioning.overlay ? -1 : 64);
++    zwlr_layer_surface_v1_set_exclusive_edge(
++        subcompositor_ptr->zwlr_layer_surface_ptr,
++        subcompositor_ptr->positioning.edge);
++    int m = subcompositor_ptr->positioning.margin;
++    uint32_t anchor = subcompositor_ptr->positioning.anchor;
++    zwlr_layer_surface_v1_set_margin(
++        subcompositor_ptr->zwlr_layer_surface_ptr,
++        anchor == WLR_EDGE_TOP ? m : 0,
++        anchor == WLR_EDGE_RIGHT ? m : 0,
++        anchor == WLR_EDGE_BOTTOM ? m : 0,
++        anchor == WLR_EDGE_LEFT ? m : 0);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Checks the element's size and requests updated size, if needed. */
+ void _wlmdock_subcompositor_request_size(
+diff --git a/src/dock/subcompositor.h b/src/dock/subcompositor.h
+index ddbf4f6..dbc6989 100644
+--- a/src/dock/subcompositor.h
++++ b/src/dock/subcompositor.h
+@@ -51,6 +51,9 @@ typedef struct _wlmdock_subcompositor_t wlmdock_subcompositor_t;
+  * @param cursor_style_ptr
+  * @param container_ptr
+  * @param positioning_ptr
++ * @param namespace_ptr       Namespace of the layer surface. The compositor
++ *                            lets the user drag a surface of "wlmdock" (the
++ *                            Dock) to other corners.
+  *
+  * @return Handle of the compositor, or NULL on error.
+  */
+@@ -61,7 +64,8 @@ wlmdock_subcompositor_t *wlmdock_subcompositor_create(
+     struct zwlr_layer_shell_v1 *zwlr_layer_shell_ptr,
+     struct wlmim_cursor_style *cursor_style_ptr,
+     wlmtk_container_t *container_ptr,
+-    const wlmtk_dock_positioning_t *positioning_ptr);
++    const wlmtk_dock_positioning_t *positioning_ptr,
++    const char *namespace_ptr);
+ 
+ /**
+  * Prepares the subcompositor.
+@@ -77,6 +81,16 @@ void wlmdock_subcompositor_prepare(
+     struct wlr_allocator *wlr_allocator_ptr,
+     struct wlr_renderer *wlr_renderer_ptr);
+ 
++/**
++ * Moves the layer surface to a new position, eg. another corner.
++ *
++ * @param subcompositor_ptr
++ * @param positioning_ptr
++ */
++void wlmdock_subcompositor_set_positioning(
++    wlmdock_subcompositor_t *subcompositor_ptr,
++    const wlmtk_dock_positioning_t *positioning_ptr);
++
+ /**
+  * Destroys the subcompositor.
+  *
+diff --git a/src/dock/tilebox.c b/src/dock/tilebox.c
+index 00c4839..4cc80d6 100644
+--- a/src/dock/tilebox.c
++++ b/src/dock/tilebox.c
+@@ -117,4 +117,60 @@ void wlmdock_tilebox_remove_tile(wlmdock_tilebox_t *tilebox_ptr,
+         wlmtk_dlnode_from_tile(tile_ptr));
+ }
+ 
++/* ------------------------------------------------------------------------- */
++struct wlr_box wlmdock_tilebox_tile_box(wlmdock_tilebox_t *tilebox_ptr,
++                                        wlmtk_tile_t *tile_ptr)
++{
++    struct wlr_box box = wlmtk_element_get_dimensions_box(
++        wlmtk_tile_element(tile_ptr));
++    int x, y;
++    wlmtk_element_get_position(wlmtk_tile_element(tile_ptr), &x, &y);
++    box.x += x;
++    box.y += y;
++    // The tiles are in the box' inner container.
++    wlmtk_element_get_position(
++        &tilebox_ptr->tile_box.element_container.super_element, &x, &y);
++    box.x += x;
++    box.y += y;
++    return box;
++}
++
++/* ------------------------------------------------------------------------- */
++size_t wlmdock_tilebox_tiles(wlmdock_tilebox_t *tilebox_ptr,
++                             wlmtk_tile_t **tiles_ptr,
++                             size_t max_tiles)
++{
++    size_t n = 0;
++    for (bs_dllist_node_t *dlnode_ptr = tilebox_ptr->reverse ?
++             tilebox_ptr->tiles.tail_ptr : tilebox_ptr->tiles.head_ptr;
++         NULL != dlnode_ptr;
++         dlnode_ptr = tilebox_ptr->reverse ?
++             dlnode_ptr->prev_ptr : dlnode_ptr->next_ptr) {
++        if (n < max_tiles) tiles_ptr[n] = wlmtk_tile_from_dlnode(dlnode_ptr);
++        ++n;
++    }
++    return n;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmdock_tilebox_set_reverse(wlmdock_tilebox_t *tilebox_ptr, bool reverse)
++{
++    if (tilebox_ptr->reverse == reverse) return;
++    size_t n = bs_dllist_size(&tilebox_ptr->tiles);
++    wlmtk_tile_t **tiles_ptr = NULL;
++    if (0 < n) {
++        tiles_ptr = logged_calloc(n, sizeof(wlmtk_tile_t*));
++        if (NULL == tiles_ptr) return;
++    }
++    wlmdock_tilebox_tiles(tilebox_ptr, tiles_ptr, n);
++    for (size_t i = 0; i < n; ++i) {
++        wlmdock_tilebox_remove_tile(tilebox_ptr, tiles_ptr[i]);
++    }
++    tilebox_ptr->reverse = reverse;
++    for (size_t i = 0; i < n; ++i) {
++        wlmdock_tilebox_add_tile(tilebox_ptr, tiles_ptr[i]);
++    }
++    if (NULL != tiles_ptr) free(tiles_ptr);
++}
++
+ /* == End of tilebox.c ===================================================== */
+diff --git a/src/dock/tilebox.h b/src/dock/tilebox.h
+index 29a84fb..98f8233 100644
+--- a/src/dock/tilebox.h
++++ b/src/dock/tilebox.h
+@@ -90,6 +90,39 @@ void wlmdock_tilebox_remove_tile(
+     wlmdock_tilebox_t *tilebox_ptr,
+     wlmtk_tile_t *tile_ptr);
+ 
++/**
++ * Sets whether tiles are stacked from the end (eg. for a dock anchored at
++ * the bottom). The tiles keep their order, as counted from the anchor.
++ *
++ * @param tilebox_ptr
++ * @param reverse
++ */
++void wlmdock_tilebox_set_reverse(wlmdock_tilebox_t *tilebox_ptr, bool reverse);
++
++/**
++ * Returns the tiles in order from the anchor.
++ *
++ * @param tilebox_ptr
++ * @param tiles_ptr           Array to fill, of `max_tiles` elements.
++ * @param max_tiles
++ *
++ * @return The number of tiles. May be larger than `max_tiles`.
++ */
++size_t wlmdock_tilebox_tiles(wlmdock_tilebox_t *tilebox_ptr,
++                             wlmtk_tile_t **tiles_ptr,
++                             size_t max_tiles);
++
++/**
++ * Returns where the tile is, in coordinates of the tile box' element.
++ *
++ * @param tilebox_ptr
++ * @param tile_ptr
++ *
++ * @return The tile's box.
++ */
++struct wlr_box wlmdock_tilebox_tile_box(wlmdock_tilebox_t *tilebox_ptr,
++                                        wlmtk_tile_t *tile_ptr);
++
+ #ifdef __cplusplus
+ }  // extern "C"
+ #endif  // __cplusplus
+diff --git a/src/dock_position.c b/src/dock_position.c
+new file mode 100644
+index 0000000..ac23e32
+--- /dev/null
++++ b/src/dock_position.c
+@@ -0,0 +1,260 @@
++/* ========================================================================= */
++/**
++ * @file dock_position.c
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "dock_position.h"
++
++#include <string.h>
++#define WLR_USE_UNSTABLE
++#include <wlr/util/edges.h>
++#undef WLR_USE_UNSTABLE
++
++/* == Declarations ========================================================= */
++
++/** Names of edges, as in the state file. */
++static const bspl_enum_desc_t _wlmaker_dock_place_edges[] = {
++    BSPL_ENUM("TOP", WLR_EDGE_TOP),
++    BSPL_ENUM("BOTTOM", WLR_EDGE_BOTTOM),
++    BSPL_ENUM("LEFT", WLR_EDGE_LEFT),
++    BSPL_ENUM("RIGHT", WLR_EDGE_RIGHT),
++    BSPL_ENUM_SENTINEL(),
++};
++
++/** Mask of the horizontal sides. */
++static const uint32_t _wlmaker_dock_place_horizontal =
++    WLR_EDGE_LEFT | WLR_EDGE_RIGHT;
++/** Mask of the vertical sides. */
++static const uint32_t _wlmaker_dock_place_vertical_sides =
++    WLR_EDGE_TOP | WLR_EDGE_BOTTOM;
++
++/* == Exported methods ===================================================== */
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dock_place_vertical(wlmaker_dock_place_t place)
++{
++    return 0 != (place.edge & _wlmaker_dock_place_horizontal);
++}
++
++/* ------------------------------------------------------------------------- */
++uint32_t wlmaker_dock_place_corner(wlmaker_dock_place_t place)
++{
++    return place.edge | place.anchor;
++}
++
++/* ------------------------------------------------------------------------- */
++wlmaker_dock_place_t wlmaker_dock_place_from_corner(
++    uint32_t corner, bool vertical)
++{
++    uint32_t h = corner & _wlmaker_dock_place_horizontal;
++    uint32_t v = corner & _wlmaker_dock_place_vertical_sides;
++    if (vertical) return (wlmaker_dock_place_t){ .edge = h, .anchor = v };
++    return (wlmaker_dock_place_t){ .edge = v, .anchor = h };
++}
++
++/* ------------------------------------------------------------------------- */
++wlmaker_dock_place_t wlmaker_dock_place_at(
++    const struct wlr_box *output_box_ptr,
++    double x,
++    double y,
++    bool vertical)
++{
++    double cx = output_box_ptr->x + output_box_ptr->width / 2.0;
++    double cy = output_box_ptr->y + output_box_ptr->height / 2.0;
++    uint32_t corner = (x < cx ? WLR_EDGE_LEFT : WLR_EDGE_RIGHT) |
++        (y < cy ? WLR_EDGE_TOP : WLR_EDGE_BOTTOM);
++    return wlmaker_dock_place_from_corner(corner, vertical);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dock_place_resolve(
++    wlmaker_dock_place_t moved,
++    wlmaker_dock_place_t moved_from,
++    wlmaker_dock_place_t *other_ptr)
++{
++    if (wlmaker_dock_place_corner(moved) !=
++        wlmaker_dock_place_corner(*other_ptr)) return false;
++    // Should the moved dock come from that corner too: Pick the corner across
++    // the edge, so they still don't overlap.
++    uint32_t corner = wlmaker_dock_place_corner(moved_from);
++    if (corner == wlmaker_dock_place_corner(moved)) {
++        corner ^= _wlmaker_dock_place_horizontal;
++    }
++    *other_ptr = wlmaker_dock_place_from_corner(
++        corner, wlmaker_dock_place_vertical(*other_ptr));
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_dock_place_decode(
++    bspl_dict_t *dict_ptr,
++    wlmaker_dock_place_t *place_ptr)
++{
++    if (NULL == dict_ptr) return false;
++    int edge, anchor;
++    const char *e = bspl_dict_get_string_value(dict_ptr, "Edge");
++    const char *a = bspl_dict_get_string_value(dict_ptr, "Anchor");
++    if (NULL == e || NULL == a ||
++        !bspl_enum_name_to_value(_wlmaker_dock_place_edges, e, &edge) ||
++        !bspl_enum_name_to_value(_wlmaker_dock_place_edges, a, &anchor)) {
++        return false;
++    }
++    wlmaker_dock_place_t p = { .edge = edge, .anchor = anchor };
++    // The anchor must be adjacent to the edge.
++    if (wlmaker_dock_place_vertical(p) ==
++        (0 != (p.anchor & _wlmaker_dock_place_horizontal))) return false;
++    *place_ptr = p;
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++bspl_dict_t *wlmaker_dock_place_encode(wlmaker_dock_place_t place)
++{
++    const char *e = NULL, *a = NULL;
++    if (!bspl_enum_value_to_name(_wlmaker_dock_place_edges, place.edge, &e) ||
++        !bspl_enum_value_to_name(_wlmaker_dock_place_edges, place.anchor, &a)) {
++        return NULL;
++    }
++    bspl_dict_t *dict_ptr = bspl_dict_create();
++    bspl_string_t *es = bspl_string_create(e);
++    bspl_string_t *as = bspl_string_create(a);
++    bool rv = NULL != dict_ptr && NULL != es && NULL != as &&
++        bspl_dict_add(dict_ptr, "Edge", bspl_object_from_string(es)) &&
++        bspl_dict_add(dict_ptr, "Anchor", bspl_object_from_string(as));
++    if (NULL != es) bspl_string_unref(es);
++    if (NULL != as) bspl_string_unref(as);
++    if (!rv && NULL != dict_ptr) {
++        bspl_dict_unref(dict_ptr);
++        dict_ptr = NULL;
++    }
++    return dict_ptr;
++}
++
++/* == Unit tests =========================================================== */
++
++static void test_quadrants(bs_test_t *test_ptr);
++static void test_resolve(bs_test_t *test_ptr);
++static void test_codec(bs_test_t *test_ptr);
++
++/** Test cases. */
++static const bs_test_case_t _wlmaker_dock_position_test_cases[] = {
++    { true, "quadrants", test_quadrants },
++    { true, "resolve", test_resolve },
++    { true, "codec", test_codec },
++    BS_TEST_CASE_SENTINEL()
++};
++
++const bs_test_set_t wlmaker_dock_position_test_set = BS_TEST_SET(
++    true, "dock_position", _wlmaker_dock_position_test_cases);
++
++/* ------------------------------------------------------------------------- */
++/** Maps the quadrants of an output to edge and anchor. */
++void test_quadrants(bs_test_t *test_ptr)
++{
++    struct wlr_box o = { .x = 1280, .y = 0, .width = 1280, .height = 720 };
++    wlmaker_dock_place_t p;
++
++    // Vertical docks: Edge left/right, anchor top/bottom.
++    p = wlmaker_dock_place_at(&o, 1300, 10, true);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_LEFT, p.edge);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_TOP, p.anchor);
++    p = wlmaker_dock_place_at(&o, 2500, 10, true);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_RIGHT, p.edge);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_TOP, p.anchor);
++    p = wlmaker_dock_place_at(&o, 1300, 700, true);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_LEFT, p.edge);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_BOTTOM, p.anchor);
++    p = wlmaker_dock_place_at(&o, 1920, 360, true);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_RIGHT, p.edge);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_BOTTOM, p.anchor);
++
++    // Horizontal docks: Edge top/bottom, anchor left/right.
++    p = wlmaker_dock_place_at(&o, 2500, 700, false);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_BOTTOM, p.edge);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_RIGHT, p.anchor);
++    BS_TEST_VERIFY_FALSE(test_ptr, wlmaker_dock_place_vertical(p));
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT,
++                      wlmaker_dock_place_corner(p));
++}
++
++/* ------------------------------------------------------------------------- */
++/** Two docks don't share a corner. */
++void test_resolve(bs_test_t *test_ptr)
++{
++    wlmaker_dock_place_t dock = { WLR_EDGE_RIGHT, WLR_EDGE_TOP };
++    wlmaker_dock_place_t clip = { WLR_EDGE_LEFT, WLR_EDGE_TOP };
++    wlmaker_dock_place_t moved;
++
++    // Dock moved bottom-right: No conflict.
++    moved = (wlmaker_dock_place_t){ WLR_EDGE_RIGHT, WLR_EDGE_BOTTOM };
++    BS_TEST_VERIFY_FALSE(
++        test_ptr, wlmaker_dock_place_resolve(moved, dock, &clip));
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_LEFT, clip.edge);
++
++    // Dock moved onto the Clip's corner: They swap.
++    moved = (wlmaker_dock_place_t){ WLR_EDGE_LEFT, WLR_EDGE_TOP };
++    BS_TEST_VERIFY_TRUE(
++        test_ptr, wlmaker_dock_place_resolve(moved, dock, &clip));
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_RIGHT, clip.edge);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_TOP, clip.anchor);
++
++    // A horizontal Clip keeps its orientation when swapped.
++    wlmaker_dock_place_t hclip = { WLR_EDGE_BOTTOM, WLR_EDGE_RIGHT };
++    moved = (wlmaker_dock_place_t){ WLR_EDGE_RIGHT, WLR_EDGE_BOTTOM };
++    BS_TEST_VERIFY_TRUE(
++        test_ptr, wlmaker_dock_place_resolve(moved, dock, &hclip));
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_TOP, hclip.edge);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_RIGHT, hclip.anchor);
++
++    // Both in the same corner before: The other goes across.
++    wlmaker_dock_place_t other = { WLR_EDGE_LEFT, WLR_EDGE_TOP };
++    BS_TEST_VERIFY_TRUE(test_ptr, wlmaker_dock_place_resolve(
++                            other, other, &other));
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_RIGHT, other.edge);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Decodes and encodes places. */
++void test_codec(bs_test_t *test_ptr)
++{
++    bspl_object_t *o = bspl_create_object_from_plist_string(
++        "{ Edge = RIGHT; Anchor = BOTTOM; }");
++    wlmaker_dock_place_t p = {};
++    BS_TEST_VERIFY_TRUE(
++        test_ptr, wlmaker_dock_place_decode(bspl_dict_from_object(o), &p));
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_RIGHT, p.edge);
++    BS_TEST_VERIFY_EQ(test_ptr, WLR_EDGE_BOTTOM, p.anchor);
++    bspl_object_unref(o);
++
++    // The anchor must be adjacent.
++    o = bspl_create_object_from_plist_string("{ Edge = RIGHT; Anchor = LEFT; }");
++    BS_TEST_VERIFY_FALSE(
++        test_ptr, wlmaker_dock_place_decode(bspl_dict_from_object(o), &p));
++    bspl_object_unref(o);
++
++    bspl_dict_t *d = wlmaker_dock_place_encode(
++        (wlmaker_dock_place_t){ WLR_EDGE_LEFT, WLR_EDGE_TOP });
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
++    BS_TEST_VERIFY_STREQ(test_ptr, "LEFT",
++                         bspl_dict_get_string_value(d, "Edge"));
++    BS_TEST_VERIFY_STREQ(test_ptr, "TOP",
++                         bspl_dict_get_string_value(d, "Anchor"));
++    bspl_dict_unref(d);
++}
++
++/* == End of dock_position.c =============================================== */
+diff --git a/src/dock_position.h b/src/dock_position.h
+new file mode 100644
+index 0000000..a92cf0b
+--- /dev/null
++++ b/src/dock_position.h
+@@ -0,0 +1,127 @@
++/* ========================================================================= */
++/**
++ * @file dock_position.h
++ *
++ * @copyright
++ * Copyright (c) 2026 Big WindowMaker contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * https://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++#ifndef __WLMAKER_DOCK_POSITION_H__
++#define __WLMAKER_DOCK_POSITION_H__
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#include <libbase/libbase.h>
++#include <libbase/plist.h>
++#define WLR_USE_UNSTABLE
++#include <wlr/util/box.h>
++#undef WLR_USE_UNSTABLE
++
++#ifdef __cplusplus
++extern "C" {
++#endif  // __cplusplus
++
++/**
++ * Where a dock (the Dock, or the Clip) is placed: Its edge, and the anchor
++ * along that edge. Together, they pick a corner of the output.
++ */
++typedef struct {
++    /** Edge: WLR_EDGE_LEFT, _RIGHT (vertical dock), _TOP or _BOTTOM. */
++    uint32_t                  edge;
++    /** Anchor: Adjacent to the edge. */
++    uint32_t                  anchor;
++} wlmaker_dock_place_t;
++
++/** @return Whether the dock at `place` is vertical (at a left/right edge). */
++bool wlmaker_dock_place_vertical(wlmaker_dock_place_t place);
++
++/** @return The corner of `place`, as a bitmask of two `enum wlr_edges`. */
++uint32_t wlmaker_dock_place_corner(wlmaker_dock_place_t place);
++
++/**
++ * Computes the place for a corner, keeping the dock's orientation.
++ *
++ * @param corner              Bitmask of one of WLR_EDGE_LEFT, _RIGHT and one
++ *                            of WLR_EDGE_TOP, _BOTTOM.
++ * @param vertical
++ *
++ * @return The place.
++ */
++wlmaker_dock_place_t wlmaker_dock_place_from_corner(
++    uint32_t corner, bool vertical);
++
++/**
++ * Computes the place for dropping a dock at (x, y): The corner of the
++ * output's quadrant, ie. left/right by the horizontal and top/bottom by the
++ * vertical half the point is in. The dock's orientation is kept.
++ *
++ * @param output_box_ptr
++ * @param x
++ * @param y
++ * @param vertical
++ *
++ * @return The place.
++ */
++wlmaker_dock_place_t wlmaker_dock_place_at(
++    const struct wlr_box *output_box_ptr,
++    double x,
++    double y,
++    bool vertical);
++
++/**
++ * Keeps two docks out of the same corner: If `moved` ends up in the corner
++ * of `other_ptr`, `other_ptr` moves to where `moved` came from.
++ *
++ * @param moved               New place of the moved dock.
++ * @param moved_from          Former place of the moved dock.
++ * @param other_ptr           Place of the other dock. Updated.
++ *
++ * @return true if `other_ptr` was updated.
++ */
++bool wlmaker_dock_place_resolve(
++    wlmaker_dock_place_t moved,
++    wlmaker_dock_place_t moved_from,
++    wlmaker_dock_place_t *other_ptr);
++
++/**
++ * Reads `Edge` and `Anchor` from a section of the state.
++ *
++ * @param dict_ptr
++ * @param place_ptr
++ *
++ * @return true if both were found and valid.
++ */
++bool wlmaker_dock_place_decode(
++    bspl_dict_t *dict_ptr,
++    wlmaker_dock_place_t *place_ptr);
++
++/**
++ * Creates a dict with `Edge` and `Anchor` of `place`, for storing.
++ *
++ * @param place
++ *
++ * @return The dict, or NULL on error.
++ */
++bspl_dict_t *wlmaker_dock_place_encode(wlmaker_dock_place_t place);
++
++/** Unit test cases. */
++extern const bs_test_set_t wlmaker_dock_position_test_set;
++
++#ifdef __cplusplus
++}  // extern "C"
++#endif  // __cplusplus
++
++#endif /* __WLMAKER_DOCK_POSITION_H__ */
++/* == End of dock_position.h =============================================== */
+diff --git a/src/layer_panel.c b/src/layer_panel.c
+index 2030f95..6a96d04 100644
+--- a/src/layer_panel.c
++++ b/src/layer_panel.c
+@@ -23,12 +23,17 @@
+ 
+ #include <inttypes.h>
+ #include <libbase/libbase.h>
++#include <linux/input-event-codes.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
++#include <string.h>
+ #include <wayland-server-core.h>
+ #include <wayland-server-protocol.h>
+ #define WLR_USE_UNSTABLE
+ #include <wlr/types/wlr_compositor.h>
++#include <wlr/types/wlr_cursor.h>
++#include <wlr/types/wlr_output_layout.h>
++#include <wlr/types/wlr_seat.h>
+ #include <wlr/types/wlr_layer_shell_v1.h>
+ #include <wlr/util/edges.h>
+ #undef WLR_USE_UNSTABLE
+@@ -36,6 +41,9 @@
+ #include "toolkit/toolkit.h"
+ #include "wlr-layer-shell-unstable-v1-protocol.h"
+ #include "xdg_popup.h"
++#include "clip.h"
++#include "dock_position.h"
++#include "input/manager.h"
+ #include "server.h"
+ 
+ /* == Declarations ========================================================= */
+@@ -64,6 +72,19 @@ struct _wlmaker_layer_panel_t {
+     struct wl_listener        destroy_listener;
+     /** Listener for `new_popup` signal raised by `wlr_layer_surface_v1`. */
+     struct wl_listener        new_popup_listener;
++
++    /** The superclass element's original virtual method table. */
++    wlmtk_element_vmt_t       orig_element_vmt;
++    /** Whether this is the Dock (namespace "wlmdock"): It can be dragged. */
++    bool                      is_dock;
++    /** Whether the left button is held on the Dock: May become a drag. */
++    bool                      drag_pending;
++    /** Whether the Dock is being dragged to another corner. */
++    bool                      dragging;
++    /** Pointer position where the button was pressed, in layout coords. */
++    double                    drag_start_x;
++    /** Pointer position where the button was pressed, in layout coords. */
++    double                    drag_start_y;
+ };
+ 
+ wlmaker_layer_panel_t *_wlmaker_layer_panel_create_from_surface(
+@@ -75,6 +96,16 @@ wlmaker_layer_panel_t *_wlmaker_layer_panel_create_from_surface(
+     wlmaker_layer_panel_t *layer_panel_ptr);
+ static void _wlmaker_layer_panel_element_destroy(
+     wlmtk_element_t *element_ptr);
++static bool _wlmaker_layer_panel_element_pointer_button(
++    wlmtk_element_t *element_ptr,
++    const wlmtk_button_event_t *button_event_ptr);
++static bool _wlmaker_layer_panel_element_pointer_accepts_motion(
++    wlmtk_element_t *element_ptr,
++    wlmtk_pointer_motion_event_t *motion_event_ptr);
++static void _wlmaker_layer_panel_element_pointer_grab_cancel(
++    wlmtk_element_t *element_ptr);
++static void _wlmaker_layer_panel_end_drag(
++    wlmaker_layer_panel_t *layer_panel_ptr);
+ 
+ static bool _wlmaker_layer_panel_apply_keyboard(
+     wlmaker_layer_panel_t *layer_panel_ptr,
+@@ -115,8 +146,16 @@ static const wlmtk_panel_vmt_t _wlmaker_layer_panel_vmt = {
+ /** Virtual method table for the layer panel's superclass element. */
+ static const wlmtk_element_vmt_t _wlmaker_layer_panel_element_vmt = {
+     .destroy = _wlmaker_layer_panel_element_destroy,
++    .pointer_button = _wlmaker_layer_panel_element_pointer_button,
++    .pointer_accepts_motion = _wlmaker_layer_panel_element_pointer_accepts_motion,
++    .pointer_grab_cancel = _wlmaker_layer_panel_element_pointer_grab_cancel,
+ };
+ 
++/** Distance the pointer must move with the button held, to drag the Dock. */
++static const double _wlmaker_layer_panel_drag_threshold = 8;
++/** Namespace of the Dock's layer surface, as used by `wlmdock`. */
++static const char *_wlmaker_layer_panel_dock_namespace = "wlmdock";
++
+ /* == Exported methods ===================================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -174,9 +213,13 @@ wlmaker_layer_panel_t *_wlmaker_layer_panel_create_from_surface(
+     wlmtk_panel_extend(
+         &layer_panel_ptr->super_panel,
+         &_wlmaker_layer_panel_vmt);
+-    wlmtk_element_extend(
++    layer_panel_ptr->orig_element_vmt = wlmtk_element_extend(
+         wlmtk_panel_element(&layer_panel_ptr->super_panel),
+         &_wlmaker_layer_panel_element_vmt);
++    layer_panel_ptr->is_dock =
++        NULL != wlr_layer_surface_v1_ptr->namespace &&
++        0 == strcmp(wlr_layer_surface_v1_ptr->namespace,
++                    _wlmaker_layer_panel_dock_namespace);
+ 
+     wlmtk_container_add_element_atop(
+         &layer_panel_ptr->super_panel.super_container,
+@@ -398,6 +441,133 @@ bool _wlmaker_layer_panel_apply_layer(
+     return true;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Implements @ref wlmtk_element_vmt_t::pointer_button. For the Dock: Moving
++ * the pointer with the left button held drags it to another corner, like on
++ * Window Maker. A click (without moving) goes to the Dock, eg. to launch.
++ */
++bool _wlmaker_layer_panel_element_pointer_button(
++    wlmtk_element_t *element_ptr,
++    const wlmtk_button_event_t *button_event_ptr)
++{
++    wlmaker_layer_panel_t *layer_panel_ptr = BS_CONTAINER_OF(
++        element_ptr, wlmaker_layer_panel_t,
++        super_panel.super_container.super_element);
++    wlmaker_server_t *server_ptr = layer_panel_ptr->server_ptr;
++
++    if (layer_panel_ptr->dragging) {
++        if (BTN_LEFT != button_event_ptr->button ||
++            WLMTK_BUTTON_UP != button_event_ptr->type) return true;
++        // The seat tracks the button; there is no focused surface now.
++        wlr_seat_pointer_notify_button(
++            server_ptr->wlr_seat_ptr, button_event_ptr->time_msec,
++            BTN_LEFT, WL_POINTER_BUTTON_STATE_RELEASED);
++        _wlmaker_layer_panel_end_drag(layer_panel_ptr);
++
++        struct wlr_cursor *c = wlmim_wlr_cursor(server_ptr->input_manager_ptr);
++        struct wlr_output *wlr_output_ptr = wlr_output_layout_output_at(
++            server_ptr->wlr_output_layout_ptr, c->x, c->y);
++        if (NULL == wlr_output_ptr) return true;
++        struct wlr_box box;
++        wlr_output_layout_get_box(
++            server_ptr->wlr_output_layout_ptr, wlr_output_ptr, &box);
++        const struct wlr_layer_surface_v1_state *state_ptr =
++            &layer_panel_ptr->wlr_layer_surface_v1_ptr->current;
++        uint32_t edge = state_ptr->exclusive_edge;
++        if (0 == edge) edge = state_ptr->anchor;
++        bool vertical = 0 != (edge & (WLR_EDGE_LEFT | WLR_EDGE_RIGHT)) &&
++            0 == (edge & (WLR_EDGE_TOP | WLR_EDGE_BOTTOM));
++        wlmaker_clip_move_dock(
++            server_ptr, "Dock",
++            wlmaker_dock_place_at(&box, c->x, c->y, vertical));
++        return true;
++    }
++
++    if (layer_panel_ptr->drag_pending &&
++        BTN_LEFT == button_event_ptr->button &&
++        WLMTK_BUTTON_UP == button_event_ptr->type) {
++        _wlmaker_layer_panel_end_drag(layer_panel_ptr);
++    }
++
++    bool rv = layer_panel_ptr->orig_element_vmt.pointer_button(
++        element_ptr, button_event_ptr);
++
++    if (layer_panel_ptr->is_dock &&
++        BTN_LEFT == button_event_ptr->button &&
++        WLMTK_BUTTON_DOWN == button_event_ptr->type &&
++        NULL != element_ptr->parent_container_ptr &&
++        NULL != server_ptr->input_manager_ptr) {
++        struct wlr_cursor *c = wlmim_wlr_cursor(server_ptr->input_manager_ptr);
++        layer_panel_ptr->drag_pending = true;
++        layer_panel_ptr->dragging = false;
++        layer_panel_ptr->drag_start_x = c->x;
++        layer_panel_ptr->drag_start_y = c->y;
++        wlmtk_container_pointer_grab(
++            element_ptr->parent_container_ptr, element_ptr);
++    }
++    return rv;
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Implements @ref wlmtk_element_vmt_t::pointer_accepts_motion. Beyond the
++ * threshold with the button held, the Dock is dragged: The Dock (client)
++ * loses the pointer, so the release does not launch anything.
++ */
++bool _wlmaker_layer_panel_element_pointer_accepts_motion(
++    wlmtk_element_t *element_ptr,
++    wlmtk_pointer_motion_event_t *motion_event_ptr)
++{
++    wlmaker_layer_panel_t *layer_panel_ptr = BS_CONTAINER_OF(
++        element_ptr, wlmaker_layer_panel_t,
++        super_panel.super_container.super_element);
++
++    if (layer_panel_ptr->drag_pending && !layer_panel_ptr->dragging) {
++        struct wlr_cursor *c = wlmim_wlr_cursor(
++            layer_panel_ptr->server_ptr->input_manager_ptr);
++        double dx = c->x - layer_panel_ptr->drag_start_x;
++        double dy = c->y - layer_panel_ptr->drag_start_y;
++        if (dx * dx + dy * dy >= _wlmaker_layer_panel_drag_threshold *
++            _wlmaker_layer_panel_drag_threshold) {
++            layer_panel_ptr->dragging = true;
++            wlr_seat_pointer_notify_clear_focus(
++                layer_panel_ptr->server_ptr->wlr_seat_ptr);
++        }
++    }
++    if (layer_panel_ptr->dragging) return true;
++
++    return layer_panel_ptr->orig_element_vmt.pointer_accepts_motion(
++        element_ptr, motion_event_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Implements @ref wlmtk_element_vmt_t::pointer_grab_cancel. Ends a drag. */
++void _wlmaker_layer_panel_element_pointer_grab_cancel(
++    wlmtk_element_t *element_ptr)
++{
++    wlmaker_layer_panel_t *layer_panel_ptr = BS_CONTAINER_OF(
++        element_ptr, wlmaker_layer_panel_t,
++        super_panel.super_container.super_element);
++    layer_panel_ptr->drag_pending = false;
++    layer_panel_ptr->dragging = false;
++    layer_panel_ptr->orig_element_vmt.pointer_grab_cancel(element_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Ends a (pending) drag of the Dock: Releases the pointer grab. */
++void _wlmaker_layer_panel_end_drag(wlmaker_layer_panel_t *layer_panel_ptr)
++{
++    wlmtk_element_t *element_ptr = wlmtk_panel_element(
++        &layer_panel_ptr->super_panel);
++    layer_panel_ptr->drag_pending = false;
++    layer_panel_ptr->dragging = false;
++    if (NULL != element_ptr->parent_container_ptr) {
++        wlmtk_container_pointer_grab_release(
++            element_ptr->parent_container_ptr, element_ptr);
++    }
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Implements wlmtk_panel_vmt_t::request_size. */
+ uint32_t _wlmaker_layer_panel_request_size(
+diff --git a/src/server.c b/src/server.c
+index e73eb76..c72fb2e 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -391,6 +391,10 @@ wlmaker_server_t *wlmaker_server_create(
+ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
+ {
+     wlmaker_context_menu_cancel(server_ptr, NULL);
++    if (NULL != server_ptr->state_fname_ptr) {
++        free(server_ptr->state_fname_ptr);
++        server_ptr->state_fname_ptr = NULL;
++    }
+     if (NULL != server_ptr->root_menu_ptr) {
+         wlmaker_root_menu_destroy(server_ptr->root_menu_ptr);
+         server_ptr->root_menu_ptr = NULL;
+diff --git a/src/server.h b/src/server.h
+index 246d6ed..28d25d0 100644
+--- a/src/server.h
++++ b/src/server.h
+@@ -83,6 +83,8 @@ typedef struct {
+ struct _wlmaker_server_t {
+     /** Files module handle. */
+     wlm_util_files_t           *files_ptr;
++    /** The `--state_file` argument, or NULL. Where state gets stored. */
++    char                      *state_fname_ptr;
+     /** Configuration dictionnary. */
+     bspl_dict_t               *config_dict_ptr;
+     /** Copy of the options. */
+diff --git a/src/util/subprocess_monitor.c b/src/util/subprocess_monitor.c
+index 5eb9f19..2ea152d 100644
+--- a/src/util/subprocess_monitor.c
++++ b/src/util/subprocess_monitor.c
+@@ -181,6 +181,14 @@ error:
+     return NULL;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++pid_t wlm_util_subprocess_pid(
++    struct wlm_util_subprocess *subprocess_handle_ptr)
++{
++    if (NULL == subprocess_handle_ptr->subprocess_ptr) return 0;
++    return bs_subprocess_pid(subprocess_handle_ptr->subprocess_ptr);
++}
++
+ /* == Local (static) methods =============================================== */
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/util/subprocess_monitor.h b/src/util/subprocess_monitor.h
+index 322264c..a177b76 100644
+--- a/src/util/subprocess_monitor.h
++++ b/src/util/subprocess_monitor.h
+@@ -23,6 +23,7 @@
+ 
+ #include <libbase/libbase.h>
+ #include <stdbool.h>
++#include <sys/types.h>
+ 
+ /** Forward definition for the subprocess monitor. */
+ typedef struct _wlm_util_subprocess_monitor_t wlm_util_subprocess_monitor_t;
+@@ -103,6 +104,16 @@ void wlm_util_subprocess_monitor_cede(
+     wlm_util_subprocess_monitor_t *monitor_ptr,
+     struct wlm_util_subprocess *subprocess_handle_ptr);
+ 
++/**
++ * Returns the process ID of the subprocess.
++ *
++ * @param subprocess_handle_ptr
++ *
++ * @return The PID, or 0 if not known.
++ */
++pid_t wlm_util_subprocess_pid(
++    struct wlm_util_subprocess *subprocess_handle_ptr);
++
+ /**
+  * Starts, entrust and cedes a subprocess to the monitor.
+  *
+diff --git a/src/wlclient/wlclient.c b/src/wlclient/wlclient.c
+index 1a91c2d..a577a95 100644
+--- a/src/wlclient/wlclient.c
++++ b/src/wlclient/wlclient.c
+@@ -120,6 +120,8 @@ struct _wlmcl_client_t {
+ 
+     /** File descriptor to monitor SIGINT. */
+     int                       signal_fd;
++    /** The signals monitored by @ref wlmcl_client_t::signal_fd. */
++    sigset_t                  signal_set;
+     /** Whether @ref wlmcl_client_initialize was executed. */
+     bool                      initialized;
+ 
+@@ -395,6 +397,7 @@ wlmcl_client_t *wlmcl_client_create(const char *app_id_ptr)
+     wl_signal_init(&wlclient_ptr->events.keymap);
+     wl_signal_init(&wlclient_ptr->events.keyboard_repeat_info);
+     wl_signal_init(&wlclient_ptr->events.pointer_changed);
++    wl_signal_init(&wlclient_ptr->events.pointer_leave);
+     wl_signal_init(&wlclient_ptr->events.pointer_button);
+     wl_signal_init(&wlclient_ptr->events.pointer_axis);
+ 
+@@ -435,6 +438,7 @@ wlmcl_client_t *wlmcl_client_create(const char *app_id_ptr)
+         wlmcl_client_destroy(wlclient_ptr);
+         return NULL;
+     }
++    wlclient_ptr->signal_set = signal_set;
+     wlclient_ptr->signal_fd = signalfd(-1, &signal_set, SFD_NONBLOCK);
+     if (0 >= wlclient_ptr->signal_fd) {
+         bs_log(BS_ERROR | BS_ERRNO, "Failed signalfd(-1, %p, SFD_NONBLOCK)",
+@@ -636,6 +640,29 @@ struct wlmcl_client_events *wlmcl_client_events(wlmcl_client_t *wlclient_ptr)
+     return &wlclient_ptr->events;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++bool wlmcl_client_add_signal(wlmcl_client_t *wlclient_ptr, int signal_number)
++{
++    sigset_t signal_set = wlclient_ptr->signal_set;
++    if (0 != sigaddset(&signal_set, signal_number)) {
++        bs_log(BS_ERROR | BS_ERRNO, "Failed sigaddset(%p, %d)",
++               &signal_set, signal_number);
++        return false;
++    }
++    if (0 != sigprocmask(SIG_BLOCK, &signal_set, NULL)) {
++        bs_log(BS_ERROR | BS_ERRNO, "Failed sigprocmask(SIG_BLOCK, %p, NULL)",
++               &signal_set);
++        return false;
++    }
++    if (0 > signalfd(wlclient_ptr->signal_fd, &signal_set, SFD_NONBLOCK)) {
++        bs_log(BS_ERROR | BS_ERRNO, "Failed signalfd(%d, %p, SFD_NONBLOCK)",
++               wlclient_ptr->signal_fd, &signal_set);
++        return false;
++    }
++    wlclient_ptr->signal_set = signal_set;
++    return true;
++}
++
+ /* ------------------------------------------------------------------------- */
+ int wlmcl_client_signal_fd(wlmcl_client_t *wlclient_ptr)
+ {
+@@ -1221,12 +1248,13 @@ void wlmcl_client_pointer_handle_leave(
+     void *data_ptr,
+     __UNUSED__ struct wl_pointer *wl_pointer,
+     __UNUSED__ uint32_t serial,
+-    __UNUSED__ struct wl_surface *surface)
++    struct wl_surface *surface)
+ {
+     wlmcl_client_t *client_ptr = data_ptr;
+     client_ptr->pointer_focus_surface_ptr = NULL;
+     client_ptr->pending_axis_valid[0] = false;
+     client_ptr->pending_axis_valid[1] = false;
++    wl_signal_emit(&client_ptr->events.pointer_leave, surface);
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/wlclient/wlclient.h b/src/wlclient/wlclient.h
+index 674acd5..abdfeac 100644
+--- a/src/wlclient/wlclient.h
++++ b/src/wlclient/wlclient.h
+@@ -99,6 +99,11 @@ struct wlmcl_client_events {
+      * struct @ref wlmcl_client_pointer_axis_event *.
+      */
+     struct wl_signal          pointer_axis;
++    /**
++     * The pointer left one of the client's surfaces. Provides the
++     * struct wl_surface *.
++     */
++    struct wl_signal          pointer_leave;
+ };
+ 
+ /** Event argument for @ref wlmcl_client_events::pointer_button. */
+@@ -216,6 +221,18 @@ const struct wlmcl_client_attributes *wlmcl_client_attributes(
+ /** @return A pointer to @ref wlmcl_client_t::events. */
+ struct wlmcl_client_events *wlmcl_client_events(wlmcl_client_t *wlmcl_client_ptr);
+ 
++/**
++ * Adds a signal to those monitored by @ref wlmcl_client_signal_fd (initially
++ * SIGINT and SIGTERM). It is blocked from regular delivery.
++ *
++ * @param wlmcl_client_ptr
++ * @param signal_number
++ *
++ * @return true on success.
++ */
++bool wlmcl_client_add_signal(wlmcl_client_t *wlmcl_client_ptr,
++                             int signal_number);
++
+ /** @return The signal file descriptor monitored by the client. */
+ int wlmcl_client_signal_fd(wlmcl_client_t *wlmcl_client_ptr);
+ 
+diff --git a/src/wlmaker.c b/src/wlmaker.c
+index 45ff829..3bf0329 100644
+--- a/src/wlmaker.c
++++ b/src/wlmaker.c
+@@ -271,7 +271,6 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+ 
+     bspl_dict_t *state_dict_ptr = wlmaker_state_load(
+         files_ptr, wlmaker_arg_state_file_ptr);
+-    if (NULL != wlmaker_arg_state_file_ptr) free(wlmaker_arg_state_file_ptr);
+     if (NULL == state_dict_ptr) {
+         fprintf(stderr, "Failed to load & initialize state.\n");
+         return EXIT_FAILURE;
+@@ -291,6 +290,9 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+     wlmaker_server_t *server_ptr = wlmaker_server_create(
+         config_dict_ptr, files_ptr, &style, &wlmaker_server_options);
+     if (NULL == server_ptr) return EXIT_FAILURE;
++    // Kept, for storing changes (eg. a Dock moved to another corner).
++    server_ptr->state_fname_ptr = wlmaker_arg_state_file_ptr;
++    wlmaker_arg_state_file_ptr = NULL;
+ 
+     // TODO(kaeser@gubbe.ch): Uh, that's ugly...
+     server_ptr->root_menu_ptr = wlmaker_root_menu_create(
+diff --git a/src/wlmdock.c b/src/wlmdock.c
+index c5c74b8..f85224a 100644
+--- a/src/wlmdock.c
++++ b/src/wlmdock.c
+@@ -19,15 +19,21 @@
+  * limitations under the License.
+  */
+ 
++// For `struct ucred`, to find the compositor's process.
++#define _GNU_SOURCE
++
+ #include <basedir.h>
+ #include <libbase/libbase.h>
+ #include <libbase/plist.h>
++#include <linux/input-event-codes.h>
+ #include <stdbool.h>
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <signal.h>
+ #include <sys/signalfd.h>
++#include <sys/socket.h>
+ #include <sys/types.h>
+ #include <unistd.h>
+ #include <wayland-client-core.h>
+@@ -47,6 +53,9 @@
+ #include <wlr/util/log.h>
+ #undef WLR_USE_UNSTABLE
+ 
++#include "config.h"
++#include "dock_position.h"
++
+ #include "toolkit/toolkit.h"
+ #include "util/backtrace.h"
+ #include "util/files.h"
+@@ -100,8 +109,61 @@ typedef struct {
+     struct wl_event_source    *client_signal_event_source_ptr;
+     /** Listener for `destroy` of @ref wlmdock_t::wlr_backend_ptr. */
+     struct wl_listener        backend_destroy_listener;
++
++    /** Files handle, for (re-)loading and storing the state. */
++    wlm_util_files_t          *files_ptr;
++    /** The `--state_file` argument, or NULL. */
++    const char                *state_fname_ptr;
++    /** Whether showing the Clip's launchers (`--clip`). */
++    bool                      clip;
++    /** Section of the state: "Dock" or "Clip". */
++    const char                *section_ptr;
++    /** The style. */
++    wlmaker_config_style_t    *style_ptr;
++    /** Current position. */
++    wlmtk_dock_positioning_t  positioning;
++
++    /** What is shown on the surface: The tile box, and the menu if open. */
++    wlmtk_container_t         root_container;
++    /** The launcher's menu, when open. Otherwise NULL. */
++    wlmtk_menu_t              *menu_ptr;
++    /** The launcher the menu is for. */
++    wlmdock_launcher_t        *menu_launcher_ptr;
++    /** Destroys the closed menu, from the event loop. */
++    struct wl_event_source    *menu_close_event_source_ptr;
++    /** Listener for @ref wlmtk_menu_events_t::request_close. */
++    struct wl_listener        menu_request_close_listener;
++    /** Corners to flip to, once the menu is gone. 0 for none. */
++    uint32_t                  pending_flip;
++    /** The menu element's original virtual method table. */
++    wlmtk_element_vmt_t       menu_orig_vmt;
++    /** Listener for @ref wlmcl_client_events::pointer_leave. */
++    struct wl_listener        pointer_leave_listener;
+ } wlmdock_t;
+ 
++/** Actions of the launcher's menu. */
++typedef enum {
++    WLMDOCK_MENU_LAUNCH,
++    WLMDOCK_MENU_KILL,
++    WLMDOCK_MENU_REMOVE,
++    WLMDOCK_MENU_FLIP_SIDE,
++    WLMDOCK_MENU_FLIP_END,
++} wlmdock_menu_action_t;
++
++/** An item of the launcher's menu. */
++typedef struct {
++    /** The menu item. */
++    wlmtk_menu_item_t         *menu_item_ptr;
++    /** Back-link to the dock. */
++    wlmdock_t                 *dock_ptr;
++    /** What it does. */
++    wlmdock_menu_action_t     action;
++    /** Listener for @ref wlmtk_menu_item_events_t::triggered. */
++    struct wl_listener        triggered_listener;
++    /** Listener for @ref wlmtk_menu_item_events_t::destroy. */
++    struct wl_listener        destroy_listener;
++} wlmdock_menu_item_t;
++
+ /** TODO: Replace this. */
+ struct wlmdock_state {
+     /** Positioning data. */
+@@ -126,6 +188,30 @@ static bool _wlmdock_decode_launchers(
+     bspl_object_t *object_ptr,
+     const union bspl_desc_value *desc_value_ptr,
+     void *value_ptr);
++static bool _wlmdock_load_positioning(
++    wlmdock_t *dock_ptr,
++    bspl_dict_t *state_dict_ptr,
++    wlmtk_dock_positioning_t *positioning_ptr);
++static void _wlmdock_set_positioning(
++    wlmdock_t *dock_ptr,
++    const wlmtk_dock_positioning_t *positioning_ptr);
++static void _wlmdock_open_menu(
++    wlmdock_launcher_t *launcher_ptr,
++    void *ud_ptr);
++static void _wlmdock_destroy_menu(wlmdock_t *dock_ptr);
++static void _wlmdock_close_menu(wlmdock_t *dock_ptr);
++static void _wlmdock_idle_destroy_menu(void *data_ptr);
++static void _wlmdock_flip(wlmdock_t *dock_ptr, uint32_t flip);
++static void _wlmdock_layout(wlmdock_t *dock_ptr);
++static void _wlmdock_handle_menu_request_close(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
++static void _wlmdock_handle_pointer_leave(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
++static bool _wlmdock_menu_pointer_button(
++    wlmtk_element_t *element_ptr,
++    const wlmtk_button_event_t *button_event_ptr);
+ 
+ /* == Data ================================================================= */
+ 
+@@ -265,7 +351,6 @@ int main(int argc, const char **argv)
+ 
+     bspl_dict_t *state_dict_ptr = wlmaker_state_load(
+         files_ptr, wlmdock_arg_state_file_ptr);
+-    if (NULL != wlmdock_arg_state_file_ptr) free(wlmdock_arg_state_file_ptr);
+     if (NULL == state_dict_ptr) {
+         fprintf(stderr, "Failed to load & initialize state.\n");
+         return EXIT_FAILURE;
+@@ -294,6 +379,10 @@ int main(int argc, const char **argv)
+         bs_log(BS_ERROR, "Failed to create wlmdock.");
+         return EXIT_FAILURE;
+     }
++    dock_ptr->files_ptr = files_ptr;
++    dock_ptr->state_fname_ptr = wlmdock_arg_state_file_ptr;
++    dock_ptr->clip = wlmdock_arg_clip;
++    dock_ptr->section_ptr = section_ptr;
+ 
+     for (size_t i = 0; i < bspl_array_size(state.launchers_array_ptr); ++i) {
+         bspl_dict_t *dict_ptr = bspl_dict_from_object(
+@@ -310,6 +399,8 @@ int main(int argc, const char **argv)
+             dock_ptr->subprocess_monitor_ptr,
+             files_ptr);
+         if (NULL == launcher_ptr) return EXIT_FAILURE;
++        wlmdock_launcher_set_menu_handler(
++            launcher_ptr, _wlmdock_open_menu, dock_ptr);
+         wlmdock_tilebox_add_tile(
+             dock_ptr->tilebox_ptr,
+             wlmdock_launcher_tile(launcher_ptr));
+@@ -328,6 +419,7 @@ int main(int argc, const char **argv)
+ 
+     _wlmdock_destroy(dock_ptr);
+     bspl_decoded_destroy(wlmaker_config_style_desc, &style);
++    if (NULL != wlmdock_arg_state_file_ptr) free(wlmdock_arg_state_file_ptr);
+ 
+     if (NULL != files_ptr) wlm_util_files_destroy(files_ptr);
+ 
+@@ -343,6 +435,13 @@ wlmdock_t *_wlmdock_create(
+ {
+     wlmdock_t *dock_ptr = logged_calloc(1, sizeof(wlmdock_t));
+     if (NULL == dock_ptr) return NULL;
++    dock_ptr->style_ptr = style_ptr;
++    dock_ptr->positioning = positioning;
++    if (!wlmtk_container_init(&dock_ptr->root_container)) {
++        free(dock_ptr);
++        return NULL;
++    }
++    wlmtk_element_set_visible(&dock_ptr->root_container.super_element, true);
+ 
+     // 1. Initialize client wrapper and connect to parent compositor.
+     dock_ptr->client_ptr = wlmcl_client_create("wlmaker.wlmdock");
+@@ -354,6 +453,15 @@ wlmdock_t *_wlmdock_create(
+     const struct wlmcl_client_attributes *attrs =
+         wlmcl_client_attributes(dock_ptr->client_ptr);
+     dock_ptr->remote_display_ptr = attrs->wl_display_ptr;
++    // SIGUSR1: The compositor moved the Dock (or Clip). Re-read the state.
++    if (!wlmcl_client_add_signal(dock_ptr->client_ptr, SIGUSR1)) {
++        _wlmdock_destroy(dock_ptr);
++        return NULL;
++    }
++    wlmtk_util_connect_listener_signal(
++        &wlmcl_client_events(dock_ptr->client_ptr)->pointer_leave,
++        &dock_ptr->pointer_leave_listener,
++        _wlmdock_handle_pointer_leave);
+ 
+     // Register extra Wayland interfaces.
+     if (!wlmcl_layer_shell_register(
+@@ -416,6 +524,9 @@ wlmdock_t *_wlmdock_create(
+         _wlmdock_destroy(dock_ptr);
+         return NULL;
+     }
++    wlmtk_container_add_element(
++        &dock_ptr->root_container,
++        wlmdock_tilebox_element(dock_ptr->tilebox_ptr));
+ 
+     // 6. Prepare renderer and allocator. The dock is small and drawn in
+     // software anyway: Default to the pixman renderer, which makes the
+@@ -461,8 +572,9 @@ wlmdock_t *_wlmdock_create(
+         // TODO(kaeser@gubbe.ch): Find a way to not provide a cursor style,
+         // when using the cursor shape extension.
+         &style_ptr->cursor,
+-        wlmdock_tilebox_container(dock_ptr->tilebox_ptr),
+-        &positioning);
++        &dock_ptr->root_container,
++        &positioning,
++        positioning.overlay ? "wlmdock-clip" : "wlmdock");
+     if (NULL == dock_ptr->subcompositor_ptr) {
+         _wlmdock_destroy(dock_ptr);
+         return NULL;
+@@ -514,6 +626,8 @@ void _wlmdock_destroy(wlmdock_t *dock_ptr)
+ {
+     if (NULL == dock_ptr) return;
+     wlmtk_util_disconnect_listener(&dock_ptr->backend_destroy_listener);
++    wlmtk_util_disconnect_listener(&dock_ptr->pointer_leave_listener);
++    _wlmdock_destroy_menu(dock_ptr);
+ 
+     if (NULL != dock_ptr->subprocess_monitor_ptr) {
+         wlm_util_subprocess_monitor_destroy(dock_ptr->subprocess_monitor_ptr);
+@@ -538,9 +652,14 @@ void _wlmdock_destroy(wlmdock_t *dock_ptr)
+         dock_ptr->wlr_allocator_ptr = NULL;
+     }
+     if (NULL != dock_ptr->tilebox_ptr) {
++        wlmtk_element_t *e = wlmdock_tilebox_element(dock_ptr->tilebox_ptr);
++        if (e->parent_container_ptr == &dock_ptr->root_container) {
++            wlmtk_container_remove_element(&dock_ptr->root_container, e);
++        }
+         wlmdock_tilebox_destroy(dock_ptr->tilebox_ptr);
+         dock_ptr->tilebox_ptr = NULL;
+     }
++    wlmtk_container_fini(&dock_ptr->root_container);
+ 
+     if (NULL != dock_ptr->local_display_ptr) {
+         wl_display_destroy(dock_ptr->local_display_ptr);
+@@ -587,7 +706,17 @@ int handle_client_signal(int fd, uint32_t mask, void *data_ptr)
+ 
+     if (mask & WL_EVENT_READABLE) {
+         ssize_t rd = read(fd, &siginfo, sizeof(siginfo));
+-        if (rd == sizeof(siginfo)) {
++        if (rd == sizeof(siginfo) && SIGUSR1 == siginfo.ssi_signo) {
++            // The compositor moved us: Re-read the position.
++            bspl_dict_t *state_dict_ptr = wlmaker_state_load(
++                dock_ptr->files_ptr, dock_ptr->state_fname_ptr);
++            wlmtk_dock_positioning_t positioning;
++            if (_wlmdock_load_positioning(
++                    dock_ptr, state_dict_ptr, &positioning)) {
++                _wlmdock_set_positioning(dock_ptr, &positioning);
++            }
++            bspl_dict_unref(state_dict_ptr);
++        } else if (rd == sizeof(siginfo)) {
+             bs_log(BS_INFO, "wlmdock: Signal %d caught, exiting loop.",
+                    siginfo.ssi_signo);
+             wl_display_terminate(dock_ptr->local_display_ptr);
+@@ -614,4 +743,472 @@ void _wlmdock_handle_backend_destroy(
+     wl_display_terminate(dock_ptr->local_display_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Reads the position from the dock's section of the state. */
++bool _wlmdock_load_positioning(
++    wlmdock_t *dock_ptr,
++    bspl_dict_t *state_dict_ptr,
++    wlmtk_dock_positioning_t *positioning_ptr)
++{
++    bspl_dict_t *dict_ptr = bspl_dict_get_dict(
++        state_dict_ptr, dock_ptr->section_ptr);
++    struct wlmdock_state state = {};
++    if (!bspl_decode_dict(dict_ptr, _wlmdock_plist_desc, &state)) {
++        bs_log(BS_WARNING, "Failed to parse the State's '%s' section.",
++               dock_ptr->section_ptr);
++        return false;
++    }
++    if (NULL != state.launchers_array_ptr) {
++        bspl_array_unref(state.launchers_array_ptr);
++    }
++    *positioning_ptr = state.positioning;
++    positioning_ptr->margin = state.margin;
++    positioning_ptr->overlay = dock_ptr->positioning.overlay;
++    if (dock_ptr->clip && !state.has_margin) {
++        positioning_ptr->margin =
++            dock_ptr->style_ptr->tile.size +
++            dock_ptr->style_ptr->dock.margin.width;
++    }
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Moves the dock: Eg. to another corner. Keeps the orientation. */
++void _wlmdock_set_positioning(
++    wlmdock_t *dock_ptr,
++    const wlmtk_dock_positioning_t *positioning_ptr)
++{
++    wlmaker_dock_place_t from = {
++        dock_ptr->positioning.edge, dock_ptr->positioning.anchor };
++    wlmaker_dock_place_t to = {
++        positioning_ptr->edge, positioning_ptr->anchor };
++    if (wlmaker_dock_place_vertical(from) != wlmaker_dock_place_vertical(to)) {
++        bs_log(BS_WARNING, "wlmdock: Cannot change orientation, ignoring "
++               "edge 0x%"PRIx32, to.edge);
++        return;
++    }
++    _wlmdock_destroy_menu(dock_ptr);
++
++    dock_ptr->positioning = *positioning_ptr;
++    wlmdock_tilebox_set_reverse(
++        dock_ptr->tilebox_ptr,
++        positioning_ptr->anchor == WLR_EDGE_BOTTOM ||
++        positioning_ptr->anchor == WLR_EDGE_RIGHT);
++    if (NULL != dock_ptr->subcompositor_ptr) {
++        wlmdock_subcompositor_set_positioning(
++            dock_ptr->subcompositor_ptr, positioning_ptr);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Stores the launchers, in their order from the anchor, in the state. */
++static void _wlmdock_store_launchers(wlmdock_t *dock_ptr)
++{
++    size_t n = wlmdock_tilebox_tiles(dock_ptr->tilebox_ptr, NULL, 0);
++    wlmtk_tile_t **tiles_ptr = NULL;
++    if (0 < n) {
++        tiles_ptr = logged_calloc(n, sizeof(wlmtk_tile_t*));
++        if (NULL == tiles_ptr) return;
++        wlmdock_tilebox_tiles(dock_ptr->tilebox_ptr, tiles_ptr, n);
++    }
++    bspl_array_t *array_ptr = bspl_array_create();
++    bspl_dict_t *values_ptr = bspl_dict_create();
++    bool rv = NULL != array_ptr && NULL != values_ptr;
++    for (size_t i = 0; rv && i < n; ++i) {
++        wlmdock_launcher_t *l_ptr = wlmdock_launcher_from_tile(tiles_ptr[i]);
++        if (NULL == l_ptr) continue;
++        rv = bspl_array_push_back(
++            array_ptr, bspl_object_from_dict(wlmdock_launcher_dict(l_ptr)));
++    }
++    rv = rv && bspl_dict_add(values_ptr, "Launchers",
++                             bspl_object_from_array(array_ptr));
++    rv = rv && wlmaker_state_store_section(
++        dock_ptr->files_ptr, dock_ptr->state_fname_ptr,
++        dock_ptr->section_ptr, values_ptr);
++    if (!rv) bs_log(BS_WARNING, "wlmdock: Failed to store the launchers.");
++    if (NULL != array_ptr) bspl_array_unref(array_ptr);
++    if (NULL != values_ptr) bspl_dict_unref(values_ptr);
++    if (NULL != tiles_ptr) free(tiles_ptr);
++
++    // The Clip leaves room for its launchers: Tell the compositor (signals
++    // SIGUSR1) to update it.
++    struct ucred ucred;
++    socklen_t len = sizeof(ucred);
++    if (rv && dock_ptr->clip &&
++        0 == getsockopt(wl_display_get_fd(dock_ptr->remote_display_ptr),
++                        SOL_SOCKET, SO_PEERCRED, &ucred, &len) &&
++        1 < ucred.pid && getpid() != ucred.pid) {
++        if (0 != kill(ucred.pid, SIGUSR1)) {
++            bs_log(BS_WARNING | BS_ERRNO, "Failed kill(%d, SIGUSR1)",
++                   (int)ucred.pid);
++        }
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Corner reached by flipping `flip`, or 0 if the Clip is there. */
++static uint32_t _wlmdock_flipped_corner(wlmdock_t *dock_ptr, uint32_t flip)
++{
++    wlmaker_dock_place_t place = {
++        dock_ptr->positioning.edge, dock_ptr->positioning.anchor };
++    uint32_t corner = wlmaker_dock_place_corner(place) ^ flip;
++
++    bspl_dict_t *state_dict_ptr = wlmaker_state_load(
++        dock_ptr->files_ptr, dock_ptr->state_fname_ptr);
++    wlmaker_dock_place_t clip;
++    if (wlmaker_dock_place_decode(
++            bspl_dict_get_dict(state_dict_ptr, "Clip"), &clip) &&
++        wlmaker_dock_place_corner(clip) == corner) corner = 0;
++    bspl_dict_unref(state_dict_ptr);
++    return corner;
++}
++
++/* ------------------------------------------------------------------------- */
++/** Moves the dock by flipping `flip`, and stores the position. */
++static void _wlmdock_flip(wlmdock_t *dock_ptr, uint32_t flip)
++{
++    uint32_t corner = _wlmdock_flipped_corner(dock_ptr, flip);
++    if (0 == corner) return;
++    wlmaker_dock_place_t place = wlmaker_dock_place_from_corner(
++        corner, wlmaker_dock_place_vertical(
++            (wlmaker_dock_place_t){
++                dock_ptr->positioning.edge, dock_ptr->positioning.anchor }));
++    bspl_dict_t *d = wlmaker_dock_place_encode(place);
++    if (NULL != d) {
++        wlmaker_state_store_section(dock_ptr->files_ptr,
++                                    dock_ptr->state_fname_ptr,
++                                    dock_ptr->section_ptr, d);
++        bspl_dict_unref(d);
++    }
++    wlmtk_dock_positioning_t positioning = dock_ptr->positioning;
++    positioning.edge = place.edge;
++    positioning.anchor = place.anchor;
++    _wlmdock_set_positioning(dock_ptr, &positioning);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles @ref wlmtk_menu_item_events_t::triggered: Does the action. */
++static void _wlmdock_handle_menu_item_triggered(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmdock_menu_item_t *item_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmdock_menu_item_t, triggered_listener);
++    wlmdock_t *dock_ptr = item_ptr->dock_ptr;
++    wlmdock_launcher_t *launcher_ptr = dock_ptr->menu_launcher_ptr;
++
++    switch (item_ptr->action) {
++    case WLMDOCK_MENU_LAUNCH:
++        if (NULL != launcher_ptr) wlmdock_launcher_launch(launcher_ptr);
++        break;
++    case WLMDOCK_MENU_KILL:
++        if (NULL != launcher_ptr) wlmdock_launcher_kill(launcher_ptr);
++        break;
++    case WLMDOCK_MENU_REMOVE:
++        if (NULL != launcher_ptr) {
++            dock_ptr->menu_launcher_ptr = NULL;
++            wlmdock_tilebox_remove_tile(dock_ptr->tilebox_ptr,
++                                        wlmdock_launcher_tile(launcher_ptr));
++            wlmdock_launcher_destroy(launcher_ptr);
++            _wlmdock_store_launchers(dock_ptr);
++        }
++        break;
++    case WLMDOCK_MENU_FLIP_SIDE:
++        // Moving destroys the menu: Not while it's dispatching this event.
++        dock_ptr->pending_flip = WLR_EDGE_LEFT | WLR_EDGE_RIGHT;
++        break;
++    case WLMDOCK_MENU_FLIP_END:
++        dock_ptr->pending_flip = WLR_EDGE_TOP | WLR_EDGE_BOTTOM;
++        break;
++    }
++    _wlmdock_close_menu(dock_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles @ref wlmtk_menu_item_events_t::destroy: Frees the item. */
++static void _wlmdock_handle_menu_item_destroy(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmdock_menu_item_t *item_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmdock_menu_item_t, destroy_listener);
++    wlmtk_util_disconnect_listener(&item_ptr->triggered_listener);
++    wlmtk_util_disconnect_listener(&item_ptr->destroy_listener);
++    free(item_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Adds an item to the menu. */
++static bool _wlmdock_menu_add(
++    wlmdock_t *dock_ptr,
++    const char *text_ptr,
++    wlmdock_menu_action_t action)
++{
++    wlmdock_menu_item_t *item_ptr = logged_calloc(1, sizeof(*item_ptr));
++    if (NULL == item_ptr) return false;
++    item_ptr->dock_ptr = dock_ptr;
++    item_ptr->action = action;
++    item_ptr->menu_item_ptr = wlmtk_menu_item_create(
++        wlmtk_menu_style_to_ref(dock_ptr->style_ptr->menu_style_ptr));
++    if (NULL == item_ptr->menu_item_ptr ||
++        !wlmtk_menu_item_set_text(item_ptr->menu_item_ptr, text_ptr)) {
++        if (NULL != item_ptr->menu_item_ptr) {
++            wlmtk_menu_item_destroy(item_ptr->menu_item_ptr);
++        }
++        free(item_ptr);
++        return false;
++    }
++    wlmtk_util_connect_listener_signal(
++        &wlmtk_menu_item_events(item_ptr->menu_item_ptr)->triggered,
++        &item_ptr->triggered_listener,
++        _wlmdock_handle_menu_item_triggered);
++    wlmtk_util_connect_listener_signal(
++        &wlmtk_menu_item_events(item_ptr->menu_item_ptr)->destroy,
++        &item_ptr->destroy_listener,
++        _wlmdock_handle_menu_item_destroy);
++    wlmtk_menu_add_item(dock_ptr->menu_ptr, item_ptr->menu_item_ptr);
++    return true;
++}
++
++/** Extension of the menu element's virtual method table. */
++static const wlmtk_element_vmt_t _wlmdock_menu_vmt = {
++    .pointer_button = _wlmdock_menu_pointer_button,
++};
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Implements @ref wlmtk_element_vmt_t::pointer_button for the menu: Releasing
++ * the right button over an item triggers it; elsewhere, the menu stays open
++ * (it was a click). Pressing a button outside the menu closes it.
++ */
++bool _wlmdock_menu_pointer_button(
++    wlmtk_element_t *element_ptr,
++    const wlmtk_button_event_t *button_event_ptr)
++{
++    wlmdock_t *dock_ptr = NULL;
++    // The menu element is a child of the root container.
++    if (NULL != element_ptr->parent_container_ptr) {
++        dock_ptr = BS_CONTAINER_OF(
++            element_ptr->parent_container_ptr, wlmdock_t, root_container);
++    }
++    if (NULL == dock_ptr || NULL == dock_ptr->menu_ptr) return true;
++
++    if (WLMTK_BUTTON_DOWN == button_event_ptr->type &&
++        !element_ptr->pointer_inside) {
++        _wlmdock_close_menu(dock_ptr);
++        return true;
++    }
++    if (BTN_RIGHT == button_event_ptr->button) {
++        if (WLMTK_BUTTON_UP != button_event_ptr->type ||
++            !element_ptr->pointer_inside) return true;
++        for (size_t i = 0; i < wlmtk_menu_items_size(dock_ptr->menu_ptr); ++i) {
++            wlmtk_menu_item_t *item_ptr = wlmtk_menu_item_at(
++                dock_ptr->menu_ptr, i);
++            if (wlmtk_menu_item_element(item_ptr)->pointer_inside &&
++                WLMTK_MENU_ITEM_DISABLED != wlmtk_menu_item_get_state(
++                    item_ptr)) {
++                wlmtk_menu_item_trigger(item_ptr);
++                break;
++            }
++        }
++        return true;
++    }
++    return dock_ptr->menu_orig_vmt.pointer_button(
++        element_ptr, button_event_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Opens the launcher's right-click menu, like on Window Maker: Launch, Kill
++ * (when it launched processes), Remove (stored in the state), and moving
++ * the Dock to another corner (except the Clip's). Drawn next to the tiles,
++ * on the dock's surface, which grows for it while open.
++ */
++void _wlmdock_open_menu(
++    wlmdock_launcher_t *launcher_ptr,
++    void *ud_ptr)
++{
++    wlmdock_t *dock_ptr = ud_ptr;
++    _wlmdock_destroy_menu(dock_ptr);
++    if (NULL == dock_ptr->style_ptr->menu_style_ptr) return;
++
++    dock_ptr->menu_ptr = wlmtk_menu_create(
++        wlmtk_menu_style_to_ref(dock_ptr->style_ptr->menu_style_ptr));
++    if (NULL == dock_ptr->menu_ptr) return;
++    dock_ptr->menu_launcher_ptr = launcher_ptr;
++
++    bool rv = _wlmdock_menu_add(dock_ptr, "Launch", WLMDOCK_MENU_LAUNCH);
++    if (wlmdock_launcher_has_processes(launcher_ptr)) {
++        rv = rv && _wlmdock_menu_add(dock_ptr, "Kill", WLMDOCK_MENU_KILL);
++    }
++    rv = rv && _wlmdock_menu_add(dock_ptr, "Remove", WLMDOCK_MENU_REMOVE);
++    // The Clip's launchers follow the Clip: No moving them on their own.
++    if (!dock_ptr->clip) {
++        uint32_t corner = dock_ptr->positioning.edge |
++            dock_ptr->positioning.anchor;
++        if (0 != _wlmdock_flipped_corner(
++                dock_ptr, WLR_EDGE_LEFT | WLR_EDGE_RIGHT)) {
++            rv = rv && _wlmdock_menu_add(
++                dock_ptr,
++                (corner & WLR_EDGE_LEFT) ?
++                "Move to Right Side" : "Move to Left Side",
++                WLMDOCK_MENU_FLIP_SIDE);
++        }
++        if (0 != _wlmdock_flipped_corner(
++                dock_ptr, WLR_EDGE_TOP | WLR_EDGE_BOTTOM)) {
++            rv = rv && _wlmdock_menu_add(
++                dock_ptr,
++                (corner & WLR_EDGE_TOP) ? "Move to Bottom" : "Move to Top",
++                WLMDOCK_MENU_FLIP_END);
++        }
++    }
++    if (!rv) {
++        _wlmdock_destroy_menu(dock_ptr);
++        return;
++    }
++
++    wlmtk_util_connect_listener_signal(
++        &wlmtk_menu_events(dock_ptr->menu_ptr)->request_close,
++        &dock_ptr->menu_request_close_listener,
++        _wlmdock_handle_menu_request_close);
++    wlmtk_element_t *e = wlmtk_menu_element(dock_ptr->menu_ptr);
++    wlmtk_container_add_element(&dock_ptr->root_container, e);
++
++    // Not the toolkit's right-click mode: It tells a click from a drag by
++    // the pointer's position in the menu, but the menu moves on the surface
++    // when the surface grows for it at the left or top. Instead: Items are
++    // triggered by a left click, or by releasing the right button over them.
++    dock_ptr->menu_orig_vmt = wlmtk_element_extend(e, &_wlmdock_menu_vmt);
++    wlmtk_menu_set_open(dock_ptr->menu_ptr, false);
++    wlmtk_menu_set_open(dock_ptr->menu_ptr, true);
++    _wlmdock_layout(dock_ptr);
++    // Like the root menu: Gets all pointer events, to see the right button
++    // released over an item, or a click elsewhere.
++    wlmtk_container_pointer_grab(&dock_ptr->root_container, e);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Closes the menu: Hides it now, destroys it from the event loop. */
++void _wlmdock_close_menu(wlmdock_t *dock_ptr)
++{
++    if (NULL == dock_ptr->menu_ptr ||
++        NULL != dock_ptr->menu_close_event_source_ptr) return;
++    dock_ptr->menu_close_event_source_ptr = wl_event_loop_add_idle(
++        wl_display_get_event_loop(dock_ptr->local_display_ptr),
++        _wlmdock_idle_destroy_menu,
++        dock_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Destroys the closed menu, from the event loop. */
++void _wlmdock_idle_destroy_menu(void *data_ptr)
++{
++    wlmdock_t *dock_ptr = data_ptr;
++    // The idle source is gone, once dispatched.
++    dock_ptr->menu_close_event_source_ptr = NULL;
++    _wlmdock_destroy_menu(dock_ptr);
++    if (0 != dock_ptr->pending_flip) {
++        uint32_t flip = dock_ptr->pending_flip;
++        dock_ptr->pending_flip = 0;
++        _wlmdock_flip(dock_ptr, flip);
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++/** Destroys the menu, if open. Shrinks the surface back to the tiles. */
++void _wlmdock_destroy_menu(wlmdock_t *dock_ptr)
++{
++    if (NULL != dock_ptr->menu_close_event_source_ptr) {
++        wl_event_source_remove(dock_ptr->menu_close_event_source_ptr);
++        dock_ptr->menu_close_event_source_ptr = NULL;
++    }
++    if (NULL == dock_ptr->menu_ptr) return;
++
++    wlmtk_element_t *e = wlmtk_menu_element(dock_ptr->menu_ptr);
++    wlmtk_util_disconnect_listener(&dock_ptr->menu_request_close_listener);
++    if (e->parent_container_ptr == &dock_ptr->root_container) {
++        wlmtk_container_pointer_grab_release(&dock_ptr->root_container, e);
++        wlmtk_container_remove_element(&dock_ptr->root_container, e);
++    }
++    wlmtk_menu_destroy(dock_ptr->menu_ptr);
++    dock_ptr->menu_ptr = NULL;
++    dock_ptr->menu_launcher_ptr = NULL;
++    _wlmdock_layout(dock_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/**
++ * Places the tiles and the menu on the surface: The menu beside the
++ * launcher's tile, away from the edge; the tiles where they were on screen.
++ */
++void _wlmdock_layout(wlmdock_t *dock_ptr)
++{
++    wlmtk_element_t *tb_ptr = wlmdock_tilebox_element(dock_ptr->tilebox_ptr);
++    if (NULL == dock_ptr->menu_ptr || NULL == dock_ptr->menu_launcher_ptr) {
++        wlmtk_element_set_position(tb_ptr, 0, 0);
++        wlmtk_container_invalidate_layout(&dock_ptr->root_container);
++        return;
++    }
++    wlmtk_element_t *m_ptr = wlmtk_menu_element(dock_ptr->menu_ptr);
++
++    struct wlr_box tb = wlmtk_element_get_dimensions_box(tb_ptr);
++    struct wlr_box m = wlmtk_element_get_dimensions_box(m_ptr);
++    struct wlr_box t = wlmdock_tilebox_tile_box(
++        dock_ptr->tilebox_ptr,
++        wlmdock_launcher_tile(dock_ptr->menu_launcher_ptr));
++    uint32_t edge = dock_ptr->positioning.edge;
++    uint32_t anchor = dock_ptr->positioning.anchor;
++
++    int tb_x = 0, tb_y = 0, m_x = 0, m_y = 0;
++    if (WLR_EDGE_LEFT == edge || WLR_EDGE_RIGHT == edge) {
++        if (WLR_EDGE_RIGHT == edge) {
++            tb_x = m.width;
++        } else {
++            m_x = tb.width;
++        }
++        // Along the tile; growing away from the anchor.
++        m_y = (WLR_EDGE_BOTTOM == anchor) ? t.y + t.height - m.height : t.y;
++        if (0 > m_y) {
++            tb_y = -m_y;
++            m_y = 0;
++        }
++    } else {
++        if (WLR_EDGE_BOTTOM == edge) {
++            tb_y = m.height;
++        } else {
++            m_y = tb.height;
++        }
++        m_x = (WLR_EDGE_RIGHT == anchor) ? t.x + t.width - m.width : t.x;
++        if (0 > m_x) {
++            tb_x = -m_x;
++            m_x = 0;
++        }
++    }
++    wlmtk_element_set_position(tb_ptr, tb_x - tb.x, tb_y - tb.y);
++    wlmtk_element_set_position(m_ptr, m_x - m.x, m_y - m.y);
++    wlmtk_container_invalidate_layout(&dock_ptr->root_container);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles @ref wlmtk_menu_events_t::request_close: Closes the menu. */
++void _wlmdock_handle_menu_request_close(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmdock_t *dock_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmdock_t, menu_request_close_listener);
++    _wlmdock_close_menu(dock_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handles @ref wlmcl_client_events::pointer_leave: Closes the menu. */
++void _wlmdock_handle_pointer_leave(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmdock_t *dock_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmdock_t, pointer_leave_listener);
++    _wlmdock_close_menu(dock_ptr);
++}
++
+ /* == End of wlmdock.c ===================================================== */
+diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
+index 5f96120..f7b96a7 100644
+--- a/tests/wlmaker_test.c
++++ b/tests/wlmaker_test.c
+@@ -28,6 +28,7 @@
+ #include "config.h"
+ #include "context_menu.h"
+ #include "corner.h"
++#include "dock_position.h"
+ #include "dockapps.h"
+ #include "layer_panel.h"
+ #include "lock_mgr.h"
+@@ -58,6 +59,7 @@ int main(int argc, const char **argv)
+         &wlmaker_config_test_set,
+         &wlmaker_context_menu_test_set,
+         &wlmaker_corner_test_set,
++        &wlmaker_dock_position_test_set,
+         &wlmaker_dockapps_test_set,
+         &wlmaker_layer_panel_test_set,
+         &wlmaker_lock_mgr_test_set,
+-- 
+2.55.0
+

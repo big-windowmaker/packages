@@ -1,0 +1,83 @@
+From 701e26e8531f6ecb86c9be0c2fe9957af6026179 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 19:21:09 -0300
+Subject: [PATCH 35/41] dock: Renders wlmdock with pixman by default, and
+ reports failures.
+
+In a real session (DRM backend, here on virtio-gpu), wlmdock ran but drew
+nothing, and logged "DRM_IOCTL_MODE_CREATE_DUMB failed: Permission
+denied" repeatedly: The automatically chosen renderer and allocator of
+the nested backend used the DRM primary node, where a client cannot
+allocate buffers.
+
+The dock is small and drawn in software anyway. wlmdock now uses the
+pixman renderer, which makes the allocator use shared memory buffers,
+unless WLR_RENDERER is set explicitly.
+
+Also logs a clear error, once, if the dock's output cannot be configured,
+instead of a warning on every attempt.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ src/dock/container_surface.c | 10 ++++++++--
+ src/wlmdock.c                | 16 +++++++++++++---
+ 2 files changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/src/dock/container_surface.c b/src/dock/container_surface.c
+index 8ac0c79..6d90d4c 100644
+--- a/src/dock/container_surface.c
++++ b/src/dock/container_surface.c
+@@ -224,8 +224,14 @@ void wlmdock_container_surface_commit_size(
+     wlr_output_state_set_custom_mode(&state, width, height, 0);
+     if (!wlr_output_commit_state(
+             container_surface_ptr->wlr_output_ptr, &state)) {
+-        bs_log(BS_WARNING, "Failed wlr_output_commit_state(%p, %p) for %dx%d",
+-               container_surface_ptr->wlr_output_ptr, &state, width, height);
++        // Report once: The dock will not be visible.
++        static bool reported = false;
++        if (!reported) {
++            bs_log(BS_ERROR, "Failed to configure the dock's output to "
++                   "%dx%d: The dock cannot draw. Check the renderer "
++                   "(WLR_RENDERER) and buffer allocation.", width, height);
++            reported = true;
++        }
+     }
+     wlr_output_state_finish(&state);
+ 
+diff --git a/src/wlmdock.c b/src/wlmdock.c
+index 0712b40..c5c74b8 100644
+--- a/src/wlmdock.c
++++ b/src/wlmdock.c
+@@ -36,6 +36,7 @@
+ #include <wlr/backend.h>
+ #include <wlr/backend/wayland.h>
+ #include <wlr/render/allocator.h>
++#include <wlr/render/pixman.h>
+ #include <wlr/render/wlr_renderer.h>
+ #include <wlr/types/wlr_compositor.h>
+ #include <wlr/types/wlr_output.h>
+@@ -416,9 +417,18 @@ wlmdock_t *_wlmdock_create(
+         return NULL;
+     }
+ 
+-    // 6. Prepare renderer and allocator.
+-    dock_ptr->wlr_renderer_ptr = wlr_renderer_autocreate(
+-        dock_ptr->wlr_backend_ptr);
++    // 6. Prepare renderer and allocator. The dock is small and drawn in
++    // software anyway: Default to the pixman renderer, which makes the
++    // allocator use shared memory. An automatically chosen GPU renderer
++    // and allocator may pick the DRM primary node, where a client cannot
++    // allocate buffers (eg. "DRM_IOCTL_MODE_CREATE_DUMB failed: Permission
++    // denied"), leaving the dock invisible. WLR_RENDERER still overrides.
++    if (NULL != getenv("WLR_RENDERER")) {
++        dock_ptr->wlr_renderer_ptr = wlr_renderer_autocreate(
++            dock_ptr->wlr_backend_ptr);
++    } else {
++        dock_ptr->wlr_renderer_ptr = wlr_pixman_renderer_create();
++    }
+     if (NULL == dock_ptr->wlr_renderer_ptr) {
+         bs_log(BS_ERROR, "Failed to create renderer.");
+         _wlmdock_destroy(dock_ptr);
+-- 
+2.55.0
+

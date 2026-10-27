@@ -1,0 +1,235 @@
+From bee3c2c7223b35692a9012a7f7c254fa41ab2fbd Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 26 Oct 2026 19:12:01 -0300
+Subject: [PATCH 33/34] dock: Exits cleanly when the parent compositor goes
+ away.
+
+At the end of a session, wlmdock aborted on a wlroots assertion and left
+a core dump: When the connection to the parent compositor is lost, the
+nested Wayland backend destroys itself and its output, while wlmdock
+still had listeners attached (wlr_output_finish: frame listeners;
+wlr_backend_finish: new_input listeners).
+
+* The container surface listens to its output's `destroy`, and drops its
+  references and listeners then.
+* The input manager listens to the backend's `destroy`, and detaches.
+* wlmdock exits its event loop when the backend is destroyed.
+
+Signed-off-by: ruscher <rruscher@gmail.com>
+---
+ src/dock/container_surface.c | 36 ++++++++++++++++++++++++++++++++++++
+ src/input/manager.c          | 27 +++++++++++++++++++++++++++
+ src/wlmdock.c                | 28 ++++++++++++++++++++++++++++
+ 3 files changed, 91 insertions(+)
+
+diff --git a/src/dock/container_surface.c b/src/dock/container_surface.c
+index 409890a..8ac0c79 100644
+--- a/src/dock/container_surface.c
++++ b/src/dock/container_surface.c
+@@ -55,6 +55,8 @@ struct wlmdock_container_surface {
+     struct wlr_scene          *wlr_scene_ptr;
+     /** For `events.frame` of @ref wlr_output_ptr. */
+     struct wl_listener        output_frame_listener;
++    /** For `events.destroy` of @ref wlr_output_ptr. */
++    struct wl_listener        output_destroy_listener;
+ 
+     /* -- References to parent objects ------------------ */
+     /** Output layout for this surface's compositor. */
+@@ -68,6 +70,9 @@ struct wlmdock_container_surface {
+ static void _wlmdock_container_surface_handle_output_frame(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
++static void _wlmdock_container_surface_handle_output_destroy(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
+ 
+ /* == Data ================================================================= */
+ 
+@@ -157,6 +162,12 @@ struct wlmdock_container_surface *wlmdock_container_surface_create(
+         &container_surface_ptr->wlr_output_ptr->events.frame,
+         &container_surface_ptr->output_frame_listener,
+         _wlmdock_container_surface_handle_output_frame);
++    // The backend may destroy the output, eg. when the parent compositor
++    // goes away. Listeners must be gone before.
++    wlmtk_util_connect_listener_signal(
++        &container_surface_ptr->wlr_output_ptr->events.destroy,
++        &container_surface_ptr->output_destroy_listener,
++        _wlmdock_container_surface_handle_output_destroy);
+ 
+     return container_surface_ptr;
+ }
+@@ -165,6 +176,8 @@ struct wlmdock_container_surface *wlmdock_container_surface_create(
+ void wlmdock_container_surface_destroy(
+     struct wlmdock_container_surface *container_surface_ptr)
+ {
++    wlmtk_util_disconnect_listener(
++        &container_surface_ptr->output_destroy_listener);
+     wlmtk_util_disconnect_listener(
+         &container_surface_ptr->output_frame_listener);
+ 
+@@ -203,6 +216,7 @@ void wlmdock_container_surface_commit_size(
+     int height)
+ {
+     if (0 >= width || 0 >= height) return;
++    if (NULL == container_surface_ptr->wlr_output_ptr) return;
+ 
+     struct wlr_output_state state;
+     wlr_output_state_init(&state);
+@@ -245,4 +259,26 @@ void _wlmdock_container_surface_handle_output_frame(
+         container_surface_ptr->wlr_scene_output_ptr, &now);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Handles the output's destruction (eg. by the backend, when the parent
++ * compositor went away): Releases the references to it.
++ */
++void _wlmdock_container_surface_handle_output_destroy(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    struct wlmdock_container_surface *container_surface_ptr = BS_CONTAINER_OF(
++        listener_ptr, struct wlmdock_container_surface,
++        output_destroy_listener);
++
++    wlmtk_util_disconnect_listener(
++        &container_surface_ptr->output_frame_listener);
++    wlmtk_util_disconnect_listener(
++        &container_surface_ptr->output_destroy_listener);
++    // The scene output and the output layout follow the output's destruction.
++    container_surface_ptr->wlr_scene_output_ptr = NULL;
++    container_surface_ptr->wlr_output_ptr = NULL;
++}
++
+ /* == End of container_surface.c =========================================== */
+diff --git a/src/input/manager.c b/src/input/manager.c
+index b28574e..660f4c7 100644
+--- a/src/input/manager.c
++++ b/src/input/manager.c
+@@ -56,6 +56,8 @@ struct _wlmim_t {
+ 
+     /** Listener for `new_input` signals raised by `wlr_backend`. */
+     struct wl_listener        backend_new_input_device_listener;
++    /** Listener for `destroy` signals raised by `wlr_backend`. */
++    struct wl_listener        backend_destroy_listener;
+ 
+     /** Virtual keyboard manager. Owned by wl_display. */
+     struct wlr_virtual_keyboard_manager_v1 *wlr_virtual_keyboard_manager_v1_ptr;
+@@ -129,6 +131,9 @@ static void _wlmim_add_input_device(
+ static void _wlmim_handle_new_input_device(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
++static void _wlmim_handle_backend_destroy(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
+ static void _wlmim_handle_new_virtual_keyboard(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
+@@ -240,6 +245,12 @@ wlmim_t *wlmim_input_manager_create(
+             &wlr_backend_ptr->events.new_input,
+             &input_manager_ptr->backend_new_input_device_listener,
+             _wlmim_handle_new_input_device);
++        // The backend may go away first, eg. a nested Wayland backend when
++        // the parent compositor terminates.
++        wlmtk_util_connect_listener_signal(
++            &wlr_backend_ptr->events.destroy,
++            &input_manager_ptr->backend_destroy_listener,
++            _wlmim_handle_backend_destroy);
+     }
+ 
+     if (NULL != wl_display_ptr && NULL != wlr_seat_ptr) {
+@@ -280,6 +291,8 @@ void wlmim_input_manager_destroy(wlmim_t *input_manager_ptr)
+         &input_manager_ptr->new_virtual_pointer_listener);
+     wlmtk_util_disconnect_listener(
+         &input_manager_ptr->new_virtual_keyboard_listener);
++    wlmtk_util_disconnect_listener(
++        &input_manager_ptr->backend_destroy_listener);
+     wlmtk_util_disconnect_listener(
+         &input_manager_ptr->backend_new_input_device_listener);
+ 
+@@ -595,6 +608,20 @@ void _wlmim_handle_new_virtual_pointer(
+     }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Handler for the `destroy` signal of `wlr_backend`: Detaches from it. */
++void _wlmim_handle_backend_destroy(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmim_t *input_manager_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmim_t, backend_destroy_listener);
++    wlmtk_util_disconnect_listener(
++        &input_manager_ptr->backend_new_input_device_listener);
++    wlmtk_util_disconnect_listener(
++        &input_manager_ptr->backend_destroy_listener);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Handler for the `destroy` signal raised by `wlr_input_device`.
+diff --git a/src/wlmdock.c b/src/wlmdock.c
+index e4484c4..0712b40 100644
+--- a/src/wlmdock.c
++++ b/src/wlmdock.c
+@@ -97,6 +97,8 @@ typedef struct {
+ 
+     /** Event source for monitoring signals via client's signal_fd. */
+     struct wl_event_source    *client_signal_event_source_ptr;
++    /** Listener for `destroy` of @ref wlmdock_t::wlr_backend_ptr. */
++    struct wl_listener        backend_destroy_listener;
+ } wlmdock_t;
+ 
+ /** TODO: Replace this. */
+@@ -116,6 +118,9 @@ static wlmdock_t *_wlmdock_create(
+     wlmaker_config_style_t *style_ptr);
+ static void _wlmdock_destroy(wlmdock_t *dock_ptr);
+ static int handle_client_signal(int fd, uint32_t mask, void *data_ptr);
++static void _wlmdock_handle_backend_destroy(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
+ static bool _wlmdock_decode_launchers(
+     bspl_object_t *object_ptr,
+     const union bspl_desc_value *desc_value_ptr,
+@@ -390,6 +395,10 @@ wlmdock_t *_wlmdock_create(
+         _wlmdock_destroy(dock_ptr);
+         return NULL;
+     }
++    wlmtk_util_connect_listener_signal(
++        &dock_ptr->wlr_backend_ptr->events.destroy,
++        &dock_ptr->backend_destroy_listener,
++        _wlmdock_handle_backend_destroy);
+ 
+     // 5. Setup dock contents.
+     wlmtk_box_orientation_t orientation = WLMTK_BOX_VERTICAL;
+@@ -494,6 +503,7 @@ wlmdock_t *_wlmdock_create(
+ void _wlmdock_destroy(wlmdock_t *dock_ptr)
+ {
+     if (NULL == dock_ptr) return;
++    wlmtk_util_disconnect_listener(&dock_ptr->backend_destroy_listener);
+ 
+     if (NULL != dock_ptr->subprocess_monitor_ptr) {
+         wlm_util_subprocess_monitor_destroy(dock_ptr->subprocess_monitor_ptr);
+@@ -576,4 +586,22 @@ int handle_client_signal(int fd, uint32_t mask, void *data_ptr)
+     return 0;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Handles destruction of the nested Wayland backend: It happens when the
++ * connection to the parent compositor is lost (eg. at the session's end).
++ * Exits the event loop, for a clean shutdown.
++ */
++void _wlmdock_handle_backend_destroy(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmdock_t *dock_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmdock_t, backend_destroy_listener);
++    bs_log(BS_INFO, "wlmdock: Backend destroyed, exiting loop.");
++    wlmtk_util_disconnect_listener(&dock_ptr->backend_destroy_listener);
++    dock_ptr->wlr_backend_ptr = NULL;
++    wl_display_terminate(dock_ptr->local_display_ptr);
++}
++
+ /* == End of wlmdock.c ===================================================== */
