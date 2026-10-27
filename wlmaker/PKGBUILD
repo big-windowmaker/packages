@@ -78,9 +78,11 @@
 #         Window Maker (logo do Big WindowMaker), com o menu do Dock: mudar
 #         de lado e "Restaurar lançadores padrão"; o Clip também restaura os
 #         seus; menus do Clip, Dock e dockapps em português
+#   0049  ícone do Clip escolhido no State.plist (Clip.Icon), com padrão
+#         definido no build (o clipe do tema Window Maker em SVG)
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=5
+pkgrel=6
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -163,6 +165,7 @@ _patches=(
   0046-config-Adds-wlmaker_state_load_defaults-the-state-a-.patch
   0047-i18n-Adds-a-small-translation-table-for-menu-items-w.patch
   0048-dock-Keeps-a-main-tile-on-the-Dock-restores-default-.patch
+  0049-clip-Adds-Clip.Icon-to-the-state-for-the-Clip-s-imag.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -220,7 +223,8 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'eee1ed6715e461c33960a2099d16b0fe9dd51d79edc78d03ac2406a7ebeafc88'
             '1f8778d0ec28f26e1e4da5d93c2dc692377fffd227e3e45c7485771bdf974f90'
             'c47c568096c6f9fc225b3b6328dbb029d64c65b4b08e066d3d6fdcbdb23ae340'
-            '0ee92f3fdb6cc2e16d3914034957ededd0cf54c8430e9397b070d7a446da7da1')
+            '0ee92f3fdb6cc2e16d3914034957ededd0cf54c8430e9397b070d7a446da7da1'
+            '2344de2c80127ab08ef56efeb11b28862fe5a1571057589454e7f20c7784b638')
 
 prepare() {
   cd wlmaker
@@ -252,8 +256,10 @@ build() {
   # remove -ggdb -DDEBUG (o makepkg cuida dos símbolos de depuração).
   # "Restaurar lançadores padrão" usa o State.plist do big-wm (o que o
   # big-wm-firstrun copia para ~/.config/wlmaker), e o quadrado principal do
-  # Dock mostra o logo do Big WindowMaker. Sem o big-wm instalado, valem o
-  # /etc/xdg/wlmaker/State.plist (ou o padrão embutido) e o ícone do wlmaker.
+  # Dock mostra o logo do Big WindowMaker; o Clip, o clipe do tema Window
+  # Maker em SVG (big-wm-wayland), quando o State.plist não tem Clip.Icon.
+  # Sem o big-wm instalado, valem o /etc/xdg/wlmaker/State.plist (ou o
+  # padrão embutido) e os ícones do wlmaker.
   cmake -S wlmaker -B build \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=None \
@@ -261,6 +267,7 @@ build() {
     -Dconfig_OPTIM=ON \
     -DWLMAKER_DEFAULT_STATE_FILE=/usr/share/big-wm/wlmaker/State.plist \
     -DWLMDOCK_DEFAULT_ICON=/usr/share/WindowMaker/Icons/big-wm-logo.png \
+    -DWLMAKER_CLIP_DEFAULT_ICON=big-wm-clip-56x56.png \
     -Wno-dev
   cmake --build build
 }
