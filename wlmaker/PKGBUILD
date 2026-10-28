@@ -174,9 +174,19 @@
 #   0098  superfícies layer-shell "wlmaker-dockapp" viram dockapps (a bandeja
 #         big-wm-tray: arrasta, explode, menu do Window Maker)
 #   0099  Configurações... da bandeja: Ícones pequenos
+#   0100-0103: memória e atalhos (branch feature/desempenho-wayland do fork)
+#   0100  sem aceleração 3D (OpenGL ES no llvmpipe, como numa VM sem virgl),
+#         o wlmaker usa o renderizador pixman: a escolha do wlroots é testada
+#         num processo filho, e o libLLVM nunca entra no compositor (PSS do
+#         wlmaker 108,7 -> 28,1 MiB na VM); WLR_RENDERER continua mandando
+#   0101  item de menu guarda só o buffer do estado atual (não os três)
+#   0102  itens de menus fechados não guardam buffer (desenhados ao abrir)
+#   0103  atalhos casam também com o keysym do primeiro nível da tecla:
+#         Ctrl+Alt+Backspace (Quit) funciona com a opção XKB
+#         terminate:ctrl_alt_bksp do br-abnt2
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=13
+pkgrel=14
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -189,6 +199,7 @@ depends=(
   cairo
   glibc
   hicolor-icon-theme
+  libglvnd  # libEGL e libGLESv2: o teste do renderizador (0100)
   libinput
   libpulse  # wlmmixer (fala com o pipewire-pulse ou com o PulseAudio)
   libxcb
@@ -302,6 +313,10 @@ _patches=(
   0097-clip-Places-the-dock-apps-of-the-state-s-Dock.Dockap.patch
   0098-icon_manager-Adopts-layer-surfaces-as-dock-apps-wlma.patch
   0099-share-Adds-the-preferences-of-big-wm-tray-to-Dockapp.patch
+  0100-backend-Uses-pixman-when-OpenGL-ES-would-render-in-s.patch
+  0101-menu_item-Keeps-only-the-buffer-of-the-item-s-curren.patch
+  0102-menu-Releases-the-item-buffers-while-the-menu-is-clo.patch
+  0103-keyboard-Matches-key-bindings-also-with-the-key-s-fi.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -402,7 +417,11 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'dc8280f42c9a68249d3d694bb50805b77aff859b8a06de604ecae96aa1e67af0'
             '62a3677ea881d354f848711fccfb85c3eae6cadd9aefafa97a33a5eefba476e3'
             '22ce0d8f601be43e7dde54c431696e71cdb50f09c4f6356106898af66176cc86'
-            'e03b443c3b8d79a70c02df37678340f445e790ea005119e1d4d6825ccd15e87c')
+            'e03b443c3b8d79a70c02df37678340f445e790ea005119e1d4d6825ccd15e87c'
+            'f263e896dae9e5b98408c14fa9aef6832f95c1361e1d8077fabd021f919991a4'
+            '6d8bd5b3f2018c6d043084e80b2813cf6eb71f6332bcaf8119c75843ef948e25'
+            'd9835e17cdb7cbf82e97f638b7d3a4f03592e75c3e7e155f3354d8a9dbc74224'
+            '7f6bd68187fb097f7e3b4ef73df2a1aca0fb6b9b4a62f19447a059adc6524ca8')
 
 prepare() {
   cd wlmaker

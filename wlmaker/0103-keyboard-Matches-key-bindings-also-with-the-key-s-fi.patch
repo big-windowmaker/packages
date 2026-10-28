@@ -1,0 +1,67 @@
+From 1387999a6b8bbdbb83ee4f67eab5f74cb5231847 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Wed, 28 Oct 2026 08:05:45 -0300
+Subject: [PATCH 103/103] keyboard: Matches key bindings also with the key's
+ first-level keysyms.
+
+A binding names the key's plain keysym, as "Ctrl+Alt+Backspace" for
+Quit. Some XKB options make the modifiers translate the key to another
+keysym: With terminate:ctrl_alt_bksp, which systemd's kbd-model-map
+sets for many console keymaps (eg. br-abnt2, us), Ctrl+Alt+BackSpace is
+the Terminate_Server keysym, and the Quit binding never matched.
+
+When no binding matches the translated keysyms of a key press, tries
+the keysyms of the key's first shift level in the effective layout, as
+other compositors do. Keys without a matching binding go on to the
+client, as before.
+
+Verified on a QEMU/KVM VM (br-abnt2, terminate:ctrl_alt_bksp):
+Ctrl+Alt+Backspace now ends the session; before, it did nothing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/input/keyboard.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/src/input/keyboard.c b/src/input/keyboard.c
+index f6b7257..0668576 100644
+--- a/src/input/keyboard.c
++++ b/src/input/keyboard.c
+@@ -426,6 +426,34 @@ void handle_key(struct wl_listener *listener_ptr, void *data_ptr)
+         }
+     }
+ 
++    // A key binding names the key's plain keysym, eg. "Ctrl+Alt+Backspace".
++    // With some XKB options, the modifiers translate the key to another
++    // keysym: terminate:ctrl_alt_bksp makes Ctrl+Alt+BackSpace the
++    // Terminate_Server keysym. If no binding matched the translated keysyms,
++    // try the key's keysyms at the first shift level, as other compositors do.
++    if (!processed &&
++        WL_KEYBOARD_KEY_STATE_PRESSED == wlr_keyboard_key_event_ptr->state) {
++        struct xkb_state *xkb_state_ptr =
++            keyboard_ptr->wlr_keyboard_ptr->xkb_state;
++        const xkb_keysym_t *raw_syms;
++        int raw_count = xkb_keymap_key_get_syms_by_level(
++            xkb_state_get_keymap(xkb_state_ptr),
++            keycode,
++            xkb_state_key_get_layout(xkb_state_ptr, keycode),
++            0,
++            &raw_syms);
++        for (int i = 0; i < raw_count && !processed; ++i) {
++            bool translated = false;
++            for (int j = 0; j < key_syms_count; ++j) {
++                if (key_syms[j] == raw_syms[i]) translated = true;
++            }
++            if (translated) continue;
++            processed = wlmim_process_key(keyboard_ptr->input_manager_ptr,
++                                          raw_syms[i],
++                                          modifiers);
++        }
++    }
++
+     if (processed) return;
+ 
+     // Events are interpreted by the seat's keyboard keymap: With multiple
+-- 
+2.55.0
+
