@@ -1,0 +1,59 @@
+wmclock: redesenha a janela só quando o relógio ou os dois pontos mudam
+
+Com os dois pontos piscando (padrão), o wmclock acorda a cada meio segundo
+e copiava o pixmap inteiro para as duas janelas toda vez, embora os dois
+pontos só mudem a cada segundo e a hora a cada minuto. Cada cópia gera um
+"damage" que acorda o servidor X e o compositor (picom). Medido numa VM do
+Big WindowMaker, só com o wmclock no Dock: Xorg 31,5 e picom 29,0 trocas
+de contexto/s antes; 15,5 e 14,9 depois. O visual e o pisca-pisca não
+mudam; Expose continua redesenhando pelo laço de eventos.
+
+diff --git a/wmclock/wmclock.c b/wmclock/wmclock.c
+index 7917917..eb468b1 100644
+--- a/wmclock/wmclock.c
++++ b/wmclock/wmclock.c
+@@ -835,6 +835,7 @@ int main(int argc, char **argv)
+    Pixmap        shapeMask;
+    struct timeval nextEvent;
+    unsigned int   blinkCounter = 0;
++   int            changed;
+ 
+    /* Parse command line options */
+    progName = extractProgName(argv[0]);
+@@ -964,12 +965,14 @@ int main(int argc, char **argv)
+    redrawWindow(&visible);
+    while (1)
+     {
++       changed = 0;
+        if (actualTime != mytime())
+ 	{
+ 	   actualTime = mytime();
+ 	   if (actualMinutes != (actualTime / 60))
+ 	    {
+ 	       showTime();
++	       changed = 1;
+ 	       if (!enableBlinking)
+ 		{
+ 		  redrawWindow(&visible);
+@@ -1004,6 +1007,7 @@ int main(int argc, char **argv)
+ 			  COLON_X_OFFSET, COLON_Y_OFFSET,
+ 			  COLON_WIDTH, COLON_HEIGHT,
+ 			  xPos[COLON_X_POS], yPos[COLON_Y_POS]);
++		changed = 1;
+ 	     }
+ #ifdef SYSV
+ 	    if (blinkCounter == 10*blinkInterval)
+@@ -1016,8 +1020,12 @@ int main(int argc, char **argv)
+ 			      BLANK_X_OFFSET, BLANK_Y_OFFSET,
+ 			      COLON_WIDTH, COLON_HEIGHT,
+ 			      xPos[COLON_X_POS], yPos[COLON_Y_POS]);
++		changed = 1;
+ 	     }
+-	    redrawWindow(&visible);
++	    /* Só quando o relógio ou os dois pontos mudaram (Expose é tratado
++	     * abaixo): a cada meio segundo, metade das cópias era igual. */
++	    if (changed)
++		redrawWindow(&visible);
+         }
+ 
+        /* read a packet */

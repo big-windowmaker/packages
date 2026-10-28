@@ -1,7 +1,7 @@
 pkgbase = big-dockapps
 	pkgdesc = Curated Window Maker dockapps for Big WindowMaker
 	pkgver = 20260412
-	pkgrel = 4
+	pkgrel = 5
 	url = https://www.dockapps.net/
 	arch = x86_64
 	license = GPL-2.0-or-later
@@ -49,6 +49,8 @@ pkgbase = big-dockapps
 	source = wmweather-curl-long.patch
 	source = wmtzrc
 	source = wmusic-segue-player.patch
+	source = wmclock-redraw-on-change.patch
+	source = wmnet-default-route.patch
 	sha256sums = cc9753fa925323b52110c595f4920da1aec6e1ae124a40be4062048991daed81
 	sha256sums = 7f1de94264c9593f94337de1ede4bac1d976a03d9af1563b400d46497caaee4e
 	sha256sums = 8edef43691e9fff071000e29166c7c1ad420c0956e9068151061e881c8ac97e9
@@ -69,6 +71,8 @@ pkgbase = big-dockapps
 	sha256sums = d7be5f4706ceb626961daa9296c98cf920a73786dbbba244d6a83d3a930984fe
 	sha256sums = cf5040ee03cd9a4bdcad227a5f52744934026980d4b161ad10c428b3f408f48b
 	sha256sums = 957dcade76c8bb417a6bb10ee0ce865b67edb47657cac1f343413dde0b34e719
+	sha256sums = f6a2af6a1b717a7aa794607d5d44ab6d4cfd2e06cb8e7600e690d8dcf703c32a
+	sha256sums = 3f1faf7f4950fe53af713933c431f41d639fa0204cf8d29c716dde17039413ce
 
 pkgname = libdockapp
 	pkgdesc = Library that provides a framework for developing dockapps

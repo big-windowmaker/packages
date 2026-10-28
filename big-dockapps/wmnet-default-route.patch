@@ -1,0 +1,90 @@
+wmnet: sem -W, monitora a interface da rota padrão em vez de eth0
+
+O padrão do wmnet era eth0, que não existe com os nomes previsíveis de
+interface (enp3s0, wlp2s0, ens4...): no Dock do Big WindowMaker o gráfico
+de rede ficava sempre vazio. Sem -W/--device, agora ele segue a interface
+da rota padrão (/proc/net/route), relida a cada leitura, e acompanha a
+troca de Ethernet para Wi-Fi durante a sessão sem pico no gráfico. Com -W
+o comportamento é o de antes.
+
+diff --git a/wmnet/drivers.c b/wmnet/drivers.c
+index e279b9b..c295a48 100644
+--- a/wmnet/drivers.c
++++ b/wmnet/drivers.c
+@@ -309,6 +309,36 @@ int updateStats_ipchains(void) {
+ 
+ #ifdef USE_2_1_DEV
+ 
++/* Sem -W/--device, segue a interface da rota padrão (/proc/net/route), relida
++ * a cada leitura: Ethernet, Wi-Fi ou USB, e a troca entre elas durante a
++ * sessão. O padrão antigo, eth0, não existe com os nomes previsíveis
++ * (enp3s0, wlp2s0...) e deixava o gráfico sempre vazio. */
++static int auto_device = 0;
++static int device_switched = 0;
++
++static void follow_default_route(void) {
++	static char current[17];
++	char line[256], iface[17];
++	unsigned long dest, mask;
++	unsigned int flags;
++	FILE *route = fopen("/proc/net/route", "r");
++	if (route == NULL) return;
++	fgets(line, sizeof(line), route);
++	while (fgets(line, sizeof(line), route)) {
++		if (sscanf(line, "%16s %lx %*x %x %*d %*d %*d %lx", iface, &dest, &flags, &mask) == 4
++		    && dest == 0 && mask == 0 && (flags & 0x1)) {
++			if (strcmp(iface, current) != 0) {
++				strncpy(current, iface, 16);
++				current[16] = '\0';
++				device = current;
++				device_switched = 1;
++			}
++			break;
++		}
++	}
++	fclose(route);
++}
++
+ int updateStats_dev(void) {
+ 	FILE *dev;
+         char *ptr;
+@@ -317,6 +347,8 @@ int updateStats_dev(void) {
+ 	rx = False;
+ 	tx = False;
+ 
++	if (auto_device) follow_default_route();
++
+ 
+ 	if ((dev = fopen("/proc/net/dev", "r")) == NULL) {
+ 		fprintf(stderr, "/proc/net/dev does not exist?\n"
+@@ -342,6 +374,15 @@ int updateStats_dev(void) {
+ 
+ 			flag = (ACCOUNT_IN_FOUND|ACCOUNT_OUT_FOUND);
+ 
++			if (device_switched) {
++				/* outra interface: contadores dela, sem pico no gráfico */
++				device_switched = 0;
++				lastpackets_in = totalpackets_in;
++				lastbytes_in = totalbytes_in;
++				lastpackets_out = totalpackets_out;
++				lastbytes_out = totalbytes_out;
++			}
++
+ 			if (totalpackets_in != lastpackets_in) {
+ 				diffbytes_in += totalbytes_in - lastbytes_in;
+ 				lastpackets_in = totalpackets_in;
+@@ -371,7 +412,13 @@ int dev_test(void) {
+   if((devfd = open("/proc/net/dev", O_RDONLY)) == -1) return False;
+   read(devfd, buffer, 36);
+   if(buffer[35] == '|') return False;
+-  if(device == NULL) device = "eth0";
++  if(device == NULL) {
++    auto_device = 1;
++    device = "eth0";
++    follow_default_route();
++    fprintf(stderr, "wmnet: using devstats driver to monitor the default route (%s)\n", device);
++    return True;
++  }
+   fprintf(stderr, "wmnet: using devstats driver to monitor %s\n", device);
+   return True;
+ }
