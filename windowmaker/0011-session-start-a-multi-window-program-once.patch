@@ -1,0 +1,121 @@
+From 891d7c353eb4df039de5fa38cea002bf00012834 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sun, 1 Nov 2026 20:17:54 -0300
+Subject: [PATCH] session: start a multi-window program once, honour
+ DontSaveSession on restore
+
+With a shared application icon, "Save Session" stores every window so
+that programs started once per window (xterm) come back with all of
+them. A program that owns several windows in one process (a browser, a
+file manager, a terminal with tabs and windows) was then saved once per
+window and, on the next start, launched once per window; it restores
+its own windows and every extra launch opened another one. Windows of a
+process (_NET_WM_PID) already saved are now skipped.
+
+Restoring also skips entries whose instance/class is now marked
+DontSaveSession, so a state saved before a desktop component (started
+by other means, such as the session's autostart) got that attribute
+does not start it a second time.
+
+Tested in Xvfb: two xterm processes and one GTK process with two
+windows, SaveSessionOnExit: before, 4 entries (the GTK program twice);
+after, 3. On start, an old entry of a DontSaveSession class was
+launched before and is skipped now; a normal entry is still launched.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/session.c | 39 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/src/session.c b/src/session.c
+index 13cbbaa6..a3bad275 100644
+--- a/src/session.c
++++ b/src/session.c
+@@ -81,6 +81,8 @@
+ #include "appicon.h"
+ #include "dock.h"
+ #include "misc.h"
++#include "wmspec.h"
++#include "wdefaults.h"
+ 
+ #include <WINGs/WUtil.h>
+ 
+@@ -288,6 +290,7 @@ void wSessionSaveState(WScreen * scr)
+ 	WMPropList *win_info, *wks;
+ 	WMPropList *list = NULL;
+ 	WMArray *wapp_list = NULL;
++	WMArray *pid_list = NULL;
+ 
+ 	make_keys();
+ 
+@@ -300,10 +303,25 @@ void wSessionSaveState(WScreen * scr)
+ 	list = WMCreatePLArray(NULL);
+ 
+ 	wapp_list = WMCreateArray(16);
++	pid_list = WMCreateArray(16);
+ 
+ 	while (wwin) {
+ 		WApplication *wapp = wApplicationOf(wwin->main_window);
+ 		Window appId = wwin->orig_main_window;
++		int pid = wNETWMGetPidForWindow(wwin->client_win);
++
++		/*
++		 * With a shared application icon every window is saved, so that
++		 * programs started once per window (xterm) come back with all of
++		 * them. A program that owns several windows in one process (a
++		 * browser, a file manager) is started only once, though: it
++		 * restores its own windows, and starting it again for each one
++		 * would open extra windows.
++		 */
++		if (pid > 0 && WMGetFirstInArray(pid_list, (void *)(intptr_t)pid) != WANotFound) {
++			wwin = wwin->prev;
++			continue;
++		}
+ 
+ 		if ((wwin->transient_for == None || wwin->transient_for == wwin->screen_ptr->root_win)
+ 		    && (WMGetFirstInArray(wapp_list, (void *)appId) == WANotFound
+@@ -320,6 +338,8 @@ void wSessionSaveState(WScreen * scr)
+ 				 * application are saved.
+ 				 */
+ 				WMAddToArray(wapp_list, (void *)appId);
++				if (pid > 0)
++					WMAddToArray(pid_list, (void *)(intptr_t)pid);
+ 			}
+ 		}
+ 		wwin = wwin->prev;
+@@ -333,6 +353,7 @@ void wSessionSaveState(WScreen * scr)
+ 	WMReleasePropList(wks);
+ 
+ 	WMFreeArray(wapp_list);
++	WMFreeArray(pid_list);
+ }
+ 
+ void wSessionClearState(WScreen * scr)
+@@ -490,6 +511,24 @@ void wSessionRestoreState(WScreen *scr)
+ 		if (!instance && !class)
+ 			continue;
+ 
++		/* saved before the program was marked "DontSaveSession" (a part
++		 * of the desktop session that is started by other means): not
++		 * started a second time */
++		{
++			WWindowAttributes attr, mask;
++
++			memset(&attr, 0, sizeof(attr));
++			memset(&mask, 0, sizeof(mask));
++			wDefaultFillAttributes(instance, class, &attr, &mask, True);
++			if (attr.dont_save_session) {
++				if (instance)
++					wfree(instance);
++				if (class)
++					wfree(class);
++				continue;
++			}
++		}
++
+ 		state = getWindowState(scr, win_info);
+ 
+ 		dock = NULL;
+-- 
+2.56.0
+
