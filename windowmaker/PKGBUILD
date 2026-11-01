@@ -12,7 +12,7 @@
 pkgname=windowmaker
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
-pkgrel=5
+pkgrel=6
 pkgdesc='X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)'
 arch=(x86_64)
 url='https://www.windowmaker.org/'
@@ -53,12 +53,20 @@ source=(
   0002-po-pt_BR-Fix-the-kill-confirmation-message.patch
   0003-info-panel-Big-WindowMaker-branding.patch
   0004-po-pt_BR-Translate-the-Info-panel.patch
+  0005-placement-appicons-on-the-yard-grid-of-each-head.patch
+  0006-dock-choose-the-monitor-of-the-Dock.patch
+  0007-info-panel-Big-WindowMaker-Custom-credits-at-the-end.patch
+  0008-po-pt_BR-Translate-the-Dock-monitor-menu.patch
 )
 sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337'
             '077b2a6e5274420751a8e9ae40bed7ea3b944e7b0e16d29fbf461afed1d3e685'
             '9d2cbeda7ee1afd1aceecfa969292d1056435b9cb01b4878cc8de8f7e9a4c71f'
-            '732deabe0fb7ed3dd11f0cce24b656cdc708768f8c52fbd00fb70d28123130d8')
+            '732deabe0fb7ed3dd11f0cce24b656cdc708768f8c52fbd00fb70d28123130d8'
+            '9ef93f7c690775d338e8541f4b58b637c83bcdd6e4b82f449dc24c23705bdbdf'
+            '1263a8efc04ead930d5745856accc4bcd129686034ad757362c8c4763a2bb6be'
+            'ef3b0d03efabc26bbacfbe19a182c6408de21ca695d9a89c69e2b63ba4f2577b'
+            '195c96d5418be771969204ff6fb3a9e10d4335d5038a34dccedc9650cf571771')
 
 prepare() {
   cd wmaker
@@ -92,6 +100,25 @@ prepare() {
   # da 0.60.0) e aparecia em inglês. Enviar ao upstream
   # (wmaker-dev@googlegroups.com).
   patch -Np1 -i "${srcdir}/0004-po-pt_BR-Translate-the-Info-panel.patch"
+
+  # AppIcons com um buraco de um ícone entre eles até reiniciar o Window
+  # Maker: o PlaceIcon() marcava os slots ocupados por coordenada absoluta,
+  # e num monitor que não começa num múltiplo do tamanho do ícone (o do
+  # meio de 3440+3440+2560) ou com um painel embaixo cada ícone ocupava
+  # também o slot seguinte. Enviar ao upstream (wmaker-dev@googlegroups.com).
+  patch -Np1 -i "${srcdir}/0005-placement-appicons-on-the-yard-grid-of-each-head.patch"
+
+  # Monitor do Dock: submenu "Monitor" no menu do Dock e arrastar para outro
+  # monitor; gravado como Dock.Monitor no WMState (nome do conector RandR),
+  # com volta automática quando o monitor é reconectado. Enviar ao upstream.
+  patch -Np1 -i "${srcdir}/0006-dock-choose-the-monitor-of-the-Dock.patch"
+
+  # Painel Info: créditos "Big WindowMaker Custom" no fim, depois de um
+  # divisor, com o símbolo de copyleft desenhado. Patch próprio: NÃO enviar.
+  patch -Np1 -i "${srcdir}/0007-info-panel-Big-WindowMaker-Custom-credits-at-the-end.patch"
+
+  # pt_BR dos menus de posição e de monitor do Dock. Enviar ao upstream.
+  patch -Np1 -i "${srcdir}/0008-po-pt_BR-Translate-the-Dock-monitor-menu.patch"
 
   # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
   # sed que o Arch faz na 0.96.0 não é necessário aqui.

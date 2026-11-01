@@ -1,0 +1,55 @@
+From 293406a2e8e5c4d14c273e5c3beabc44547f35f5 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sun, 1 Nov 2026 12:48:31 -0300
+Subject: [PATCH 4/4] po/pt_BR: Translate the Dock position and Dock monitor
+ menus
+
+---
+ po/pt_BR.po | 31 +++++++++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/po/pt_BR.po b/po/pt_BR.po
+index 831d5731..31fb8b71 100644
+--- a/po/pt_BR.po
++++ b/po/pt_BR.po
+@@ -1822,6 +1822,37 @@ msgstr "dados inválidos na seleção"
+ msgid "Based on Window Maker"
+ msgstr "Baseado no Window Maker"
+ 
++#: ../src/dock.c
++msgid "Dock position"
++msgstr "Posição do Dock"
++
++#: ../src/dock.c
++msgid "Monitor"
++msgstr "Monitor"
++
++#: ../src/dock.c
++msgid "Primary monitor"
++msgstr "Monitor principal"
++
++#: ../src/dock.c
++#, c-format
++msgid "Monitor %d (%ux%u)"
++msgstr "Monitor %d (%ux%u)"
++
++#: ../src/dock.c
++#, c-format
++msgid "Monitor %d: %s (%ux%u)"
++msgstr "Monitor %d: %s (%ux%u)"
++
++#: ../src/dock.c
++#, c-format
++msgid "%s (disconnected)"
++msgstr "%s (desconectado)"
++
++#: ../src/dock.c
++msgid "Edge of the whole screen"
++msgstr "Borda da tela inteira"
++
+ #~ msgid "out of memory while updating GNOME hints"
+ #~ msgstr "faltou memória enquanto estava atualizando as dicas do GNOME"
+ 
+-- 
+2.56.0
+

@@ -1,0 +1,167 @@
+From 7cb854e65822105bbdeb36dbd17fc849a05efae4 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sun, 1 Nov 2026 12:55:49 -0300
+Subject: [PATCH 2/2] wmcliphist: open the history menu on SIGUSR1, Super in
+ hotkeys
+
+- SIGUSR1 opens the same history menu as a click on the dock icon, at
+  the pointer: a window manager shortcut can then open it with
+  "pkill -USR1 -x wmcliphist", on X11 and on Wayland compositors (where
+  an X11 key grab of an XWayland client does not see the keys).
+- The menu opened from the hotkey or the signal never appeared:
+  gtk_menu_popup() without a trigger event shows nothing in GTK 3.24.
+  It is now placed with gtk_menu_popup_at_rect() at the pointer, and
+  tried again for up to one second while the window manager still
+  holds the keyboard (the key of its shortcut is still down).
+- Hotkeys accept Super (also Win, Logo, Meta, Mod4) and keys with digits
+  (F12); the parser wrote one byte past its buffer.
+---
+ wmcliphist/hotkeys.c    | 77 +++++++++++++++++++++++++++++++++++++----
+ wmcliphist/wmcliphist.h |  2 ++
+ 2 files changed, 72 insertions(+), 7 deletions(-)
+
+diff --git a/wmcliphist/hotkeys.c b/wmcliphist/hotkeys.c
+index 7ad8b09..690784c 100644
+--- a/wmcliphist/hotkeys.c
++++ b/wmcliphist/hotkeys.c
+@@ -1,5 +1,6 @@
+ #include "wmcliphist.h"
+ #include <gdk/gdkkeysyms.h>
++#include <glib-unix.h>
+ 
+ /* Exec on hotkey? */
+ int exec_hotkey = 1;
+@@ -17,6 +18,62 @@ gchar	exec_item_key_str[32] = DEF_EXEC_ITEM_KEY;
+ guint	exec_item_key;
+ guint	exec_item_mask;
+ 
++/*
++ * Opens the history menu at the pointer from outside a click on the dock
++ * icon: the global hotkey or SIGUSR1 (sent by a shortcut of the window
++ * manager, e.g. "pkill -USR1 -x wmcliphist" on Super+V). GTK only shows a
++ * menu after grabbing the pointer and the keyboard, and right after a
++ * shortcut the window manager may still hold the keyboard (the key is
++ * still down): try again every 25 ms, for up to one second.
++ */
++static guint popup_retry_id;
++static int popup_tries;
++
++static gboolean
++popup_history_try(gpointer data)
++{
++	(void) data;
++
++	/* (the menu is always "visible" for GTK, after gtk_widget_show_all();
++	 * mapped means it is on the screen) */
++	if (!gtk_widget_get_mapped(menu_hist)) {
++		/* No GTK event started this (gtk_menu_popup*() without one shows
++		 * nothing, which is also why Control+Alt+V did not open it): place
++		 * the menu at the pointer, on the root window of its monitor. */
++		GdkDisplay *display = gdk_display_get_default();
++		GdkDevice *pointer = gdk_seat_get_pointer(gdk_display_get_default_seat(display));
++		GdkWindow *root = gdk_get_default_root_window();
++		GdkRectangle at = { 0, 0, 1, 1 };
++
++		gdk_window_get_device_position(root, pointer, &at.x, &at.y, NULL);
++		gtk_menu_popup_at_rect(GTK_MENU(menu_hist), root, &at,
++				GDK_GRAVITY_NORTH_WEST, GDK_GRAVITY_NORTH_WEST, NULL);
++	}
++	if (gtk_widget_get_mapped(menu_hist) || ++popup_tries >= 40) {
++		popup_retry_id = 0;
++		return G_SOURCE_REMOVE;
++	}
++	return G_SOURCE_CONTINUE;
++}
++
++void
++popup_history_menu(void)
++{
++	if (popup_retry_id || gtk_widget_get_mapped(menu_hist))
++		return;
++	popup_tries = 0;
++	if (popup_history_try(NULL) == G_SOURCE_CONTINUE)
++		popup_retry_id = g_timeout_add(25, popup_history_try, NULL);
++}
++
++static gboolean
++on_sigusr1(gpointer data)
++{
++	(void) data;
++	popup_history_menu();
++	return G_SOURCE_CONTINUE;
++}
++
+ /*
+  * filter grabbed hotkeys
+  */
+@@ -32,11 +89,7 @@ global_keys_filter(GdkXEvent *gdk_xevent, GdkEvent *event, gpointer data)
+ 				XKeysymToKeycode(GDK_DISPLAY_XDISPLAY(gdk_display_get_default()), menukey) &&
+ 				xevent->xkey.state & menukey_mask) {
+ 			/* popup history menu */
+-			gtk_menu_popup(GTK_MENU(menu_hist),
+-					NULL, NULL,
+-					NULL, NULL,
+-					0,
+-					GDK_CURRENT_TIME);
++			popup_history_menu();
+ 			return_val(GDK_FILTER_REMOVE);
+ 		} else if (xevent->xkey.keycode ==
+ 				XKeysymToKeycode(GDK_DISPLAY_XDISPLAY(gdk_display_get_default()), prev_item_key)
+@@ -78,7 +131,7 @@ int
+ hotkey_parse(char *hotkey, guint *key, guint *mask)
+ {
+ 	char	c;
+-	char	*tmp = g_new0(char, strlen(hotkey));
++	char	*tmp = g_new0(char, strlen(hotkey) + 1);
+ 	int	i, idx = 0;
+ 
+ 	begin_func("hotkey_parse");
+@@ -87,7 +140,7 @@ hotkey_parse(char *hotkey, guint *key, guint *mask)
+ 
+ 	for (i = 0; i < strlen(hotkey); i++) {
+ 		c = hotkey[i];
+-		if (isalpha(c)) {
++		if (isalnum((unsigned char) c) || c == '_') {
+ 			tmp[idx++] = c;
+ 			tmp[idx] = '\0';
+ 		} else if (c == '+' || c == '-') {
+@@ -99,6 +152,12 @@ hotkey_parse(char *hotkey, guint *key, guint *mask)
+ 				*mask |= Mod1Mask;
+ 			else if (strcasecmp(tmp, "shift") == 0)
+ 				*mask |= ShiftMask;
++			else if (strcasecmp(tmp, "super") == 0 ||
++					strcasecmp(tmp, "win") == 0 ||
++					strcasecmp(tmp, "logo") == 0 ||
++					strcasecmp(tmp, "meta") == 0 ||
++					strcasecmp(tmp, "mod4") == 0)
++				*mask |= Mod4Mask;
+ 			else {
+ 				fprintf(stderr, "Invalid key modifier: %s\n",
+ 						tmp);
+@@ -178,6 +237,10 @@ hotkeys_init()
+ 		hotkey_parse(DEF_EXEC_ITEM_KEY, &exec_item_key,
+ 				&exec_item_mask);
+ 	}
++	/* "pkill -USR1 -x wmcliphist": open the history menu (window manager
++	 * shortcuts, Wayland compositors where X11 key grabs do not work) */
++	g_unix_signal_add(SIGUSR1, on_sigusr1, NULL);
++
+ 	gdk_window_add_filter(gdk_get_default_root_window(), global_keys_filter, NULL);
+ 	grab_key(menukey, menukey_mask);
+ 	grab_key(prev_item_key, prev_item_mask);
+diff --git a/wmcliphist/wmcliphist.h b/wmcliphist/wmcliphist.h
+index 6562cd4..684d250 100644
+--- a/wmcliphist/wmcliphist.h
++++ b/wmcliphist/wmcliphist.h
+@@ -244,6 +244,8 @@ hotkeys_init();
+  */
+ void
+ hotkeys_done();
++void
++popup_history_menu(void);
+ 
+ 
+ 
+-- 
+2.56.0
+

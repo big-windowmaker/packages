@@ -1,0 +1,298 @@
+From 2835de5678d83e9220cfed166844f4c689d67213 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sun, 1 Nov 2026 12:50:41 -0300
+Subject: [PATCH 1/2] wmnet: watch the interface of the default route by
+ default
+
+Without -W, the devstats driver watched "eth0", which does not exist on
+systems with predictable interface names (enp7s0, wlp2s0...): the graph
+stayed empty and the speedometer at 0.
+
+Now, without -W, wmnet watches the interface of the default route
+(/proc/net/route, lowest metric), or the first interface that is up
+when there is none, and checks again every 3 seconds or as soon as the
+interface disappears: cable plugged in, Wi-Fi, VPN taking the default
+route. Only one interface is counted, so traffic is never counted twice
+through a VPN.
+
+Also:
+- the first sample, a new interface or counters that went back
+  (interface recreated) set a new baseline instead of adding the whole
+  counter as one sample, which drew a full-height spike;
+- /proc/net/dev is parsed at the colon, so long interface names and
+  lines without a space after the colon are read correctly (the old
+  loop searched for ':' past the end of the name buffer);
+- the default polling interval goes from 25 ms to 100 ms (10 reads
+  per second instead of 40); -d still sets it.
+---
+ wmnet/drivers.c | 181 ++++++++++++++++++++++++++++++++++++++----------
+ wmnet/wmnet.1x  |   5 +-
+ wmnet/wmnet.c   |   4 +-
+ 3 files changed, 150 insertions(+), 40 deletions(-)
+
+diff --git a/wmnet/drivers.c b/wmnet/drivers.c
+index e279b9b..9fe90db 100644
+--- a/wmnet/drivers.c
++++ b/wmnet/drivers.c
+@@ -18,6 +18,7 @@
+ #include<sys/stat.h>
+ #include<sys/socket.h>
+ #include<unistd.h>
++#include<time.h>
+ #include"config.h"
+ 
+ 
+@@ -309,57 +310,155 @@ int updateStats_ipchains(void) {
+ 
+ #ifdef USE_2_1_DEV
+ 
++/*
++ * Interface chosen automatically (no -W/--device): the one of the default
++ * route, read from /proc/net/route, so a VPN that takes the default route
++ * is followed and traffic is never counted twice. Without a default route,
++ * the first interface that is up and is not the loopback. Checked again
++ * every few seconds: plugging the cable, switching to Wi-Fi or a renamed
++ * interface (enp..., wlp...) are picked up without restarting wmnet.
++ * Before this, wmnet watched "eth0" when started without options, and
++ * the graph stayed empty on every modern system.
++ */
++static int auto_device = 0;
++static char auto_name[32];
++static time_t auto_checked;
++static int have_baseline = 0;
++
++static int default_route_device(char *out, size_t len) {
++	FILE *f = fopen("/proc/net/route", "r");
++	char line[256], ifname[32];
++	unsigned long dest, mask, flags, metric, best_metric = (unsigned long)-1;
++	int found = 0;
++
++	if (!f) return 0;
++	if (!fgets(line, sizeof(line), f)) { fclose(f); return 0; }
++	while (fgets(line, sizeof(line), f)) {
++		/* Iface Destination Gateway Flags RefCnt Use Metric Mask ... */
++		if (sscanf(line, "%31s %lx %*x %lx %*d %*d %lu %lx", ifname, &dest, &flags, &metric, &mask) != 5)
++			continue;
++		if (dest != 0 || mask != 0 || !(flags & 0x1 /* RTF_UP */))
++			continue;
++		if (!found || metric < best_metric) {
++			snprintf(out, len, "%s", ifname);
++			best_metric = metric;
++			found = 1;
++		}
++	}
++	fclose(f);
++	return found;
++}
++
++static int first_up_device(char *out, size_t len) {
++	FILE *dev = fopen("/proc/net/dev", "r");
++	char line[512];
++	int found = 0;
++
++	if (!dev) return 0;
++	while (!found && fgets(line, sizeof(line), dev)) {
++		char *colon = strchr(line, ':'), *name = line, path[96], state[16] = "";
++		FILE *op;
++		if (!colon) continue;
++		*colon = '\0';
++		while (*name == ' ') name++;
++		if (!strcmp(name, "lo") || strlen(name) >= 32) continue;
++		snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", name);
++		if ((op = fopen(path, "r"))) {
++			if (fgets(state, sizeof(state), op) && !strncmp(state, "up", 2)) {
++				snprintf(out, len, "%s", name);
++				found = 1;
++			}
++			fclose(op);
++		}
++	}
++	fclose(dev);
++	return found;
++}
++
++static void choose_auto_device(void) {
++	char name[32];
++	time_t now = time(NULL);
++
++	if (auto_name[0] && now - auto_checked < 3)
++		return;
++	auto_checked = now;
++	if (!default_route_device(name, sizeof(name)) && !first_up_device(name, sizeof(name)))
++		return;
++	if (strcmp(name, auto_name)) {
++		if (auto_name[0])
++			fprintf(stderr, "wmnet: now monitoring %s\n", name);
++		snprintf(auto_name, sizeof(auto_name), "%s", name);
++		device = auto_name;
++		have_baseline = 0;	/* other counters: no jump in the graph */
++	}
++}
++
+ int updateStats_dev(void) {
+ 	FILE *dev;
+-        char *ptr;
+-	unsigned int flag = 0;
+-	static char interface[16];
++	char line[512];
++	int found = 0;
+ 	rx = False;
+ 	tx = False;
+ 
++	if (auto_device)
++		choose_auto_device();
+ 
+ 	if ((dev = fopen("/proc/net/dev", "r")) == NULL) {
+ 		fprintf(stderr, "/proc/net/dev does not exist?\n"
+ 				"Perhaps we are not running Linux?\n");
+ 		exit(4);
+ 	}
+-        /* the first two lines we can skip */
+-        fgets(buffer, 256, dev);
+-        fgets(buffer, 256, dev);
+-
+-	/* IP Chain Rules for Linux kernel 2_1.x */
+-	while(flag != (ACCOUNT_IN_FOUND|ACCOUNT_OUT_FOUND) && fgets(buffer, 256, dev)) {
+-
+-		sscanf(buffer, "%16s %llu %llu %*d %*d %*d %*d %*d %*d %llu %llu %*d %*d %*d %*d %*d %*d",
+-		       interface, &totalbytes_in, &totalpackets_in, &totalbytes_out, &totalpackets_out);
+ 
+-		/* strip trailing colon */
+-		ptr = interface;
+-		while(*ptr != ':') ptr++;
+-		*ptr = '\0';
+-
+-		if (!strcmp(interface, device)) {
+-
+-			flag = (ACCOUNT_IN_FOUND|ACCOUNT_OUT_FOUND);
++	while (!found && fgets(line, sizeof(line), dev)) {
++		char *colon = strchr(line, ':'), *name = line;
++		unsigned long long bin, pin, bout, pout;
++
++		if (!colon)	/* the two header lines */
++			continue;
++		*colon = '\0';
++		while (*name == ' ') name++;
++		if (!device || strcmp(name, device))
++			continue;
++		/* bytes packets errs drop fifo frame compressed multicast | bytes packets */
++		if (sscanf(colon + 1, "%llu %llu %*u %*u %*u %*u %*u %*u %llu %llu",
++			   &bin, &pin, &bout, &pout) != 4)
++			break;
++		found = 1;
++		totalbytes_in = bin; totalpackets_in = pin;
++		totalbytes_out = bout; totalpackets_out = pout;
++
++		/* First sample, another interface, or counters that went back
++		 * (interface recreated, counter wrapped): new baseline instead of
++		 * one huge, bogus sample. */
++		if (!have_baseline || bin < lastbytes_in || bout < lastbytes_out ||
++		    pin < lastpackets_in || pout < lastpackets_out) {
++			lastbytes_in = bin; lastpackets_in = pin;
++			lastbytes_out = bout; lastpackets_out = pout;
++			have_baseline = 1;
++			break;
++		}
+ 
+-			if (totalpackets_in != lastpackets_in) {
+-				diffbytes_in += totalbytes_in - lastbytes_in;
+-				lastpackets_in = totalpackets_in;
+-				lastbytes_in = totalbytes_in;
+-				rx = True;
+-			}
++		if (totalpackets_in != lastpackets_in) {
++			diffbytes_in += totalbytes_in - lastbytes_in;
++			lastpackets_in = totalpackets_in;
++			lastbytes_in = totalbytes_in;
++			rx = True;
++		}
+ 
+-			if (totalpackets_out != lastpackets_out) {
+-				diffbytes_out += totalbytes_out - lastbytes_out;
+-				lastpackets_out = totalpackets_out;
+-				lastbytes_out = totalbytes_out;
+-				tx = True;
+-			}
++		if (totalpackets_out != lastpackets_out) {
++			diffbytes_out += totalbytes_out - lastbytes_out;
++			lastpackets_out = totalpackets_out;
++			lastbytes_out = totalbytes_out;
++			tx = True;
+ 		}
+ 	}
+ 
+ 	fclose(dev);
+ 
++	/* interface gone (cable or Wi-Fi down, renamed): look again soon */
++	if (!found && auto_device)
++		auto_checked = 0;
++
+ 	/* return True if no change to tx/rx
+ 	 * return False if display will need to be updated
+ 	 */
+@@ -367,12 +466,18 @@ int updateStats_dev(void) {
+ }
+ 
+ int dev_test(void) {
+-  int devfd;
+-  if((devfd = open("/proc/net/dev", O_RDONLY)) == -1) return False;
+-  read(devfd, buffer, 36);
+-  if(buffer[35] == '|') return False;
+-  if(device == NULL) device = "eth0";
+-  fprintf(stderr, "wmnet: using devstats driver to monitor %s\n", device);
++  FILE *dev;
++  char line[256];
++  if((dev = fopen("/proc/net/dev", "r")) == NULL) return False;
++  /* 2.0 kernels had no bytes column ("|" right after the packets) */
++  if(!fgets(line, sizeof(line), dev) || (strlen(line) > 35 && line[35] == '|')) { fclose(dev); return False; }
++  fclose(dev);
++  if(device == NULL) {
++    auto_device = 1;
++    choose_auto_device();
++    fprintf(stderr, "wmnet: using devstats driver to monitor %s (automatic)\n", device ? device : "(none yet)");
++  } else
++    fprintf(stderr, "wmnet: using devstats driver to monitor %s\n", device);
+   return True;
+ }
+ 
+diff --git a/wmnet/wmnet.1x b/wmnet/wmnet.1x
+index 25d7f17..2a96bb5 100644
+--- a/wmnet/wmnet.1x
++++ b/wmnet/wmnet.1x
+@@ -103,7 +103,7 @@ given more than once on the command line to specify more than one device.
+ .TP
+ .B \-d \fIDELAY
+ delay time for polling /proc/net/ip_account (in
+-microseconds). Defaults to 25000, that is 0.025 seconds, or 40 Hz
++microseconds). Defaults to 100000, that is 0.1 seconds, or 10 Hz
+ .TP
+ .B \-D,\-\-driver=\fIDRIVER
+ use \fIDRIVER \fP to get the stats we monitor.  Compiled in drivers can be listed
+@@ -113,6 +113,9 @@ with the \-h switch.
+ watch statistics for \fIDEVICE \fP.  This option is only used for certain
+ stat drivers, namely: kmem, devstats, and pppstats.  The ipchains and ipfwadm
+ stat drivers do not use this parameter.
++With the devstats driver and no \fB\-W\fP, wmnet monitors the interface of
++the default route (or, without one, the first interface that is up) and
++follows it when it changes.
+ .TP
+ .B \-X,\-\-display=\fDISPLAY
+ X display to use.
+diff --git a/wmnet/wmnet.c b/wmnet/wmnet.c
+index d4e4a28..17289f9 100644
+--- a/wmnet/wmnet.c
++++ b/wmnet/wmnet.c
+@@ -393,7 +393,9 @@ void setup_wmnet(int argc, char **argv) {
+ 	}
+ 
+ 	/* usleep() in between polls to /proc/net/ip_acct */
+-	if (delayTime <= 0) delayTime = 25000;
++	/* 10 reads per second: the arrows still blink with the traffic and an idle
++	 * wmnet stays close to 0% CPU (it was 40 reads per second) */
++	if (delayTime <= 0) delayTime = 100000;
+ 
+ 	/* Setup the X windows, GC's, initial states, etc */
+ 	setupX();
+-- 
+2.56.0
+
