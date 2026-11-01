@@ -12,7 +12,7 @@
 pkgname=windowmaker
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
-pkgrel=6
+pkgrel=7
 pkgdesc='X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)'
 arch=(x86_64)
 url='https://www.windowmaker.org/'
@@ -57,6 +57,7 @@ source=(
   0006-dock-choose-the-monitor-of-the-Dock.patch
   0007-info-panel-Big-WindowMaker-Custom-credits-at-the-end.patch
   0008-po-pt_BR-Translate-the-Dock-monitor-menu.patch
+  0009-dock-keep-the-Dock-visible-and-restore-its-position.patch
 )
 sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337'
@@ -66,7 +67,8 @@ sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '9ef93f7c690775d338e8541f4b58b637c83bcdd6e4b82f449dc24c23705bdbdf'
             '1263a8efc04ead930d5745856accc4bcd129686034ad757362c8c4763a2bb6be'
             'ef3b0d03efabc26bbacfbe19a182c6408de21ca695d9a89c69e2b63ba4f2577b'
-            '195c96d5418be771969204ff6fb3a9e10d4335d5038a34dccedc9650cf571771')
+            '195c96d5418be771969204ff6fb3a9e10d4335d5038a34dccedc9650cf571771'
+            '8be7bc00e7af166ef97791babbe5a824ed11aad58d6d4f889702f5d4365d03b8')
 
 prepare() {
   cd wmaker
@@ -119,6 +121,13 @@ prepare() {
 
   # pt_BR dos menus de posição e de monitor do Dock. Enviar ao upstream.
   patch -Np1 -i "${srcdir}/0008-po-pt_BR-Translate-the-Dock-monitor-menu.patch"
+
+  # O Dock "sumia" ao escolher um monitor: ficava na emenda entre dois
+  # monitores, embaixo das janelas. Agora vai para a borda da tela livre
+  # do Clip, é conferido dentro de um monitor e trazido à frente; e
+  # "Restaurar posição do Dock" (menu do Dock, RESET_DOCK no menu raiz e
+  # o comando ResetDock do big-wm-dock-reset). Enviar ao upstream.
+  patch -Np1 -i "${srcdir}/0009-dock-keep-the-Dock-visible-and-restore-its-position.patch"
 
   # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
   # sed que o Arch faz na 0.96.0 não é necessário aqui.
