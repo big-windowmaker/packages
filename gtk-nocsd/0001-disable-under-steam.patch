@@ -1,0 +1,62 @@
+--- a/Source/GTK-NoCSD.c
++++ b/Source/GTK-NoCSD.c
+@@ -287,10 +287,29 @@
+ void GTKNoCSDUnsetLDPreload(void) {
+ 	// setenv does not always work before execve in these specific contexts,
+ 	// so LD_PRELOAD is stripped manually from the environment array.
++	// Only this library leaves LD_PRELOAD: other preloads (the Steam
++	// overlay, MangoHud...) stay. Rewritten in place, as it only gets shorter.
+ 	if (environ != NULL) {
+ 		for (char **Variable = environ; *Variable != NULL; ++Variable) {
+ 			if (strncmp(*Variable, "LD_PRELOAD=", 11) == 0) {
+-				(*Variable)[11] = '\0';
++				char *Value = *Variable + 11, *Write = Value;
++				const char *Read = Value;
++				while (*Read != '\0') {
++					size_t Length = strcspn(Read, ": ");
++					if (Length > 0 && !(memmem(Read, Length, "gtk-nocsd", 9) != NULL
++						|| memmem(Read, Length, "gtk3-nocsd", 10) != NULL)) {
++						if (Write != Value) {
++							*Write++ = ':';
++						}
++						memmove(Write, Read, Length);
++						Write += Length;
++					}
++					Read += Length;
++					while (*Read == ':' || *Read == ' ') {
++						++Read;
++					}
++				}
++				*Write = '\0';
+ 				break;
+ 			}
+ 		}
+@@ -476,6 +495,28 @@
+ 			strstr(GTKNoCSDArguments[1], "/sbuild\0") != NULL);
+ 	}
+ 
++	// Never inside Steam and what it runs (Steam Linux Runtime, Proton, Wine,
++	// native games): with the Steam overlay also preloaded, the runtime's
++	// entry point script blocked forever on a pipe and games never started.
++	// None of it uses GTK windows that need this library. Unloading here
++	// (restart without the library in LD_PRELOAD) keeps it out of the whole
++	// Steam process tree when the Steam launcher script itself is started.
++	if (!Disable) {
++		const char *SteamVariables[] = {"SteamAppId", "SteamGameId",
++			"STEAM_COMPAT_APP_ID", "STEAM_RUNTIME", "SteamClientLaunch", NULL};
++		for (size_t Index = 0; !Disable && SteamVariables[Index]; ++Index) {
++			Disable = getenv(SteamVariables[Index]) != NULL;
++		}
++		for (size_t Index = 0; !Disable && GTKNoCSDArguments != NULL &&
++			Index < GTKNoCSDArgumentNumber && Index < 2; ++Index) {
++			const char *Argument = GTKNoCSDArguments[Index];
++			const char *Base = Argument ? strrchr(Argument, '/') : NULL;
++			Base = Base ? Base + 1 : Argument;
++			Disable = Base != NULL && (strcmp(Base, "steam") == 0 ||
++				strcmp(Base, "steam.sh") == 0);
++		}
++	}
++
+ 	// For package level loading disable on everything GNOME except Flashback
+ 	// GTK_NOCSD_GNOME=1 disables this check and enables the library for GNOME
+ 	const char *Desktop = getenv("XDG_CURRENT_DESKTOP");
