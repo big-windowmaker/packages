@@ -12,7 +12,7 @@
 pkgname=windowmaker
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
-pkgrel=8
+pkgrel=9
 pkgdesc='X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)'
 arch=(x86_64)
 url='https://www.windowmaker.org/'
@@ -60,6 +60,7 @@ source=(
   0009-dock-keep-the-Dock-visible-and-restore-its-position.patch
   0010-wmagnify-fast-rendering-mouse-wheel-zoom-smooth-scaling.patch
   0011-session-start-a-multi-window-program-once.patch
+  0012-info-panel-subtitle-Based-on-BigLinux.patch
 )
 sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337'
@@ -72,7 +73,8 @@ sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '195c96d5418be771969204ff6fb3a9e10d4335d5038a34dccedc9650cf571771'
             '8be7bc00e7af166ef97791babbe5a824ed11aad58d6d4f889702f5d4365d03b8'
             '561e62bafe7ce4d6b5671bcf5d80eb17caa3c7a907c9637715f03f660a2a108d'
-            '025c9e46e4fa12cfe382b5658a79ecbac74af650276abdf34e7a3191c8b3aaa5')
+            '025c9e46e4fa12cfe382b5658a79ecbac74af650276abdf34e7a3191c8b3aaa5'
+            '5fb7989c152afc171f6488710ba7cd6d7a5e9a53ddf62c1a9e211386c729864b')
 
 prepare() {
   cd wmaker
@@ -97,7 +99,7 @@ prepare() {
   patch -Np1 -i "${srcdir}/0002-po-pt_BR-Fix-the-kill-confirmation-message.patch"
 
   # Identidade do Big WindowMaker no painel Info: nome "Big WindowMaker",
-  # "Baseado no Window Maker" e a linha "Copyleft 🄯 <ano> Rafael Ruscher"
+  # o subtítulo (trocado pelo 0012) e a linha "Copyleft 🄯 <ano> Rafael Ruscher"
   # acima dos copyrights do Window Maker, que continuam lá (GPL, seção 2c).
   # Patch próprio do Big WindowMaker: NÃO enviar ao upstream.
   patch -Np1 -i "${srcdir}/0003-info-panel-Big-WindowMaker-branding.patch"
@@ -144,6 +146,12 @@ prepare() {
   # abrindo janelas a mais; e um componente marcado DontSaveSession depois
   # de salvo era relançado. Enviar ao upstream.
   patch -Np1 -i "${srcdir}/0011-session-start-a-multi-window-program-once.patch"
+
+  # Subtítulo do painel Info: "Baseado no BigLinux" (o sistema é o Big
+  # WindowMaker, baseado no BigLinux), no lugar de "Baseado no Window Maker".
+  # Os copyrights do Window Maker continuam no painel. Patch próprio do Big
+  # WindowMaker: NÃO enviar ao upstream.
+  patch -Np1 -i "${srcdir}/0012-info-panel-subtitle-Based-on-BigLinux.patch"
 
   # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
   # sed que o Arch faz na 0.96.0 não é necessário aqui.

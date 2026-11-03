@@ -1,0 +1,68 @@
+From cf133059f72200775a4e8c11857d8d42941179af Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 3 Nov 2026 15:21:58 -0300
+Subject: [PATCH] =?UTF-8?q?Painel=20Info:=20subt=C3=ADtulo=20"Based=20on?=
+ =?UTF-8?q?=20BigLinux"?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Patch próprio do Big WindowMaker (não é para o upstream).
+
+O sistema se apresenta como Big WindowMaker, baseado no BigLinux: o
+subtítulo do painel Info passa de "Based on Window Maker" para "Based
+on BigLinux" ("Baseado no BigLinux" em português). Os avisos de
+copyright do Window Maker continuam no painel, logo abaixo, sem
+mudança.
+---
+ po/pt.po     | 4 ++--
+ po/pt_BR.po  | 4 ++--
+ src/dialog.c | 2 +-
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/po/pt.po b/po/pt.po
+index 2a13d01..eb1d5fd 100644
+--- a/po/pt.po
++++ b/po/pt.po
+@@ -1668,8 +1668,8 @@ msgid "invalid data in selection"
+ msgstr "dados inválidos na seleção"
+ 
+ #: ../src/dialog.c
+-msgid "Based on Window Maker"
+-msgstr "Baseado no Window Maker"
++msgid "Based on BigLinux"
++msgstr "Baseado no BigLinux"
+ 
+ #~ msgid "out of memory while updating GNOME hints"
+ #~ msgstr "faltou memória enquanto estava atualizando as dicas do GNOME"
+diff --git a/po/pt_BR.po b/po/pt_BR.po
+index 3b1e01b..0c56d9b 100644
+--- a/po/pt_BR.po
++++ b/po/pt_BR.po
+@@ -1819,8 +1819,8 @@ msgid "invalid data in selection"
+ msgstr "dados inválidos na seleção"
+ 
+ #: ../src/dialog.c
+-msgid "Based on Window Maker"
+-msgstr "Baseado no Window Maker"
++msgid "Based on BigLinux"
++msgstr "Baseado no BigLinux"
+ 
+ #: ../src/dock.c
+ msgid "Dock position"
+diff --git a/src/dialog.c b/src/dialog.c
+index 9b90a24..30caf36 100644
+--- a/src/dialog.c
++++ b/src/dialog.c
+@@ -1426,7 +1426,7 @@ void wShowInfoPanel(WScreen *scr)
+ 		font = NULL;
+ 	}
+ 	WMSetLabelTextAlignment(panel->name2L, WACenter);
+-	WMSetLabelText(panel->name2L, _("Based on Window Maker"));
++	WMSetLabelText(panel->name2L, _("Based on BigLinux"));
+ 
+ 	snprintf(buffer, sizeof(buffer), _("Version %s"), VERSION);
+ 	panel->versionL = WMCreateLabel(panel->win);
+-- 
+2.56.0
+
