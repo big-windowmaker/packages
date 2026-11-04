@@ -1,0 +1,51 @@
+From 2697b845c9b717c776781c6d239f2ff3cd8e0c46 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Wed, 4 Nov 2026 17:12:16 -0300
+Subject: [PATCH 2/2] share: Right-click actions of the wmake-zones-wl dock-app
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ share/wlmaker/Dockapps.plist | 10 ++++++++++
+ src/i18n.c                   |  5 +++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/share/wlmaker/Dockapps.plist b/share/wlmaker/Dockapps.plist
+index 7004baa..4744973 100644
+--- a/share/wlmaker/Dockapps.plist
++++ b/share/wlmaker/Dockapps.plist
+@@ -150,6 +150,16 @@
+       );
+     };
+ 
++    "wmake-zones-wl" = {
++      Actions = (
++        { Title = "Zones On / Off"; Command = "wmake-zones zones toggle"; },
++        { Title = "Auto Tiling On / Off"; Command = "wmake-zones autotile toggle"; },
++        { Title = "Next Layout"; Command = "wmake-zones layout next"; },
++        { Title = "Edit Zones..."; Command = "wmake-zones-prefs --editor"; },
++        { Title = "Window Organization Preferences..."; Command = "wmake-zones-prefs"; }
++      );
++    };
++
+     wlmmixer = {
+       Actions = (
+         { Title = "Mute / Unmute"; Command = "pactl set-sink-mute @DEFAULT_SINK@ toggle"; },
+diff --git a/src/i18n.c b/src/i18n.c
+index 9330ce7..a21df80 100644
+--- a/src/i18n.c
++++ b/src/i18n.c
+@@ -96,6 +96,11 @@ static const wlmaker_i18n_entry_t _wlmaker_i18n_pt_br[] = {
+     { "System Monitor", "Monitor do sistema" },
+     { "htop in a Terminal", "htop no terminal" },
+     { "Open Calendar", "Abrir calendário" },
++    { "Zones On / Off", "Zonas: ligar / desligar" },
++    { "Auto Tiling On / Off", "Mosaico automático: ligar / desligar" },
++    { "Next Layout", "Próximo layout" },
++    { "Edit Zones...", "Editar zonas..." },
++    { "Window Organization Preferences...", "Preferências da organização de janelas..." },
+     { "Clock Style", "Estilo do relógio" },
+     { "Analog", "Analógico" },
+     { "12-Hour Clock (AM/PM)", "Relógio de 12 horas (AM/PM)" },
+-- 
+2.56.0
+

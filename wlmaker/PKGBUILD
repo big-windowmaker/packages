@@ -184,9 +184,16 @@
 #   0103  atalhos casam também com o keysym do primeiro nível da tecla:
 #         Ctrl+Alt+Backspace (Quit) funciona com a opção XKB
 #         terminate:ctrl_alt_bksp do br-abnt2
+#   0104-0105: organização de janelas (branch big-wm/zones do fork)
+#   0104  zonas e mosaico do wmake-zones dentro do compositor: overlay das
+#         zonas ao arrastar (sem roubar o ponteiro), encaixe ao soltar, Esc
+#         cancela, mosaico automático, ação Zones e socket de controle em
+#         $XDG_RUNTIME_DIR/wmake-zones; usa o núcleo e o arquivo de
+#         configuração do wmake-zones (libwmake-zones-engine.a, estático)
+#   0105  ações do clique direito do dockapp wmake-zones-wl (Dockapps.plist)
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=14
+pkgrel=15
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -215,6 +222,7 @@ makedepends=(
   git
   librsvg  # exigido pelo CMake da 0.9; só os exemplos (não instalados) usam
   wayland-protocols
+  'wmake-zones>=0.1.0'  # núcleo das zonas (biblioteca estática, 0104)
 )
 checkdepends=(desktop-file-utils)
 optdepends=(
@@ -317,6 +325,8 @@ _patches=(
   0101-menu_item-Keeps-only-the-buffer-of-the-item-s-curren.patch
   0102-menu-Releases-the-item-buffers-while-the-menu-is-clo.patch
   0103-keyboard-Matches-key-bindings-also-with-the-key-s-fi.patch
+  0104-zones-Window-zones-and-tiling-wmake-zones-in-the-com.patch
+  0105-share-Right-click-actions-of-the-wmake-zones-wl-dock.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -421,7 +431,9 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'f263e896dae9e5b98408c14fa9aef6832f95c1361e1d8077fabd021f919991a4'
             '6d8bd5b3f2018c6d043084e80b2813cf6eb71f6332bcaf8119c75843ef948e25'
             'd9835e17cdb7cbf82e97f638b7d3a4f03592e75c3e7e155f3354d8a9dbc74224'
-            '7f6bd68187fb097f7e3b4ef73df2a1aca0fb6b9b4a62f19447a059adc6524ca8')
+            '7f6bd68187fb097f7e3b4ef73df2a1aca0fb6b9b4a62f19447a059adc6524ca8'
+            'f2acbc17d70debe53003d7e2c55d20196267cad834d07a9f45f8dc3944f91870'
+            '6a5d0f2677d2ad065c84ae16df9054fdfbdc79aeea97b4de4554bec978a8c06b')
 
 prepare() {
   cd wlmaker

@@ -1,0 +1,58 @@
+# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+#
+# wmake-zones: zonas de encaixe e mosaico de janelas para o Window Maker
+# (serviço X11 + dockapp) e o wlmaker (o compositor usa o núcleo estático
+# instalado aqui; ver o patch 0104 do pacote wlmaker). Desligado por
+# padrão: o autostart sai na hora enquanto o usuário não ligar as zonas ou
+# o mosaico.
+#
+# WMAKE_ZONES_SOURCE troca a fonte (ex.: git+file:///caminho/wmake-zones
+# para compilar um clone local antes do push).
+pkgname=wmake-zones
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Window zones and tiling for Window Maker and wlmaker, with the OpenStep look'
+arch=(x86_64)
+url='https://github.com/big-windowmaker/wmake-zones'
+license=('GPL-2.0-or-later')
+depends=(
+  cairo
+  glibc
+  gtk3       # preferências e editor de zonas (só quando abertos)
+  hicolor-icon-theme
+  libx11
+  libxext    # XShape: overlay que não pega o ponteiro
+  fontconfig
+  libxft
+  libxi      # XInput 2.1: eventos brutos do botão durante o arrasto
+  libxrandr  # monitores
+  libxrender
+  wayland    # dockapp nativo do wlmaker
+)
+makedepends=(git librsvg meson wayland-protocols)
+checkdepends=(xorg-server-xvfb xdotool xorg-xprop xterm windowmaker)
+optdepends=(
+  'windowmaker: zonas e mosaico na sessão X11'
+  'wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patch 0104)'
+  'picom: zonas translúcidas (sem compositor, contornos com o destino em listras)'
+)
+# O núcleo estático (libwmake-zones-engine.a) é usado pelo wlmaker.
+options=(staticlibs)
+source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}")
+sha256sums=('SKIP')
+
+build() {
+  arch-meson wmake-zones build
+  meson compile -C build
+}
+
+check() {
+  # O teste funcional do X11 roda num Xvfb próprio com o wmaker; sem as
+  # ferramentas ele sai como "skip".
+  meson test -C build --print-errorlogs
+}
+
+package() {
+  meson install -C build --destdir "$pkgdir"
+  install -Dm644 wmake-zones/README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
