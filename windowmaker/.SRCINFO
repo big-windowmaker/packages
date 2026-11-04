@@ -1,7 +1,7 @@
 pkgbase = windowmaker
 	pkgdesc = X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)
 	pkgver = 0.96.0.r130.g558e67f
-	pkgrel = 9
+	pkgrel = 10
 	url = https://www.windowmaker.org/
 	arch = x86_64
 	license = GPL-2.0-or-later AND WTFPL
@@ -45,6 +45,8 @@ pkgbase = windowmaker
 	source = 0010-wmagnify-fast-rendering-mouse-wheel-zoom-smooth-scaling.patch
 	source = 0011-session-start-a-multi-window-program-once.patch
 	source = 0012-info-panel-subtitle-Based-on-BigLinux.patch
+	source = 0013-info-panel-credits-aligned-left-Copyleft-lines.patch
+	source = 0014-icons-standard-margin-smooth-scaling-and-clip-shadow.patch
 	sha256sums = a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf
 	sha256sums = 08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337
 	sha256sums = 077b2a6e5274420751a8e9ae40bed7ea3b944e7b0e16d29fbf461afed1d3e685
@@ -58,5 +60,7 @@ pkgbase = windowmaker
 	sha256sums = 561e62bafe7ce4d6b5671bcf5d80eb17caa3c7a907c9637715f03f660a2a108d
 	sha256sums = 025c9e46e4fa12cfe382b5658a79ecbac74af650276abdf34e7a3191c8b3aaa5
 	sha256sums = 5fb7989c152afc171f6488710ba7cd6d7a5e9a53ddf62c1a9e211386c729864b
+	sha256sums = f1ecd2fcdfa54b0ffaa4c9117c0e5f943478e45bec6d0c8dc6ea6a409a19af1b
+	sha256sums = 3fa37118725d16faf948dfbc2f75cc6a57a0d6ff2b59f5ad77ea5186d94ca6d1
 
 pkgname = windowmaker

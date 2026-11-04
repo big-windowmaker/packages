@@ -12,7 +12,7 @@
 pkgname=windowmaker
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
-pkgrel=9
+pkgrel=10
 pkgdesc='X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)'
 arch=(x86_64)
 url='https://www.windowmaker.org/'
@@ -61,6 +61,8 @@ source=(
   0010-wmagnify-fast-rendering-mouse-wheel-zoom-smooth-scaling.patch
   0011-session-start-a-multi-window-program-once.patch
   0012-info-panel-subtitle-Based-on-BigLinux.patch
+  0013-info-panel-credits-aligned-left-Copyleft-lines.patch
+  0014-icons-standard-margin-smooth-scaling-and-clip-shadow.patch
 )
 sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337'
@@ -74,7 +76,9 @@ sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '8be7bc00e7af166ef97791babbe5a824ed11aad58d6d4f889702f5d4365d03b8'
             '561e62bafe7ce4d6b5671bcf5d80eb17caa3c7a907c9637715f03f660a2a108d'
             '025c9e46e4fa12cfe382b5658a79ecbac74af650276abdf34e7a3191c8b3aaa5'
-            '5fb7989c152afc171f6488710ba7cd6d7a5e9a53ddf62c1a9e211386c729864b')
+            '5fb7989c152afc171f6488710ba7cd6d7a5e9a53ddf62c1a9e211386c729864b'
+            'f1ecd2fcdfa54b0ffaa4c9117c0e5f943478e45bec6d0c8dc6ea6a409a19af1b'
+            '3fa37118725d16faf948dfbc2f75cc6a57a0d6ff2b59f5ad77ea5186d94ca6d1')
 
 prepare() {
   cd wmaker
@@ -152,6 +156,20 @@ prepare() {
   # Os copyrights do Window Maker continuam no painel. Patch próprio do Big
   # WindowMaker: NÃO enviar ao upstream.
   patch -Np1 -i "${srcdir}/0012-info-panel-subtitle-Based-on-BigLinux.patch"
+
+  # Créditos da edição no fim do painel Info alinhados à esquerda, na coluna
+  # do aviso de copyright: "Big WindowMaker Custom" e uma linha "Copyleft 🄯
+  # Nome" por autor (o símbolo U+1F12F desenhado em vetor). Patch próprio do
+  # Big WindowMaker: NÃO enviar ao upstream.
+  patch -Np1 -i "${srcdir}/0013-info-panel-credits-aligned-left-Copyleft-lines.patch"
+
+  # Ícones padronizados com EnforceIconMargin = YES: a imagem cabe em 3/4 do
+  # ladrilho (48 de 64) sem deformar, com uma sombra suave como a do
+  # clip.tiff; as reduções de ícone (arquivo, WM_HINTS, _NET_WM_ICON) usam a
+  # média de área com alfa em vez do vizinho mais próximo (o OBS Studio, que
+  # ocupa o quadro inteiro, saía colado às bordas e serrilhado). A redução
+  # suave poderia ir ao upstream; a sombra é uma escolha do Big WindowMaker.
+  patch -Np1 -i "${srcdir}/0014-icons-standard-margin-smooth-scaling-and-clip-shadow.patch"
 
   # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
   # sed que o Arch faz na 0.96.0 não é necessário aqui.
