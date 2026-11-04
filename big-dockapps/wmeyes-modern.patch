@@ -1,0 +1,39 @@
+--- a/wmeyes.c	2026-11-04 02:23:40.462978800 -0300
++++ b/wmeyes.c	2026-11-04 02:23:40.472793942 -0300
+@@ -39,7 +39,8 @@
+ 
+ unsigned long eyecolor,outcolor,incolor;
+ 
+-typedef char bool;
++/* C23 (GCC 15+): bool é palavra reservada */
++#include <stdbool.h>
+ #ifndef TRUE
+ #define TRUE 1
+ #define FALSE 0
+@@ -294,11 +295,14 @@
+ 	static int oldrely=-1000;
+ 	static int idletime=0;
+ 	static int masknum=0;
++	static int lastmask=-1;
+ 	unsigned int modmask;
+ 	int    eyex,eyey,len;
++	bool   moved;
+ 
+ 	XQueryPointer(dpy,Win[activeWin],&wroot,&wchild,&absx,&absy,&relx,&rely,
+ 	              &modmask);
++	moved = (oldrelx != relx || oldrely != rely);
+ 	if (oldrelx == relx && oldrely == rely)  {
+ 		idletime++;
+ 	}
+@@ -317,6 +321,11 @@
+ 		   masknum--;
+ 		}
+ 	}
++	/* Ponteiro parado e pálpebras no mesmo quadro: a imagem é a mesma, não
++	 * redesenha (antes, 8 vezes por segundo o tempo todo). */
++	if (!moved && masknum == lastmask)
++		return;
++	lastmask = masknum;
+ 	XCopyArea(dpy, eyesmask, shapemask, mGC, 0,0,64,64,0,0);
+ 	if(!(wmaker || ushape))  {
+ 		XCopyArea(dpy, backtile, currpmap, WinGC, 0,0,64,64,0,0);
