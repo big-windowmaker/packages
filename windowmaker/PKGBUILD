@@ -12,7 +12,7 @@
 pkgname=windowmaker
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
-pkgrel=10
+pkgrel=11
 pkgdesc='X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)'
 arch=(x86_64)
 url='https://www.windowmaker.org/'
@@ -63,6 +63,7 @@ source=(
   0012-info-panel-subtitle-Based-on-BigLinux.patch
   0013-info-panel-credits-aligned-left-Copyleft-lines.patch
   0014-icons-standard-margin-smooth-scaling-and-clip-shadow.patch
+  0015-wmspec-a-dock-that-takes-no-input-is-not-focusable.patch
 )
 sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337'
@@ -78,7 +79,8 @@ sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '025c9e46e4fa12cfe382b5658a79ecbac74af650276abdf34e7a3191c8b3aaa5'
             '5fb7989c152afc171f6488710ba7cd6d7a5e9a53ddf62c1a9e211386c729864b'
             'f1ecd2fcdfa54b0ffaa4c9117c0e5f943478e45bec6d0c8dc6ea6a409a19af1b'
-            '3fa37118725d16faf948dfbc2f75cc6a57a0d6ff2b59f5ad77ea5186d94ca6d1')
+            '3fa37118725d16faf948dfbc2f75cc6a57a0d6ff2b59f5ad77ea5186d94ca6d1'
+            'e4bf626c79668918aaa2457055000492b06138232cfb78674829a3f5f7c35957')
 
 prepare() {
   cd wmaker
@@ -170,6 +172,13 @@ prepare() {
   # ocupa o quadro inteiro, saía colado às bordas e serrilhado). A redução
   # suave poderia ir ao upstream; a sombra é uma escolha do Big WindowMaker.
   patch -Np1 -i "${srcdir}/0014-icons-standard-margin-smooth-scaling-and-clip-shadow.patch"
+
+  # Um dock/painel que não aceita teclado (WM_HINTS input = False, como o dock
+  # com abas) deixa de receber o foco. Antes, ao fechar a última janela (por
+  # exemplo o Buscar aplicativos com Esc), o wmaker passava o foco para o dock,
+  # que o recusava: o foco do X ficava em None e nenhum atalho funcionava até
+  # clicar numa janela. Pode ir ao upstream.
+  patch -Np1 -i "${srcdir}/0015-wmspec-a-dock-that-takes-no-input-is-not-focusable.patch"
 
   # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
   # sed que o Arch faz na 0.96.0 não é necessário aqui.
