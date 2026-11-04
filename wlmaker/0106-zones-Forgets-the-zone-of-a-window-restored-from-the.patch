@@ -1,0 +1,36 @@
+From b3acc966c51149ba1b5f64adac7f224a773332a0 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Wed, 4 Nov 2026 17:38:13 -0300
+Subject: [PATCH] zones: Forgets the zone of a window restored from the tiling
+
+The window goes back to the box from before it was snapped or tiled, so
+the zone it was snapped to no longer applies.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/zones.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/zones.c b/src/zones.c
+index 256ce55..778831c 100644
+--- a/src/zones.c
++++ b/src/zones.c
+@@ -691,6 +691,7 @@ static int _wlmaker_zones_tile_run(void *data_ptr)
+                 if (w->has_restore) {
+                     wlmtk_window_request_bounding_box(window_ptr, &w->restore);
+                     w->has_restore = false;
++                    w->zone = -1;
+                 }
+             }
+             continue;
+@@ -759,6 +760,7 @@ static void _wlmaker_zones_untile_all(wlmaker_zones_t *zones_ptr)
+         if (w->has_restore) {
+             wlmtk_window_request_bounding_box(w->window_ptr, &w->restore);
+             w->has_restore = false;
++            w->zone = -1;
+         }
+     }
+ }
+-- 
+2.56.0
+

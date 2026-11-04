@@ -191,6 +191,7 @@
 #         $XDG_RUNTIME_DIR/wmake-zones; usa o núcleo e o arquivo de
 #         configuração do wmake-zones (libwmake-zones-engine.a, estático)
 #   0105  ações do clique direito do dockapp wmake-zones-wl (Dockapps.plist)
+#   0106  a janela restaurada do mosaico esquece a zona em que estava
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
 pkgrel=15
@@ -327,6 +328,7 @@ _patches=(
   0103-keyboard-Matches-key-bindings-also-with-the-key-s-fi.patch
   0104-zones-Window-zones-and-tiling-wmake-zones-in-the-com.patch
   0105-share-Right-click-actions-of-the-wmake-zones-wl-dock.patch
+  0106-zones-Forgets-the-zone-of-a-window-restored-from-the.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -433,7 +435,8 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'd9835e17cdb7cbf82e97f638b7d3a4f03592e75c3e7e155f3354d8a9dbc74224'
             '7f6bd68187fb097f7e3b4ef73df2a1aca0fb6b9b4a62f19447a059adc6524ca8'
             'f2acbc17d70debe53003d7e2c55d20196267cad834d07a9f45f8dc3944f91870'
-            '6a5d0f2677d2ad065c84ae16df9054fdfbdc79aeea97b4de4554bec978a8c06b')
+            '6a5d0f2677d2ad065c84ae16df9054fdfbdc79aeea97b4de4554bec978a8c06b'
+            '5d92ce21d763d8d1674a49ea34c8f87926f8fedc51295347bca153af2395ecb4')
 
 prepare() {
   cd wlmaker
