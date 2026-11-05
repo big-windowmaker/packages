@@ -34,6 +34,8 @@ pkgbase = wmake-zones
 	optdepends = picom: zonas translúcidas (sem compositor, contornos com o destino em listras)
 	options = staticlibs
 	source = wmake-zones::git+https://github.com/big-windowmaker/wmake-zones.git#tag=v0.2.0
+	source = 0001-tests-zombie-service-counts-as-exited.patch
 	sha256sums = SKIP
+	sha256sums = 38c1aa436af5973329c4421ee787b00cf4882e67c2c2e0d6ff551d2174e75a92
 
 pkgname = wmake-zones

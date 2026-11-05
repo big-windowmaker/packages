@@ -64,10 +64,16 @@ optdepends=(
 )
 # O núcleo estático (libwmake-zones-engine.a) é usado pelo wlmaker.
 options=(staticlibs)
-source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}")
-sha256sums=('SKIP')
+source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}"
+        0001-tests-zombie-service-counts-as-exited.patch)
+sha256sums=('SKIP'
+            '38c1aa436af5973329c4421ee787b00cf4882e67c2c2e0d6ff551d2174e75a92')
 
 prepare() {
+  # 0001: correção só do teste (contêiner sem init que recolha órfãos), já
+  # no main do wmake-zones; sai na próxima versão.
+  git -C wmake-zones apply "$srcdir/0001-tests-zombie-service-counts-as-exited.patch"
+
   # A versão do PKGBUILD precisa ser a do projeto (meson.build).
   local v
   v=$(sed -n "s/^  version: '\(.*\)',$/\1/p" wmake-zones/meson.build)
@@ -86,7 +92,11 @@ check() {
   # Núcleo (925 mil verificações), metadados e o teste funcional do X11,
   # que roda num Xvfb próprio com o wmaker; sem as ferramentas ele sai
   # como "skip".
-  meson test -C build --print-errorlogs
+  # A saída TAP (qual verificação falhou) fica no testlog.txt.
+  meson test -C build --print-errorlogs || {
+    cat build/meson-logs/testlog.txt
+    return 1
+  }
 }
 
 package() {
