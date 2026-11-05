@@ -11,7 +11,7 @@
 #   wmake-zones-wl     dockapp nativo do wlmaker, sem XWayland
 #   libwmake-zones-engine.a
 #                      núcleo de geometria, mosaico e configuração; o
-#                      wlmaker liga nele (patches 0104-0116 do pacote
+#                      wlmaker liga nele (patches 0104-0118 do pacote
 #                      wlmaker) para ter as mesmas zonas no Wayland
 #
 # Zonas ligadas por padrão (desde a 0.3), mosaico desligado: as janelas
@@ -60,7 +60,7 @@ checkdepends=(
 )
 optdepends=(
   'windowmaker: zonas e mosaico na sessão X11'
-  'wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patches 0104-0116)'
+  'wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patches 0104-0118)'
   'picom: zonas translúcidas (sem compositor, contornos com o destino em listras)'
 )
 # O núcleo estático (libwmake-zones-engine.a) é usado pelo wlmaker. Sem LTO:
