@@ -52,6 +52,7 @@ makedepends=(
 checkdepends=(
   appstream          # valida os metadados (sem rede)
   python             # cliente "mudo" do teste do socket
+  python-xlib        # confere que o seletor e o menu do dockapp largam o teclado
   windowmaker        # o teste funcional roda o wmaker de verdade num Xvfb
   xdotool
   xorg-server-xvfb
