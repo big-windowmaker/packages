@@ -86,6 +86,22 @@ if [[ -f .ci-localdeps ]]; then
   done < .ci-localdeps
 fi
 
+# Fontes baixadas antes, com novas tentativas: um espelho fora do ar por um
+# momento (visto: 504 do snapshot.debian.org no wdm) não derruba o build.
+echo "::group::fontes"
+for attempt in 1 2 3; do
+  if as_builder makepkg --verifysource --noconfirm; then
+    break
+  fi
+  if ((attempt == 3)); then
+    echo "fontes indisponíveis depois de 3 tentativas" >&2
+    exit 1
+  fi
+  echo "falha ao baixar as fontes (tentativa ${attempt}); nova tentativa em 30 s" >&2
+  sleep 30
+done
+echo "::endgroup::"
+
 echo "::group::makepkg"
 if ((nodeps)); then
   as_builder makepkg --nodeps --noconfirm --cleanbuild --log
