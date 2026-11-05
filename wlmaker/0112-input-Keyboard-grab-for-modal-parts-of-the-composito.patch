@@ -1,0 +1,100 @@
+From 0ceac08b05504482be8e1b5333b003ba758c58d7 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Thu, 5 Nov 2026 09:06:39 -0300
+Subject: [PATCH 112/116] input: Keyboard grab for modal parts of the
+ compositor
+
+wlmim_set_key_grab() routes every key press to a callback until it is
+reset, before any key binding; releases still reach clients so no key
+stays down for them. For the zone picker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/input/manager.c | 20 ++++++++++++++++++++
+ src/input/manager.h | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 48 insertions(+)
+
+diff --git a/src/input/manager.c b/src/input/manager.c
+index d335602..aa5978d 100644
+--- a/src/input/manager.c
++++ b/src/input/manager.c
+@@ -53,6 +53,10 @@ struct _wlmim_t {
+     bs_dllist_t               devices;
+     /** List of all bound keys, see @ref wlmim_keybinding_t::dlnode */
+     bs_dllist_t               keybindings;
++    /** Keyboard grab: gets every key press while set. */
++    wlmim_key_grab_callback_t key_grab_callback;
++    /** Argument to @ref _wlmim_t::key_grab_callback. */
++    void                      *key_grab_ud_ptr;
+ 
+     /** Listener for `new_input` signals raised by `wlr_backend`. */
+     struct wl_listener        backend_new_input_device_listener;
+@@ -485,10 +489,26 @@ bool wlmim_process_key(
+         bs_log(BS_DEBUG, "Process key '%s' (sym %d, modifiers %"PRIx32")",
+                keysym_name, keysym, modifiers);
+     }
++    if (NULL != im_ptr->key_grab_callback) {
++        // A modal part of the compositor (eg. the zone picker) has the
++        // keyboard: Every press is consumed, and no binding runs.
++        im_ptr->key_grab_callback(keysym, modifiers, im_ptr->key_grab_ud_ptr);
++        return true;
++    }
+     struct _wlmim_process_arg a = { .keysym = keysym, .modifiers = modifiers };
+     return bs_dllist_any(&im_ptr->keybindings, _wlmim_process_keybinding, &a);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmim_set_key_grab(
++    wlmim_t *im_ptr,
++    wlmim_key_grab_callback_t callback,
++    void *ud_ptr)
++{
++    im_ptr->key_grab_callback = callback;
++    im_ptr->key_grab_ud_ptr = ud_ptr;
++}
++
+ /* ------------------------------------------------------------------------- */
+ const struct wlmim_cursor_options *wlmim_cursor_options(
+     wlmim_t *input_manager_ptr)
+diff --git a/src/input/manager.h b/src/input/manager.h
+index b137b11..2db10ef 100644
+--- a/src/input/manager.h
++++ b/src/input/manager.h
+@@ -233,6 +233,34 @@ void wlmim_unbind_key(
+     wlmim_t *input_manager_ptr,
+     wlmim_keybinding_t *keybinding_ptr);
+ 
++/**
++ * Callback of a keyboard grab, for each key press.
++ *
++ * @param keysym
++ * @param modifiers           See `enum wlr_keyboard_modifiers`.
++ * @param ud_ptr
++ *
++ * @return Ignored: The press is consumed anyway.
++ */
++typedef bool (*wlmim_key_grab_callback_t)(
++    xkb_keysym_t keysym,
++    uint32_t modifiers,
++    void *ud_ptr);
++
++/**
++ * Grabs the keyboard: While set, every key press goes to `callback` and no
++ * key binding runs; clients get no presses. Releases still reach clients,
++ * so that no key stays down for them. A NULL callback ends the grab.
++ *
++ * @param input_manager_ptr
++ * @param callback            May be NULL.
++ * @param ud_ptr
++ */
++void wlmim_set_key_grab(
++    wlmim_t *input_manager_ptr,
++    wlmim_key_grab_callback_t callback,
++    void *ud_ptr);
++
+ /**
+  * Processes key combo: Call back if a matching binding is found.
+  *
+-- 
+2.56.0
+

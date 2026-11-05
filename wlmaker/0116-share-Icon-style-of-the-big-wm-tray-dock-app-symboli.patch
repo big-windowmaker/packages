@@ -1,0 +1,51 @@
+From efc3069ea759b9bc6d1a25716e29683c5c8c65df Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Thu, 5 Nov 2026 09:44:28 -0300
+Subject: [PATCH 116/116] share: Icon style of the big-wm-tray dock-app
+ (symbolic, monochrome)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ share/wlmaker/Dockapps.plist | 9 ++++++++-
+ src/i18n.c                   | 5 +++++
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/share/wlmaker/Dockapps.plist b/share/wlmaker/Dockapps.plist
+index 64b4526..12c91c8 100644
+--- a/share/wlmaker/Dockapps.plist
++++ b/share/wlmaker/Dockapps.plist
+@@ -210,7 +210,14 @@
+     "big-wm-tray" = {
+       Preferences = (
+         { Key = SmallIcons; Title = "Small Icons"; Type = Bool;
+-          Default = No; }
++          Default = No; },
++        { Key = IconStyle; Title = "Icon Style"; Default = auto;
++          Choices = (
++            (auto, "Automatic"),
++            (symbolic, "Prefer Symbolic"),
++            (monochrome, "Monochrome"),
++            (original, "Original Colors")
++          ); }
+       );
+     };
+   };
+diff --git a/src/i18n.c b/src/i18n.c
+index 73944f3..edb0197 100644
+--- a/src/i18n.c
++++ b/src/i18n.c
+@@ -113,6 +113,11 @@ static const wlmaker_i18n_entry_t _wlmaker_i18n_pt_br[] = {
+     { "Application Rules...", "Regras por aplicativo..." },
+     { "Monitors...", "Monitores..." },
+     { "About wmake-zones", "Sobre o wmake-zones" },
++    { "Icon Style", "Estilo dos ícones" },
++    { "Automatic", "Automático" },
++    { "Prefer Symbolic", "Preferir simbólicos" },
++    { "Monochrome", "Monocromático" },
++    { "Original Colors", "Cores originais" },
+     { "Clock Style", "Estilo do relógio" },
+     { "Analog", "Analógico" },
+     { "12-Hour Clock (AM/PM)", "Relógio de 12 horas (AM/PM)" },
+-- 
+2.56.0
+

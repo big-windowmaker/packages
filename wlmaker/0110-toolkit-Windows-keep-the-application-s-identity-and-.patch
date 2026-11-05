@@ -1,0 +1,288 @@
+From c4d814099d924b0007661d78b9d7ad2933e15798 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Thu, 5 Nov 2026 09:06:39 -0300
+Subject: [PATCH 110/116] toolkit: Windows keep the application's identity and
+ dialog state
+
+wlmtk_window_set_app_id() keeps the xdg-shell app ID, or for X11 clients
+the class and instance of WM_CLASS (updated on set_class), and
+wlmtk_window_set_dialog() marks toplevels with a parent, modal X11
+windows and those declaring a dialog, splash or utility type. Window
+organizers match per-application rules on them and leave dialogs alone.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/toolkit/window.h | 31 +++++++++++++++++++++
+ src/toolkit/window.c     | 58 ++++++++++++++++++++++++++++++++++++++++
+ src/xdg_toplevel.c       | 20 +++++++++++++-
+ src/xwl_surface.c        | 42 +++++++++++++++++++++++++++++
+ 4 files changed, 150 insertions(+), 1 deletion(-)
+
+diff --git a/include/toolkit/window.h b/include/toolkit/window.h
+index ef1a1c9..6e2bdab 100644
+--- a/include/toolkit/window.h
++++ b/include/toolkit/window.h
+@@ -283,6 +283,37 @@ bool wlmtk_window_set_title(
+  */
+ const char *wlmtk_window_get_title(wlmtk_window_t *window_ptr);
+ 
++/**
++ * Sets the application's identity: The xdg-shell app ID, or for X11 clients
++ * the class and instance of WM_CLASS. Used to match per-application rules;
++ * not shown to the user.
++ *
++ * @param window_ptr
++ * @param app_id_ptr          App ID or WM_CLASS class. May be NULL.
++ * @param instance_ptr        WM_CLASS instance, or the app ID. May be NULL.
++ *
++ * @return true on success.
++ */
++bool wlmtk_window_set_app_id(
++    wlmtk_window_t *window_ptr,
++    const char *app_id_ptr,
++    const char *instance_ptr);
++
++/** @return The app ID (or WM_CLASS class), or NULL if not known. */
++const char *wlmtk_window_get_app_id(wlmtk_window_t *window_ptr);
++
++/** @return The WM_CLASS instance (or the app ID), or NULL if not known. */
++const char *wlmtk_window_get_instance(wlmtk_window_t *window_ptr);
++
++/**
++ * Marks the window as a dialog: It has a parent, is modal, or declares
++ * itself as a dialog. Window organizers leave dialogs alone.
++ */
++void wlmtk_window_set_dialog(wlmtk_window_t *window_ptr, bool dialog);
++
++/** @return Whether the window is a dialog. */
++bool wlmtk_window_is_dialog(wlmtk_window_t *window_ptr);
++
+ /**
+  * Sets the window as activated, depending on the argument's value.
+  *
+diff --git a/src/toolkit/window.c b/src/toolkit/window.c
+index 47720d4..2d7d128 100644
+--- a/src/toolkit/window.c
++++ b/src/toolkit/window.c
+@@ -92,6 +92,12 @@ struct _wlmtk_window_t {
+ 
+     /** The window's title. */
+     char                      *title_ptr;
++    /** Application ID (xdg app_id, or the X11 WM_CLASS class). May be NULL. */
++    char                      *app_id_ptr;
++    /** X11 WM_CLASS instance; the app ID for native clients. May be NULL. */
++    char                      *instance_ptr;
++    /** A dialog: has a parent, is modal, or says it is one. */
++    bool                      dialog;
+ 
+     /** Properties of the window. See @ref wlmtk_window_property_t. */
+     uint32_t                  properties;
+@@ -344,6 +350,10 @@ void wlmtk_window_destroy(wlmtk_window_t *window_ptr)
+         free(window_ptr->title_ptr);
+         window_ptr->title_ptr = NULL;
+     }
++    free(window_ptr->app_id_ptr);
++    window_ptr->app_id_ptr = NULL;
++    free(window_ptr->instance_ptr);
++    window_ptr->instance_ptr = NULL;
+ 
+     if (NULL != window_ptr->style_ref_ptr) {
+         wlmtk_window_style_ref_release(window_ptr->style_ref_ptr);
+@@ -525,6 +535,54 @@ const char *wlmtk_window_get_title(wlmtk_window_t *window_ptr)
+     return window_ptr->title_ptr;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Replaces `*dest_ptr_ptr` by a copy of `src_ptr` (NULL or "" clears). */
++static bool _wlmtk_window_set_str(char **dest_ptr_ptr, const char *src_ptr)
++{
++    char *copy_ptr = NULL;
++    if (NULL != src_ptr && '\0' != *src_ptr) {
++        copy_ptr = logged_strdup(src_ptr);
++        if (NULL == copy_ptr) return false;
++    }
++    free(*dest_ptr_ptr);
++    *dest_ptr_ptr = copy_ptr;
++    return true;
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmtk_window_set_app_id(
++    wlmtk_window_t *window_ptr,
++    const char *app_id_ptr,
++    const char *instance_ptr)
++{
++    return _wlmtk_window_set_str(&window_ptr->app_id_ptr, app_id_ptr) &&
++        _wlmtk_window_set_str(&window_ptr->instance_ptr, instance_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++const char *wlmtk_window_get_app_id(wlmtk_window_t *window_ptr)
++{
++    return window_ptr->app_id_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++const char *wlmtk_window_get_instance(wlmtk_window_t *window_ptr)
++{
++    return window_ptr->instance_ptr;
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmtk_window_set_dialog(wlmtk_window_t *window_ptr, bool dialog)
++{
++    window_ptr->dialog = dialog;
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmtk_window_is_dialog(wlmtk_window_t *window_ptr)
++{
++    return window_ptr->dialog;
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmtk_window_set_activated(
+     wlmtk_window_t *window_ptr,
+diff --git a/src/xdg_toplevel.c b/src/xdg_toplevel.c
+index 974a8b4..07ff972 100644
+--- a/src/xdg_toplevel.c
++++ b/src/xdg_toplevel.c
+@@ -390,6 +390,12 @@ struct wlmaker_xdg_toplevel *_wlmaker_xdg_toplevel_create_injected(
+             &client.pid, &client.uid, &client.gid);
+     }
+     wlmtk_window_set_client(wlmaker_xdg_toplevel_ptr->window_ptr, &client);
++    // App ID and parent may already be set before the toplevel is created.
++    wlmtk_window_set_app_id(wlmaker_xdg_toplevel_ptr->window_ptr,
++                            wlr_xdg_toplevel_ptr->app_id,
++                            wlr_xdg_toplevel_ptr->app_id);
++    wlmtk_window_set_dialog(wlmaker_xdg_toplevel_ptr->window_ptr,
++                            NULL != wlr_xdg_toplevel_ptr->parent);
+ 
+     wlmaker_xdg_toplevel_ptr->tracker_handle_ptr =
+         wlmaker_toplevel_tracker_handle_create(
+@@ -695,7 +701,13 @@ void _wlmaker_xdg_toplevel_handle_set_parent(
+     struct wlmaker_xdg_toplevel *wlmaker_xdg_toplevel_ptr = BS_CONTAINER_OF(
+         listener_ptr, struct wlmaker_xdg_toplevel, set_parent_listener);
+ 
+-    bs_log(BS_ERROR, "TODO: set_parent %p", wlmaker_xdg_toplevel_ptr);
++    // A toplevel with a parent is a dialog. wlmaker does not stack it on
++    // the parent yet; window organizers leave it alone.
++    if (NULL != wlmaker_xdg_toplevel_ptr->window_ptr) {
++        wlmtk_window_set_dialog(
++            wlmaker_xdg_toplevel_ptr->window_ptr,
++            NULL != wlmaker_xdg_toplevel_ptr->wlr_xdg_toplevel_ptr->parent);
++    }
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -727,6 +739,12 @@ void _wlmaker_xdg_toplevel_handle_set_app_id(
+     wlmaker_toplevel_tracker_handle_set_app_id(
+         wlmaker_xdg_toplevel_ptr->tracker_handle_ptr,
+         wlmaker_xdg_toplevel_ptr->wlr_xdg_toplevel_ptr->app_id);
++    if (NULL != wlmaker_xdg_toplevel_ptr->window_ptr) {
++        const char *app_id_ptr =
++            wlmaker_xdg_toplevel_ptr->wlr_xdg_toplevel_ptr->app_id;
++        wlmtk_window_set_app_id(
++            wlmaker_xdg_toplevel_ptr->window_ptr, app_id_ptr, app_id_ptr);
++    }
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/xwl_surface.c b/src/xwl_surface.c
+index a52774f..2fa44be 100644
+--- a/src/xwl_surface.c
++++ b/src/xwl_surface.c
+@@ -68,6 +68,8 @@ struct _wlmaker_xwl_surface_t {
+ 
+     /** Listener for the `set_title` signal of `wlr_xwayland_surface`. */
+     struct wl_listener        set_title_listener;
++    /** Listener for the `set_class` signal of `wlr_xwayland_surface`. */
++    struct wl_listener        set_class_listener;
+     /** Listener for the `set_parent` signal of `wlr_xwayland_surface`. */
+     struct wl_listener        set_parent_listener;
+     /** Listener for the `set_decorations` signal of `wlr_xwayland_surface`. */
+@@ -129,6 +131,10 @@ static void _xwl_surface_handle_dissociate(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
+ 
++static void _xwl_surface_handle_set_class(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
++static void _xwl_surface_apply_identity(wlmaker_xwl_surface_t *xs_ptr);
+ static void _xwl_surface_handle_set_title(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
+@@ -263,6 +269,10 @@ wlmaker_xwl_surface_t *wlmaker_xwl_surface_create(
+         &wlr_xwayland_surface_ptr->events.set_title,
+         &xwl_surface_ptr->set_title_listener,
+         _xwl_surface_handle_set_title);
++    wlmtk_util_connect_listener_signal(
++        &wlr_xwayland_surface_ptr->events.set_class,
++        &xwl_surface_ptr->set_class_listener,
++        _xwl_surface_handle_set_class);
+     wlmtk_util_connect_listener_signal(
+         &wlr_xwayland_surface_ptr->events.set_parent,
+         &xwl_surface_ptr->set_parent_listener,
+@@ -292,6 +302,7 @@ void wlmaker_xwl_surface_destroy(wlmaker_xwl_surface_t *xwl_surface_ptr)
+     wlmtk_util_disconnect_listener(&xwl_surface_ptr->set_geometry_listener);
+     wlmtk_util_disconnect_listener(&xwl_surface_ptr->set_decorations_listener);
+     wlmtk_util_disconnect_listener(&xwl_surface_ptr->set_parent_listener);
++    wlmtk_util_disconnect_listener(&xwl_surface_ptr->set_class_listener);
+     wlmtk_util_disconnect_listener(&xwl_surface_ptr->set_title_listener);
+     wlmtk_util_disconnect_listener(&xwl_surface_ptr->dissociate_listener);
+     wlmtk_util_disconnect_listener(&xwl_surface_ptr->associate_listener);
+@@ -483,6 +494,7 @@ void _xwl_surface_handle_associate(
+         wlmtk_window_set_client(xwl_surface_ptr->window_ptr, &client);
+         wlmtk_window_set_title(xwl_surface_ptr->window_ptr,
+                                 xwl_surface_ptr->title_ptr);
++        _xwl_surface_apply_identity(xwl_surface_ptr);
+ 
+         xwl_surface_ptr->tl_menu_ptr = wlmaker_tl_menu_create(
+             xwl_surface_ptr->window_ptr, xwl_surface_ptr->server_ptr);
+@@ -580,6 +592,35 @@ void _xwl_surface_handle_dissociate(
+     xwl_surface_ptr->surface_ptr = NULL;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Copies WM_CLASS and the dialog state of the X11 window to the window. */
++void _xwl_surface_apply_identity(wlmaker_xwl_surface_t *xs_ptr)
++{
++    if (NULL == xs_ptr->window_ptr) return;
++    struct wlr_xwayland_surface *s = xs_ptr->wlr_xwayland_surface_ptr;
++    wlmtk_window_set_app_id(xs_ptr->window_ptr, s->class, s->instance);
++    wlmtk_window_set_dialog(
++        xs_ptr->window_ptr,
++        s->modal || NULL != s->parent ||
++        wlr_xwayland_surface_has_window_type(
++            s, WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DIALOG) ||
++        wlr_xwayland_surface_has_window_type(
++            s, WLR_XWAYLAND_NET_WM_WINDOW_TYPE_SPLASH) ||
++        wlr_xwayland_surface_has_window_type(
++            s, WLR_XWAYLAND_NET_WM_WINDOW_TYPE_UTILITY));
++}
++
++/* ------------------------------------------------------------------------- */
++/** Handler for the `set_class` event of `struct wlr_xwayland_surface`. */
++void _xwl_surface_handle_set_class(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmaker_xwl_surface_t *xs_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_xwl_surface_t, set_class_listener);
++    _xwl_surface_apply_identity(xs_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Handler for the `set_title` event of `struct wlr_xwayland_surface`.
+@@ -1019,6 +1060,7 @@ void fake_init_wlr_xwayland_surface(
+     wl_signal_init(&wlr_xwayland_surface_ptr->events.associate);
+     wl_signal_init(&wlr_xwayland_surface_ptr->events.dissociate);
+     wl_signal_init(&wlr_xwayland_surface_ptr->events.set_title);
++    wl_signal_init(&wlr_xwayland_surface_ptr->events.set_class);
+     wl_signal_init(&wlr_xwayland_surface_ptr->events.set_parent);
+     wl_signal_init(&wlr_xwayland_surface_ptr->events.set_decorations);
+     wl_signal_init(&wlr_xwayland_surface_ptr->events.set_geometry);
+-- 
+2.56.0
+
