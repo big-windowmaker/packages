@@ -1,12 +1,13 @@
 pkgbase = wmake-zones
 	pkgdesc = Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look
-	pkgver = 0.2.0
-	pkgrel = 2
+	pkgver = 0.3.0
+	pkgrel = 1
 	url = https://github.com/big-windowmaker/wmake-zones
 	arch = x86_64
 	license = GPL-2.0-or-later
 	checkdepends = appstream
 	checkdepends = python
+	checkdepends = python-xlib
 	checkdepends = windowmaker
 	checkdepends = xdotool
 	checkdepends = xorg-server-xvfb
@@ -30,13 +31,11 @@ pkgbase = wmake-zones
 	depends = libxrender
 	depends = wayland
 	optdepends = windowmaker: zonas e mosaico na sessão X11
-	optdepends = wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patches 0104-0107)
+	optdepends = wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patches 0104-0118)
 	optdepends = picom: zonas translúcidas (sem compositor, contornos com o destino em listras)
 	options = staticlibs
 	options = !lto
-	source = wmake-zones::git+https://github.com/big-windowmaker/wmake-zones.git#tag=v0.2.0
-	source = 0001-tests-zombie-service-counts-as-exited.patch
+	source = wmake-zones::git+https://github.com/big-windowmaker/wmake-zones.git#tag=v0.3.0
 	sha256sums = SKIP
-	sha256sums = 38c1aa436af5973329c4421ee787b00cf4882e67c2c2e0d6ff551d2174e75a92
 
 pkgname = wmake-zones

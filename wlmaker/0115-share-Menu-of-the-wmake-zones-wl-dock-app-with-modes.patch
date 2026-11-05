@@ -1,0 +1,72 @@
+From 3371f01a948a6824aea9fdf4ab616f22c912daba Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Thu, 5 Nov 2026 09:07:57 -0300
+Subject: [PATCH 115/116] share: Menu of the wmake-zones-wl dock-app with
+ modes, undo and settings
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ share/wlmaker/Dockapps.plist | 19 ++++++++++++++++---
+ src/i18n.c                   | 12 ++++++++++++
+ 2 files changed, 28 insertions(+), 3 deletions(-)
+
+diff --git a/share/wlmaker/Dockapps.plist b/share/wlmaker/Dockapps.plist
+index 4744973..64b4526 100644
+--- a/share/wlmaker/Dockapps.plist
++++ b/share/wlmaker/Dockapps.plist
+@@ -150,13 +150,26 @@
+       );
+     };
+ 
++    // wmake-zones-wl: Left click switches Zones and Tiling, the middle one
++    // turns the organization off and on again, the wheel changes the
++    // layout; the menu has the rest.
+     "wmake-zones-wl" = {
+       Actions = (
+-        { Title = "Zones On / Off"; Command = "wmake-zones zones toggle"; },
+-        { Title = "Auto Tiling On / Off"; Command = "wmake-zones autotile toggle"; },
++        { Title = "Mode: Zones"; Command = "wmake-zones mode zones"; },
++        { Title = "Mode: Tiling"; Command = "wmake-zones mode tiling"; },
++        { Title = "Mode: Off"; Command = "wmake-zones mode off"; },
+         { Title = "Next Layout"; Command = "wmake-zones layout next"; },
++        { Title = "Previous Layout"; Command = "wmake-zones layout prev"; },
++        { Title = "Undo"; Command = "wmake-zones undo"; },
++        { Title = "Redo"; Command = "wmake-zones redo"; },
++        { Title = "Restore All Arranged Windows"; Command = "wmake-zones restore-all"; },
++        { Title = "Arrange the Desktop"; Command = "wmake-zones arrange"; },
+         { Title = "Edit Zones..."; Command = "wmake-zones-prefs --editor"; },
+-        { Title = "Window Organization Preferences..."; Command = "wmake-zones-prefs"; }
++        { Title = "Window Organization Preferences..."; Command = "wmake-zones-prefs"; },
++        { Title = "Shortcuts..."; Command = "wmake-zones-prefs --keys"; },
++        { Title = "Application Rules..."; Command = "wmake-zones-prefs --rules"; },
++        { Title = "Monitors..."; Command = "wmake-zones-prefs --monitors"; },
++        { Title = "About wmake-zones"; Command = "wmake-zones-prefs --about"; }
+       );
+     };
+ 
+diff --git a/src/i18n.c b/src/i18n.c
+index a62a18f..73944f3 100644
+--- a/src/i18n.c
++++ b/src/i18n.c
+@@ -101,6 +101,18 @@ static const wlmaker_i18n_entry_t _wlmaker_i18n_pt_br[] = {
+     { "Next Layout", "Próximo layout" },
+     { "Edit Zones...", "Editar zonas..." },
+     { "Window Organization Preferences...", "Preferências da organização de janelas..." },
++    { "Mode: Zones", "Modo: Zonas" },
++    { "Mode: Tiling", "Modo: Mosaico" },
++    { "Mode: Off", "Modo: Desligado" },
++    { "Previous Layout", "Layout anterior" },
++    { "Undo", "Desfazer" },
++    { "Redo", "Refazer" },
++    { "Restore All Arranged Windows", "Restaurar as janelas organizadas" },
++    { "Arrange the Desktop", "Organizar a área de trabalho" },
++    { "Shortcuts...", "Atalhos..." },
++    { "Application Rules...", "Regras por aplicativo..." },
++    { "Monitors...", "Monitores..." },
++    { "About wmake-zones", "Sobre o wmake-zones" },
+     { "Clock Style", "Estilo do relógio" },
+     { "Analog", "Analógico" },
+     { "12-Hour Clock (AM/PM)", "Relógio de 12 horas (AM/PM)" },
+-- 
+2.56.0
+

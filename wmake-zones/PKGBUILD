@@ -11,18 +11,19 @@
 #   wmake-zones-wl     dockapp nativo do wlmaker, sem XWayland
 #   libwmake-zones-engine.a
 #                      núcleo de geometria, mosaico e configuração; o
-#                      wlmaker liga nele (patches 0104-0107 do pacote
+#                      wlmaker liga nele (patches 0104-0118 do pacote
 #                      wlmaker) para ter as mesmas zonas no Wayland
 #
-# Desligado por padrão: o Window Maker continua flutuante e o autostart sai
-# na hora enquanto o usuário não ligar as zonas ou o mosaico. Em repouso o
-# serviço não acorda (nenhum timer) e ocupa menos de 3 MiB.
+# Zonas ligadas por padrão (desde a 0.3), mosaico desligado: as janelas
+# flutuam como no Window Maker e só mudam de lugar quando o usuário as
+# solta numa zona. Quem desligou continua desligado. Em repouso o serviço
+# não acorda (nenhum timer) e ocupa menos de 3 MiB.
 #
 # WMAKE_ZONES_SOURCE troca a fonte (ex.: git+file:///caminho/wmake-zones
 # para compilar um clone local antes do push).
 pkgname=wmake-zones
-pkgver=0.2.0
-pkgrel=2
+pkgver=0.3.0
+pkgrel=1
 pkgdesc='Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look'
 arch=(x86_64)
 url='https://github.com/big-windowmaker/wmake-zones'
@@ -51,6 +52,7 @@ makedepends=(
 checkdepends=(
   appstream          # valida os metadados (sem rede)
   python             # cliente "mudo" do teste do socket
+  python-xlib        # confere que o seletor e o menu do dockapp largam o teclado
   windowmaker        # o teste funcional roda o wmaker de verdade num Xvfb
   xdotool
   xorg-server-xvfb
@@ -59,23 +61,17 @@ checkdepends=(
 )
 optdepends=(
   'windowmaker: zonas e mosaico na sessão X11'
-  'wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patches 0104-0107)'
+  'wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patches 0104-0118)'
   'picom: zonas translúcidas (sem compositor, contornos com o destino em listras)'
 )
 # O núcleo estático (libwmake-zones-engine.a) é usado pelo wlmaker. Sem LTO:
 # com lto (padrão do makepkg.conf do Manjaro) os objetos são "slim", só
 # bytecode do GCC, e o strip os deixa vazios: o wlmaker não ligava no CI.
 options=(staticlibs !lto)
-source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}"
-        0001-tests-zombie-service-counts-as-exited.patch)
-sha256sums=('SKIP'
-            '38c1aa436af5973329c4421ee787b00cf4882e67c2c2e0d6ff551d2174e75a92')
+source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}")
+sha256sums=('SKIP')
 
 prepare() {
-  # 0001: correção só do teste (contêiner sem init que recolha órfãos), já
-  # no main do wmake-zones; sai na próxima versão.
-  git -C wmake-zones apply "$srcdir/0001-tests-zombie-service-counts-as-exited.patch"
-
   # A versão do PKGBUILD precisa ser a do projeto (meson.build).
   local v
   v=$(sed -n "s/^  version: '\(.*\)',$/\1/p" wmake-zones/meson.build)

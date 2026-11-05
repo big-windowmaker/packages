@@ -1,0 +1,27 @@
+--- a/wmsystemtray.c
++++ b/wmsystemtray.c
+@@ -493,6 +493,24 @@
+     XChangeProperty(display, selwindow, _NET_WM_PID, XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&pid, 1);
+     XShapeCombineRectangles(display, selwindow, ShapeBounding, 0, 0, NULL, 0, ShapeSet, YXBanded);
+ 
++    /* _NET_SYSTEM_TRAY_COLORS (System Tray Protocol 0.3): tray icons that
++     * use symbolic icons (GTK 3) paint them in the foreground color. Set
++     * from the text color (-c, black by default) before the selection is
++     * taken, so icons have it when they dock. */
++    {
++        XColor fc;
++        XWindowAttributes wa;
++        long colors[12] = { 0, 0, 0, 0xc0c0, 0x1c1c, 0x2828, 0x9c9c, 0x6e6e, 0x0303, 0x2626, 0xa2a2, 0x6969 };
++        XGetWindowAttributes(display, root, &wa);
++        if(fgcolor != NULL && XParseColor(display, wa.colormap, fgcolor, &fc)){
++            colors[0] = fc.red;
++            colors[1] = fc.green;
++            colors[2] = fc.blue;
++        }
++        XChangeProperty(display, selwindow, XInternAtom(display, "_NET_SYSTEM_TRAY_COLORS", False), XA_CARDINAL, 32,
++                        PropModeReplace, (unsigned char *)colors, 12);
++    }
++
+     warn(DEBUG_DEBUG, "Creating GCs");
+     gcm = GCForeground | GCBackground | GCGraphicsExposures | GCFont;
+     gcv.foreground = fgpix;

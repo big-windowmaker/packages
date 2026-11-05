@@ -197,9 +197,24 @@
 #   0108  ícones fora das pastas XDG não são procurados na árvore de build
 #         (com WLMAKER_INSTALLED_ONLY, definido em build())
 #   0109  áreas de trabalho contadas a partir de 1 nas zonas ([Workspace N])
+#   0110-0118: paridade das zonas com o X11 (branch big-wm/zones do fork)
+#   0110  a janela guarda o app_id (ou WM_CLASS no XWayland) e se é diálogo:
+#         regras por aplicativo e diálogos fora do mosaico
+#   0111  a área de trabalho segura o ponteiro durante mover/redimensionar
+#         (um movimento rápido não termina mais o arrasto) e avisa o fim
+#         de um redimensionamento (proporção do mosaico pelo mouse)
+#   0112  grab de teclado para partes modais do compositor (seletor)
+#   0113  seletor Super+Z, foco espacial, desfazer/refazer, regras, painel
+#         de layouts no arrasto, ativação por modificador, BSP persistente
+#   0114  nomes dos layouts e textos do overlay em pt_BR
+#   0115  menu do wmake-zones-wl com os modos, desfazer e as configurações
+#   0116  estilo dos ícones da bandeja (big-wm-tray) nas Configurações...
+#   0117  o seletor larga o teclado quando a sessão é bloqueada (a senha
+#         vai para a tela de bloqueio)
+#   0118  dica do seletor por extenso (as setas viravam caixas vazias)
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=16
+pkgrel=17
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -229,7 +244,7 @@ makedepends=(
   git
   librsvg  # exigido pelo CMake da 0.9; só os exemplos (não instalados) usam
   wayland-protocols
-  'wmake-zones>=0.2.0-2'  # núcleo das zonas (biblioteca estática sem LTO, 0104; zonas iguais com gap)
+  'wmake-zones>=0.3.0'  # núcleo das zonas (estático sem LTO, 0104): histórico, foco espacial, modos (0113)
 )
 checkdepends=(desktop-file-utils)
 optdepends=(
@@ -338,6 +353,15 @@ _patches=(
   0107-zones-Reads-the-control-socket-from-the-event-loop-n.patch
   0108-clip-dock-Skips-the-source-tree-s-icons-in-an-instal.patch
   0109-zones-Counts-workspaces-from-1-as-the-toolkit-does.patch
+  0110-toolkit-Windows-keep-the-application-s-identity-and-.patch
+  0111-workspace-Keeps-the-pointer-while-a-window-is-moved-.patch
+  0112-input-Keyboard-grab-for-modal-parts-of-the-composito.patch
+  0113-zones-Picker-spatial-focus-undo-redo-rules-and-the-l.patch
+  0114-i18n-Names-of-the-zone-layouts-and-texts-of-the-zone.patch
+  0115-share-Menu-of-the-wmake-zones-wl-dock-app-with-modes.patch
+  0116-share-Icon-style-of-the-big-wm-tray-dock-app-symboli.patch
+  0117-zones-Picker-yields-the-keyboard-to-the-lock-screen.patch
+  0118-zones-Picker-hint-in-words-without-arrow-glyphs.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -448,7 +472,16 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             '5d92ce21d763d8d1674a49ea34c8f87926f8fedc51295347bca153af2395ecb4'
             '45608674202fd585af09807ac75ed3e7b7a818fe080744c37e12bd156add6a85'
             'ac2b62644718aa9bda350062d7207aef8d8782f84f1cde9e251f2846316dba03'
-            'e18d158a120fd48596018eec43d7d13552ad061c8d263c6b0db0167a894a8e98')
+            'e18d158a120fd48596018eec43d7d13552ad061c8d263c6b0db0167a894a8e98'
+            'ad3b59a8a5645c51f686c7299bd4d77b2588df3d410b7286335ecfd7b8afac65'
+            '61a049e5b497f6a8f98e94d5fe57c72ffc89599206f7ddf205ca15bc4a1a0725'
+            '5abf7c928ddef37a0af264b530da7d9a48bf95b546ab934ba6d4d001f1e6736c'
+            '2134e9acbe0a3df96d57cafa59df756ee5e7b427a78e248df9f93d12386ae953'
+            'b2fd29fd858aedf5b79705858804fd932d2701f8a6283430e8b5cce26d91347b'
+            '5a4515d0ef36954c2129085c6d9105db922118e7602b37581f0ccafa9cc49faf'
+            'b464d15663fb52d203d31ad22f6337f3da46f23cf178e95ca9c99fcbfa863048'
+            'ba075fbb1f7314b0e5aa3f85b0f6d21c9abc20f62ce96fc97f3127a19d57b0e4'
+            'b4b56fd1f15cd3868941a1e7d48bf9ca1a5c14dd299fff1b990b7ba111898be3')
 
 prepare() {
   cd wlmaker

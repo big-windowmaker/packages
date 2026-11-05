@@ -1,14 +1,14 @@
 # Maintainer: Bruno Goncalves <bigbruno@gmail.com>
 #
 # TEMPORÁRIO (Big WindowMaker): biglinux-livecd com o suporte à sessão live
-# do Window Maker (branch window-maker de big-windowmaker/biglinux-livecd),
+# do Window Maker (branch main de big-windowmaker/biglinux-livecd),
 # usado só nas ISOs de teste até a mudança entrar no upstream. Remover este
 # diretório quando o pacote do biglinux-stable tiver o suporte.
 # shellcheck shell=bash disable=SC2034,SC2154
 
 pkgname=biglinux-livecd
 pkgver=26.10.26
-pkgrel=6
+pkgrel=7
 pkgdesc="BigLinux live-session setup and Calamares installer integration"
 arch=('any')
 url="https://github.com/biglinux/biglinux-livecd"
@@ -43,9 +43,9 @@ optdepends=(
     'shadow: set the temporary password the sshenable boot argument uses'
 )
 makedepends=('git')
-_commit=a5475b72f872c48f5a4e4685b9e5ea88d7eca9d8
+_commit=d5bc88701c7de5cb30833e9eb00f090bd929644a
 source=("biglinux-livecd::git+https://github.com/big-windowmaker/biglinux-livecd.git#commit=${_commit}")
-sha256sums=('8eaab4d140f40c69c6480f6f833e766fb0c00e1c2ff2c41b4654b9d0b682d412')
+sha256sums=('70a0b62b71993d8aa6102b20c77bccd04edeb3ce4fb1e5039f029a8dbb7eaa13')
 install="${pkgname}.install"
 
 package() {
