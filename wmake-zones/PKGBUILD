@@ -1,39 +1,65 @@
 # Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
 #
-# wmake-zones: zonas de encaixe e mosaico de janelas para o Window Maker
-# (serviço X11 + dockapp) e o wlmaker (o compositor usa o núcleo estático
-# instalado aqui; ver o patch 0104 do pacote wlmaker). Desligado por
-# padrão: o autostart sai na hora enquanto o usuário não ligar as zonas ou
-# o mosaico.
+# wmake-zones: zonas de encaixe e mosaico automático de janelas para o
+# Big WindowMaker, com o visual NeXTSTEP do tema do Window Maker.
+#
+#   wmake-zones        serviço da sessão X11 (Window Maker) e dockapp do
+#                      Dock/Clip; também é o cliente dos comandos nas duas
+#                      sessões (status, zones, layout, snap, windows -l...)
+#   wmake-zones-prefs  preferências e editor visual de zonas (GTK 3), só
+#                      enquanto abertos
+#   wmake-zones-wl     dockapp nativo do wlmaker, sem XWayland
+#   libwmake-zones-engine.a
+#                      núcleo de geometria, mosaico e configuração; o
+#                      wlmaker liga nele (patches 0104-0107 do pacote
+#                      wlmaker) para ter as mesmas zonas no Wayland
+#
+# Desligado por padrão: o Window Maker continua flutuante e o autostart sai
+# na hora enquanto o usuário não ligar as zonas ou o mosaico. Em repouso o
+# serviço não acorda (nenhum timer) e ocupa menos de 3 MiB.
 #
 # WMAKE_ZONES_SOURCE troca a fonte (ex.: git+file:///caminho/wmake-zones
 # para compilar um clone local antes do push).
 pkgname=wmake-zones
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
-pkgdesc='Window zones and tiling for Window Maker and wlmaker, with the OpenStep look'
+pkgdesc='Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look'
 arch=(x86_64)
 url='https://github.com/big-windowmaker/wmake-zones'
 license=('GPL-2.0-or-later')
 depends=(
   cairo
+  fontconfig  # nomes de fonte do tema (FcFini na saída)
+  glib2       # preferências (GTK 3)
   glibc
-  gtk3       # preferências e editor de zonas (só quando abertos)
+  gtk3        # preferências e editor de zonas (só quando abertos)
   hicolor-icon-theme
   libx11
-  libxext    # XShape: overlay que não pega o ponteiro
-  fontconfig
-  libxft
-  libxi      # XInput 2.1: eventos brutos do botão durante o arrasto
-  libxrandr  # monitores
-  libxrender
-  wayland    # dockapp nativo do wlmaker
+  libxext     # XShape: overlay que não pega o ponteiro
+  libxft      # textos do overlay e do dockapp com as fontes do tema
+  libxi       # XInput 2.1: eventos brutos do botão durante o arrasto
+  libxrandr   # monitores (XRandR 1.5)
+  libxrender  # overlay translúcido com um compositor
+  wayland     # dockapp nativo do wlmaker
 )
-makedepends=(git librsvg meson wayland-protocols)
-checkdepends=(xorg-server-xvfb xdotool xorg-xprop xterm windowmaker)
+makedepends=(
+  git
+  librsvg           # ícones PNG para o Dock do Window Maker
+  meson
+  wayland-protocols
+)
+checkdepends=(
+  appstream          # valida os metadados (sem rede)
+  python             # cliente "mudo" do teste do socket
+  windowmaker        # o teste funcional roda o wmaker de verdade num Xvfb
+  xdotool
+  xorg-server-xvfb
+  xorg-xprop
+  xterm
+)
 optdepends=(
   'windowmaker: zonas e mosaico na sessão X11'
-  'wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patch 0104)'
+  'wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patches 0104-0107)'
   'picom: zonas translúcidas (sem compositor, contornos com o destino em listras)'
 )
 # O núcleo estático (libwmake-zones-engine.a) é usado pelo wlmaker.
@@ -41,18 +67,31 @@ options=(staticlibs)
 source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}")
 sha256sums=('SKIP')
 
+prepare() {
+  # A versão do PKGBUILD precisa ser a do projeto (meson.build).
+  local v
+  v=$(sed -n "s/^  version: '\(.*\)',$/\1/p" wmake-zones/meson.build)
+  if [[ ${v} != "${pkgver}" ]]; then
+    echo "meson.build diz ${v}, mas pkgver=${pkgver}" >&2
+    return 1
+  fi
+}
+
 build() {
   arch-meson wmake-zones build
   meson compile -C build
 }
 
 check() {
-  # O teste funcional do X11 roda num Xvfb próprio com o wmaker; sem as
-  # ferramentas ele sai como "skip".
+  # Núcleo (925 mil verificações), metadados e o teste funcional do X11,
+  # que roda num Xvfb próprio com o wmaker; sem as ferramentas ele sai
+  # como "skip".
   meson test -C build --print-errorlogs
 }
 
 package() {
   meson install -C build --destdir "$pkgdir"
   install -Dm644 wmake-zones/README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  cp -r wmake-zones/docs "$pkgdir/usr/share/doc/$pkgname/"
+  rm -rf "$pkgdir/usr/share/doc/$pkgname/docs/screenshots"
 }

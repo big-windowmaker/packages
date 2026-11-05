@@ -1,0 +1,52 @@
+From f2778336e4f85c21e2b50ed35448b5c3e9e3cfbb Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Thu, 5 Nov 2026 04:27:18 -0300
+Subject: [PATCH] clip, dock: Skips the source tree's icons in an installed
+ build
+
+A Clip or launcher icon not found in the XDG data directories was looked
+up in WLMAKER_SOURCE_DIR, the builder's checkout, which for a package is
+a path such as /tmp/build.XXXXXX that any local user could create. With
+WLMAKER_INSTALLED_ONLY defined, only the installed icons are used.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/clip.c           | 5 ++++-
+ src/dock_launchers.c | 5 ++++-
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/clip.c b/src/clip.c
+index da87254..d3e5f61 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -1546,7 +1546,10 @@ char *_wlmaker_clip_resolve_image(
+                 path_ptr = wlm_util_files_xdg_data_find(files_ptr, p, S_IFREG);
+             }
+             free(p);
+-#ifdef WLMAKER_SOURCE_DIR
++// The source tree is a last resort for running from the build directory;
++// an installed package (WLMAKER_INSTALLED_ONLY) must not look there: the
++// path is the builder's, e.g. a /tmp directory anyone could create.
++#if defined(WLMAKER_SOURCE_DIR) && !defined(WLMAKER_INSTALLED_ONLY)
+             if (NULL == path_ptr) {
+                 path_ptr = bs_strdupf(
+                     WLMAKER_SOURCE_DIR "/share/wlmaker/icons/%s", c);
+diff --git a/src/dock_launchers.c b/src/dock_launchers.c
+index 7c1751e..d6c2e46 100644
+--- a/src/dock_launchers.c
++++ b/src/dock_launchers.c
+@@ -721,7 +721,10 @@ char *wlmaker_dock_launcher_icon_path(
+             path_ptr = wlm_util_files_xdg_data_find(files_ptr, p, S_IFREG);
+         }
+         if (NULL != p) free(p);
+-#ifdef WLMAKER_SOURCE_DIR
++// The source tree is a last resort for running from the build directory;
++// an installed package (WLMAKER_INSTALLED_ONLY) must not look there: the
++// path is the builder's, e.g. a /tmp directory anyone could create.
++#if defined(WLMAKER_SOURCE_DIR) && !defined(WLMAKER_INSTALLED_ONLY)
+         if (NULL == path_ptr) {
+             path_ptr = bs_strdupf(
+                 WLMAKER_SOURCE_DIR "/share/wlmaker/icons/%s", icon_ptr);
+-- 
+2.56.0
+

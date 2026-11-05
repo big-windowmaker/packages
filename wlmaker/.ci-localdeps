@@ -1,0 +1,3 @@
+# O núcleo das zonas (libwmake-zones-engine.a) não está nos repositórios
+# do Manjaro: o CI compila e instala o pacote deste repositório antes.
+wmake-zones

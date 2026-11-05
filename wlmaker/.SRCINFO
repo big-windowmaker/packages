@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r80.g7481afe
-	pkgrel = 15
+	pkgrel = 16
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -11,7 +11,7 @@ pkgbase = wlmaker
 	makedepends = git
 	makedepends = librsvg
 	makedepends = wayland-protocols
-	makedepends = wmake-zones>=0.1.0
+	makedepends = wmake-zones>=0.2.0
 	depends = cairo
 	depends = glibc
 	depends = hicolor-icon-theme
@@ -21,6 +21,7 @@ pkgbase = wlmaker
 	depends = libxcb
 	depends = libxdg-basedir
 	depends = libxkbcommon
+	depends = ncurses
 	depends = pixman
 	depends = wayland
 	depends = wlroots0.20
@@ -128,6 +129,9 @@ pkgbase = wlmaker
 	source = 0104-zones-Window-zones-and-tiling-wmake-zones-in-the-com.patch
 	source = 0105-share-Right-click-actions-of-the-wmake-zones-wl-dock.patch
 	source = 0106-zones-Forgets-the-zone-of-a-window-restored-from-the.patch
+	source = 0107-zones-Reads-the-control-socket-from-the-event-loop-n.patch
+	source = 0108-clip-dock-Skips-the-source-tree-s-icons-in-an-instal.patch
+	source = 0109-zones-Counts-workspaces-from-1-as-the-toolkit-does.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
 	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
@@ -229,5 +233,8 @@ pkgbase = wlmaker
 	sha256sums = f2acbc17d70debe53003d7e2c55d20196267cad834d07a9f45f8dc3944f91870
 	sha256sums = 6a5d0f2677d2ad065c84ae16df9054fdfbdc79aeea97b4de4554bec978a8c06b
 	sha256sums = 5d92ce21d763d8d1674a49ea34c8f87926f8fedc51295347bca153af2395ecb4
+	sha256sums = 45608674202fd585af09807ac75ed3e7b7a818fe080744c37e12bd156add6a85
+	sha256sums = ac2b62644718aa9bda350062d7207aef8d8782f84f1cde9e251f2846316dba03
+	sha256sums = e18d158a120fd48596018eec43d7d13552ad061c8d263c6b0db0167a894a8e98
 
 pkgname = wlmaker

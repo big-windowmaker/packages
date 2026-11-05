@@ -1,0 +1,44 @@
+From f26db213a9fc40f2ac8c124ca2439686cad5f3f8 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Thu, 5 Nov 2026 04:43:24 -0300
+Subject: [PATCH] zones: Counts workspaces from 1, as the toolkit does
+
+wlmtk_workspace_get_details() already returns a 1-based index (the list
+size once the workspace is added); adding one more made [Workspace 2]
+apply to the first workspace and status report desktop=2 there.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/zones.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/src/zones.c b/src/zones.c
+index 8b92b09..5a5303f 100644
+--- a/src/zones.c
++++ b/src/zones.c
+@@ -230,15 +230,19 @@ static struct wlr_output *_output_at(wlmaker_zones_t *zones_ptr,
+         zones_ptr->server_ptr);
+ }
+ 
+-/** @return 1-based index of the current workspace. */
++/**
++ * @return 1-based index of the current workspace, as in the configuration's
++ * [Workspace N]. The toolkit already numbers workspaces from 1 (the index is
++ * the list size once the workspace is added).
++ */
+ static int _workspace_number(wlmaker_zones_t *zones_ptr)
+ {
+     const char *name_ptr;
+-    int index = 0;
++    int index = 1;
+     wlmtk_workspace_get_details(
+         wlmtk_desktop_get_current_workspace(zones_ptr->server_ptr->desktop_ptr),
+         &name_ptr, &index);
+-    return index + 1;
++    return index < 1 ? 1 : index;
+ }
+ 
+ /** Computes the zones of the layout effective on `output_ptr`. */
+-- 
+2.56.0
+
