@@ -197,7 +197,7 @@
 #   0108  ícones fora das pastas XDG não são procurados na árvore de build
 #         (com WLMAKER_INSTALLED_ONLY, definido em build())
 #   0109  áreas de trabalho contadas a partir de 1 nas zonas ([Workspace N])
-#   0110-0117: paridade das zonas com o X11 (branch big-wm/zones do fork)
+#   0110-0118: paridade das zonas com o X11 (branch big-wm/zones do fork)
 #   0110  a janela guarda o app_id (ou WM_CLASS no XWayland) e se é diálogo:
 #         regras por aplicativo e diálogos fora do mosaico
 #   0111  a área de trabalho segura o ponteiro durante mover/redimensionar
@@ -211,6 +211,7 @@
 #   0116  estilo dos ícones da bandeja (big-wm-tray) nas Configurações...
 #   0117  o seletor larga o teclado quando a sessão é bloqueada (a senha
 #         vai para a tela de bloqueio)
+#   0118  dica do seletor por extenso (as setas viravam caixas vazias)
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
 pkgrel=17
@@ -360,6 +361,7 @@ _patches=(
   0115-share-Menu-of-the-wmake-zones-wl-dock-app-with-modes.patch
   0116-share-Icon-style-of-the-big-wm-tray-dock-app-symboli.patch
   0117-zones-Picker-yields-the-keyboard-to-the-lock-screen.patch
+  0118-zones-Picker-hint-in-words-without-arrow-glyphs.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -478,7 +480,8 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'b2fd29fd858aedf5b79705858804fd932d2701f8a6283430e8b5cce26d91347b'
             '5a4515d0ef36954c2129085c6d9105db922118e7602b37581f0ccafa9cc49faf'
             'b464d15663fb52d203d31ad22f6337f3da46f23cf178e95ca9c99fcbfa863048'
-            'ba075fbb1f7314b0e5aa3f85b0f6d21c9abc20f62ce96fc97f3127a19d57b0e4')
+            'ba075fbb1f7314b0e5aa3f85b0f6d21c9abc20f62ce96fc97f3127a19d57b0e4'
+            'b4b56fd1f15cd3868941a1e7d48bf9ca1a5c14dd299fff1b990b7ba111898be3')
 
 prepare() {
   cd wlmaker
