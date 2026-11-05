@@ -77,7 +77,10 @@ if [[ -f .ci-localdeps ]]; then
     echo "::group::dependência local ${dep}"
     cp -r "${repo_root}/${dep}" "${work}/"
     chown -R builder: "${work}/${dep}"
-    (cd "${work}/${dep}" && as_builder makepkg --syncdeps --noconfirm --cleanbuild)
+    # --nocheck: os testes da dependência rodam no job dela; aqui ela só
+    # serve para compilar este pacote (e uma falha de teste dela não deve
+    # aparecer como falha deste).
+    (cd "${work}/${dep}" && as_builder makepkg --syncdeps --noconfirm --cleanbuild --nocheck)
     pacman -U --noconfirm "${work}/${dep}"/*.pkg.tar.zst
     echo "::endgroup::"
   done < .ci-localdeps
