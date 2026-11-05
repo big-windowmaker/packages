@@ -1,7 +1,7 @@
 pkgbase = wmake-zones
 	pkgdesc = Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look
 	pkgver = 0.2.0
-	pkgrel = 1
+	pkgrel = 2
 	url = https://github.com/big-windowmaker/wmake-zones
 	arch = x86_64
 	license = GPL-2.0-or-later
@@ -33,6 +33,7 @@ pkgbase = wmake-zones
 	optdepends = wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patches 0104-0107)
 	optdepends = picom: zonas translúcidas (sem compositor, contornos com o destino em listras)
 	options = staticlibs
+	options = !lto
 	source = wmake-zones::git+https://github.com/big-windowmaker/wmake-zones.git#tag=v0.2.0
 	source = 0001-tests-zombie-service-counts-as-exited.patch
 	sha256sums = SKIP

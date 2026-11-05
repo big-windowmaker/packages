@@ -22,7 +22,7 @@
 # para compilar um clone local antes do push).
 pkgname=wmake-zones
 pkgver=0.2.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look'
 arch=(x86_64)
 url='https://github.com/big-windowmaker/wmake-zones'
@@ -62,8 +62,10 @@ optdepends=(
   'wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patches 0104-0107)'
   'picom: zonas translúcidas (sem compositor, contornos com o destino em listras)'
 )
-# O núcleo estático (libwmake-zones-engine.a) é usado pelo wlmaker.
-options=(staticlibs)
+# O núcleo estático (libwmake-zones-engine.a) é usado pelo wlmaker. Sem LTO:
+# com lto (padrão do makepkg.conf do Manjaro) os objetos são "slim", só
+# bytecode do GCC, e o strip os deixa vazios: o wlmaker não ligava no CI.
+options=(staticlibs !lto)
 source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}"
         0001-tests-zombie-service-counts-as-exited.patch)
 sha256sums=('SKIP'
