@@ -1,0 +1,282 @@
+wmcliphist: history in the database of big-wm-clipboard
+
+Big WindowMaker keeps one clipboard history for both sessions, with a
+Super+V window (search, favorites, retention) and a SQLite database that
+survives reboots. wmcliphist, the X11 dockapp, records each new copy there
+(through `big-wm-clipboard --store`, content on a pipe, never on a command
+line), starts with the saved history, keeps the lock of an item as a
+favorite and reloads its menu on SIGUSR2 (sent when the window deletes or
+clears items). Ignore actions of ~/.wmcliphistrc are respected. Without
+big-wm-clipboard installed nothing changes.
+
+diff --git a/wmcliphist/Makefile b/wmcliphist/Makefile
+index 7b3ac71..f7466f0 100644
+--- a/wmcliphist/Makefile
++++ b/wmcliphist/Makefile
+@@ -19,7 +19,7 @@ DEBUG =
+ 
+ LIBS = `$(PKG_CONFIG) --libs gtk+-3.0 x11`
+ 
+-OBJECTS = wmcliphist.o clipboard.o gui.o rcconfig.o history.o hotkeys.o utils.o $(DEBUG)
++OBJECTS = wmcliphist.o clipboard.o gui.o rcconfig.o history.o hotkeys.o utils.o bigwm.o $(DEBUG)
+ TARGET = wmcliphist
+ ICONS = icon/ico_16x16.png icon/ico_30x30_black.png icon/ico_30x30_gray.png \
+ 	icon/ico_30x30_white.png icon/ico_40x40_black.png \
+diff --git a/wmcliphist/bigwm.c b/wmcliphist/bigwm.c
+new file mode 100644
+index 0000000..2836137
+--- /dev/null
++++ b/wmcliphist/bigwm.c
+@@ -0,0 +1,161 @@
++/*
++ * Big WindowMaker: the history lives in the database of big-wm-clipboard,
++ * shared with the Wayland session and with the Super+V window (search,
++ * favorites, retention). wmcliphist records what is copied there, starts with
++ * the saved history, keeps the lock of an item as a favorite and reloads its
++ * menu when the window deletes or clears items (SIGUSR2). Without
++ * big-wm-clipboard, nothing changes.
++ *
++ * The content goes to the helper through a pipe: never on a command line,
++ * never in a log.
++ */
++#include "wmcliphist.h"
++#include <glib-unix.h>
++
++#define BIGWM_MAX_ITEM_BYTES	(256 * 1024)
++
++static gchar *
++helper(void)
++{
++	static gchar	*path = NULL;
++	static gboolean	looked = FALSE;
++
++	if (!looked) {
++		path = g_find_program_in_path("big-wm-clipboard");
++		looked = TRUE;
++	}
++	return path;
++}
++
++static void
++run_with_input(const gchar *arg1, const gchar *arg2, const gchar *content)
++{
++	gchar	*argv[4];
++	gint	in = -1;
++	gsize	left;
++	const gchar *p;
++	GError	*error = NULL;
++
++	if (helper() == NULL || content == NULL)
++		return;
++	argv[0] = helper();
++	argv[1] = (gchar *) arg1;
++	argv[2] = (gchar *) arg2;
++	argv[3] = NULL;
++	if (!g_spawn_async_with_pipes(NULL, argv, NULL,
++			G_SPAWN_STDOUT_TO_DEV_NULL, NULL, NULL, NULL,
++			&in, NULL, NULL, &error)) {
++		g_clear_error(&error);
++		return;
++	}
++	p = content;
++	left = strlen(content);
++	while (left > 0) {
++		ssize_t n = write(in, p, left);
++		if (n < 0) {
++			if (errno == EINTR)
++				continue;
++			break;	/* the helper did not want it (recording off) */
++		}
++		p += n;
++		left -= (gsize) n;
++	}
++	close(in);
++}
++
++void
++bigwm_store(const gchar *content)
++{
++	run_with_input("--store", NULL, content);
++}
++
++void
++bigwm_favorite(const gchar *content, gint locked)
++{
++	run_with_input("--favorite", locked ? "on" : "off", content);
++}
++
++/*
++ * The saved history, oldest first so that the newest ends on top. Returns 0
++ * when the database answered (even empty), -1 without big-wm-clipboard.
++ */
++int
++bigwm_load(void)
++{
++	gchar	*argv[4];
++	gchar	count[16];
++	gchar	buf[4096];
++	gint	out = -1;
++	GError	*error = NULL;
++	GByteArray *data;
++	GPtrArray *records;
++	gsize	i, start;
++	gint	favorites = 0;
++
++	if (helper() == NULL)
++		return -1;
++	g_snprintf(count, sizeof(count), "%d", num_items_to_keep);
++	argv[0] = helper();
++	argv[1] = "--dump";
++	argv[2] = count;
++	argv[3] = NULL;
++	if (!g_spawn_async_with_pipes(NULL, argv, NULL, G_SPAWN_STDERR_TO_DEV_NULL,
++			NULL, NULL, NULL, NULL, &out, NULL, &error)) {
++		g_clear_error(&error);
++		return -1;
++	}
++	data = g_byte_array_new();
++	for (;;) {
++		ssize_t n = read(out, buf, sizeof(buf));
++		if (n < 0 && errno == EINTR)
++			continue;
++		if (n <= 0)
++			break;
++		g_byte_array_append(data, (guint8 *) buf, (guint) n);
++	}
++	close(out);
++
++	/* records: "F" or "H", the text, NUL; newest first */
++	records = g_ptr_array_new();
++	for (i = start = 0; i < data->len; i++) {
++		if (data->data[i] != '\0')
++			continue;
++		if (i - start >= 2)
++			g_ptr_array_add(records, data->data + start);
++		start = i + 1;
++	}
++	for (i = records->len; i > 0; i--) {
++		gchar *rec = g_ptr_array_index(records, i - 1);
++		gint locked = rec[0] == 'F';
++
++		/* the menu needs one unlocked item when it is full */
++		if (locked && ++favorites >= num_items_to_keep)
++			locked = 0;
++		if (strlen(rec + 1) <= BIGWM_MAX_ITEM_BYTES)
++			process_item(rec + 1, locked, FALSE);
++	}
++	g_ptr_array_free(records, TRUE);
++	g_byte_array_free(data, TRUE);
++	return 0;
++}
++
++static gboolean
++on_sigusr2(gpointer data)
++{
++	(void) data;
++	history_free();
++	history_items = NULL;
++	num_items = 0;
++	locked_count = 0;
++	selected = NULL;
++	bigwm_load();
++	return G_SOURCE_CONTINUE;
++}
++
++void
++bigwm_init(void)
++{
++	/* the helper may close its input early (recording off) */
++	signal(SIGPIPE, SIG_IGN);
++	g_unix_signal_add(SIGUSR2, on_sigusr2, NULL);
++}
+diff --git a/wmcliphist/gui.c b/wmcliphist/gui.c
+index 3f3681e..0e4ee5b 100644
+--- a/wmcliphist/gui.c
++++ b/wmcliphist/gui.c
+@@ -80,6 +80,7 @@ menu_item_button_released(GtkWidget *widget,
+ 				GTK_STATE_FLAG_NORMAL, &locked_color);
+ 			data->locked = 1;
+ 			locked_count++;
++			bigwm_favorite(data->content, 1);
+ 
+ 		} else {
+ 			gtk_widget_override_color(
+@@ -87,6 +88,7 @@ menu_item_button_released(GtkWidget *widget,
+ 				GTK_STATE_FLAG_NORMAL, NULL);
+ 			data->locked = 0;
+ 			locked_count--;
++			bigwm_favorite(data->content, 0);
+ 		}
+ 	} else {
+ 		return_val(FALSE);
+diff --git a/wmcliphist/history.c b/wmcliphist/history.c
+index 0af33e1..d8ef55f 100644
+--- a/wmcliphist/history.c
++++ b/wmcliphist/history.c
+@@ -14,6 +14,7 @@ process_item(char *content, gint locked, gboolean exec)
+ 	GList		*list_node;
+ 	ACTION		*action;
+ 	gboolean	processed = FALSE;
++	gboolean	ignored = FALSE;
+ 	HISTORY_ITEM	*hist_item;
+ 
+ 	begin_func("process_item");
+@@ -33,6 +34,7 @@ process_item(char *content, gint locked, gboolean exec)
+ 
+ 		if (action->action == ACT_IGNORE) {
+ 			processed = TRUE;
++			ignored = TRUE;
+ 			break;
+ 		}
+ 		if (action->action == ACT_EXEC && exec_immediately == TRUE
+@@ -59,6 +61,10 @@ process_item(char *content, gint locked, gboolean exec)
+ 		list_node = g_list_next(list_node);
+ 	}
+ 
++	/* a new copy (not the saved history being loaded) */
++	if (exec == TRUE && ignored == FALSE)
++		bigwm_store(content);
++
+ 	if (processed == FALSE) {
+ 		hist_item = menu_item_add(content, locked, menu_hist);
+ 
+diff --git a/wmcliphist/wmcliphist.c b/wmcliphist/wmcliphist.c
+index b33795c..e4f90b1 100644
+--- a/wmcliphist/wmcliphist.c
++++ b/wmcliphist/wmcliphist.c
+@@ -153,6 +153,7 @@ main(int argc, char **argv)
+ 
+ 	/* initialize Gtk */
+ 	gtk_init(&argc, &argv);
++	bigwm_init();
+ 
+ 	/* create main window */
+ 	main_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+@@ -348,8 +349,9 @@ main(int argc, char **argv)
+ 		clipboard = DEF_CLIPBOARD;
+ 	}
+ 
+-	/* load previously saved history */
+-	if (history_load(dump_only) != 0) {
++	/* load previously saved history: the database of big-wm-clipboard,
++	 * else the history file of wmcliphist */
++	if ((dump_only || bigwm_load() != 0) && history_load(dump_only) != 0) {
+ 		if (errno == E_TOO_MUCH) {
+ 			if (show_message("Number of items to keep (-n switch or "
+ 					"keep directive in ~/.wmcliphistrc)\n"
+diff --git a/wmcliphist/wmcliphist.h b/wmcliphist/wmcliphist.h
+index 82ca885..f33920f 100644
+--- a/wmcliphist/wmcliphist.h
++++ b/wmcliphist/wmcliphist.h
+@@ -337,4 +337,11 @@ show_message(gchar *message, char *title,
+ gchar *
+ from_utf8(gchar *string);
+ 
++
++/* Big WindowMaker: history in the database of big-wm-clipboard (bigwm.c) */
++void bigwm_init(void);
++int bigwm_load(void);
++void bigwm_store(const gchar *content);
++void bigwm_favorite(const gchar *content, gint locked);
++
+ #endif
