@@ -20,11 +20,11 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
 
 | Diretório | Pacotes gerados | Versão | Origem |
 |---|---|---|---|
-| [`windowmaker/`](windowmaker/PKGBUILD) | `windowmaker` | `0.96.0.r130.g558e67f` | `master` do [window-maker/wmaker](https://github.com/window-maker/wmaker) fixado no commit `558e67f`. Substitui o `extra/windowmaker 0.96.0`. |
-| [`wlmaker/`](wlmaker/PKGBUILD) | `wlmaker` | `1:0.8.r80.g7481afe` | `main` (desenvolvimento da 0.9) do [phkaeser/wlmaker](https://github.com/phkaeser/wlmaker) fixado no commit `7481afe`, com os patches da branch `big-wm/protocols` do [fork](https://github.com/big-windowmaker/wlmaker), XWayland, contra `wlroots0.20`. |
-| [`big-dockapps/`](big-dockapps/PKGBUILD) | `libdockapp`, `wmcpuload`, `wmbattery`, `wmusic`, `wmshutdown`, `wmmoonclock`, `wmcube`, `wmudmount`, `wmnet`, `wmclock`, `wmmemload`, `wmsystemtray`, `pclock`, `wmwifi`, `minidock`, `minicontrol`, `wmapmload`, `mountapp`, `wmcalclock`, `wmtime`, `wmclockmon`, `wmtz`, `wmtop`, `wmfsm`, `wmmon`, `wmcliphist`, `wmgtemp`, `wmsun`, `wmcalc`, `wmpager`, `wmcpufreq`, `wmglobe`, `wmweather` | `20260412` | [window-maker/dockapps](https://github.com/window-maker/dockapps) fixado no commit `251e851`; `wmudmount` (3.0), `wmsystemtray` (1.4) e `mountapp` (3.0) vêm dos tarballs do SourceForge; `minidock` (1.9) e `minicontrol` (0.2) da Zenwalk; `wmapmload` (0.3.4) do site do autor; `wmweather` (2.4.8) do tarball da Debian. |
-| [`biglinux-livecd/`](biglinux-livecd/PKGBUILD) | `biglinux-livecd` | `26.10.26` | **Temporário**, só para as ISOs de teste: branch `window-maker` de [big-windowmaker/biglinux-livecd](https://github.com/big-windowmaker/biglinux-livecd), com o suporte à sessão live do Window Maker proposto ao upstream. Sai daqui quando a mudança estiver no `biglinux-stable`. |
-| [`wmake-zones/`](wmake-zones/PKGBUILD) | `wmake-zones` | `0.2.0` | [big-windowmaker/wmake-zones](https://github.com/big-windowmaker/wmake-zones), tag `v0.2.0`. Zonas de encaixe e mosaico de janelas: serviço X11 e dockapp do Window Maker, dockapp nativo do wlmaker, preferências e editor (GTK 3), página de manual e o núcleo estático usado pelo `wlmaker` (patches 0104-0109; o CI compila o `wmake-zones` antes, por `.ci-localdeps`). Desligado até o usuário ligar. |
+| [`windowmaker/`](windowmaker/PKGBUILD) | `windowmaker` | `0.96.0.r130.g558e67f-12` | `master` do [window-maker/wmaker](https://github.com/window-maker/wmaker) fixado no commit `558e67f`, com 17 patches da branch `big-wm/refino-2026-11` do [fork](https://github.com/big-windowmaker/wmaker) (0016: dockapp acoplado inicia com a sessão; 0017: dicas do Motif mudadas com a janela aberta). Substitui o `extra/windowmaker 0.96.0`. |
+| [`wlmaker/`](wlmaker/PKGBUILD) | `wlmaker` | `1:0.8.r80.g7481afe-18` | `main` (desenvolvimento da 0.9) do [phkaeser/wlmaker](https://github.com/phkaeser/wlmaker) fixado no commit `7481afe`, com os patches da branch `big-wm/protocols` do [fork](https://github.com/big-windowmaker/wlmaker), XWayland, contra `wlroots0.20`. |
+| [`big-dockapps/`](big-dockapps/PKGBUILD) | `libdockapp`, `wmcpuload`, `wmbattery`, `wmusic`, `wmshutdown`, `wmmoonclock`, `wmcube`, `wmudmount`, `wmnet`, `wmclock`, `wmmemload`, `wmsystemtray`, `pclock`, `wmwifi`, `minidock`, `minicontrol`, `wmapmload`, `mountapp`, `wmcalclock`, `wmtime`, `wmclockmon`, `wmtz`, `wmtop`, `wmfsm`, `wmmon`, `wmcliphist`, `wmgtemp`, `wmsun`, `wmcalc`, `wmpager`, `wmcpufreq`, `wmglobe`, `wmweather` | `20260412-9` | [window-maker/dockapps](https://github.com/window-maker/dockapps) fixado no commit `251e851`; `wmudmount` (3.0), `wmsystemtray` (1.4) e `mountapp` (3.0) vêm dos tarballs do SourceForge; `minidock` (1.9) e `minicontrol` (0.2) da Zenwalk; `wmapmload` (0.3.4) do site do autor; `wmweather` (2.4.8) do tarball da Debian; `wmeyes` (1.2) do cache de distfiles do FreeBSD. O `wmcliphist` grava no histórico do `big-wm-clipboard` (Super+V). |
+| [`biglinux-livecd/`](biglinux-livecd/PKGBUILD) | `biglinux-livecd` | `26.10.26-7` | **Temporário**, só para as ISOs de teste: `main` de [big-windowmaker/biglinux-livecd](https://github.com/big-windowmaker/biglinux-livecd), com o suporte à sessão live do Window Maker proposto ao upstream. Sai daqui quando a mudança estiver no `biglinux-stable`. |
+| [`wmake-zones/`](wmake-zones/PKGBUILD) | `wmake-zones` | `0.3.1` | [big-windowmaker/wmake-zones](https://github.com/big-windowmaker/wmake-zones), tag `v0.3.1`. Zonas de encaixe e mosaico de janelas: serviço X11 e dockapp do Window Maker, dockapp nativo do wlmaker, preferências e editor (GTK 3), página de manual e o núcleo estático usado pelo `wlmaker` (patches 0104-0120; o CI compila o `wmake-zones` antes, por `.ci-localdeps`). Zonas ligadas por padrão, Mosaico desligado. |
 | [`gtk-nocsd/`](gtk-nocsd/PKGBUILD) | `gtk-nocsd` | `4.8` | Release 4.8 do [MorsMortium/gtk-nocsd](https://codeberg.org/MorsMortium/gtk-nocsd) (Codeberg). Tira a CSD das janelas GTK 3/4 e libadwaita; carregado pela sessão X11 do big-wm. |
 | [`onestepback-gtk-theme/`](onestepback-gtk-theme/PKGBUILD) | `onestepback-gtk-theme` | `0.997` | Zip da 0.997 do [site do autor](http://www.vide.memoire.free.fr/pages/onestepback/onestepback.php). Tema GTK 2/3/4 NeXTSTEP da sessão (`GTK_THEME` no big-wm), com ajustes e as classes do libadwaita no `gtk-4.0`, e a variação `OneStepBack-Dark` do modo escuro (`big-wm-theme dark`), gerada no build. |
 
@@ -227,6 +227,17 @@ problemas com `/tmp` montado como `noexec` no host.
    Confira no `git diff` se só mudou o que era esperado.
 3. Compile como descrito acima e abra um PR. O CI compila só os diretórios
    alterados, ou todos quando `ci/` ou o workflow mudam.
+
+## Créditos
+
+Desenvolvimento do Big WindowMaker:
+
+- **Rafael Ruscher** — <rruscher@gmail.com.br>
+- **Barnabé Di Kartola** — <barnabedikartola@gmail.com>
+
+Sobre os ombros do [Window Maker](https://www.windowmaker.org/), do
+[wlmaker](https://github.com/phkaeser/wlmaker) (Philipp Kaeser), do
+[BigLinux](https://www.biglinux.com.br) e da [BigCommunity](https://communitybig.org).
 
 ## Licença
 
