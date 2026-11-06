@@ -6,6 +6,7 @@ pkgbase = wmake-zones
 	arch = x86_64
 	license = GPL-2.0-or-later
 	checkdepends = appstream
+	checkdepends = imagemagick
 	checkdepends = python
 	checkdepends = python-gobject
 	checkdepends = python-pillow
@@ -15,6 +16,7 @@ pkgbase = wmake-zones
 	checkdepends = xorg-server-xephyr
 	checkdepends = xorg-server-xvfb
 	checkdepends = xorg-xprop
+	checkdepends = xorg-xwininfo
 	checkdepends = xterm
 	makedepends = git
 	makedepends = librsvg
@@ -41,6 +43,6 @@ pkgbase = wmake-zones
 	source = wmake-zones::git+https://github.com/big-windowmaker/wmake-zones.git#tag=v0.3.1
 	source = 0001-tests-dockapp-waits-for-the-tile.patch
 	sha256sums = SKIP
-	sha256sums = a55fdeecdd5dd12eaf08de4d49995d84ae709f05b59000ba0af1ba632de9262a
+	sha256sums = 753de49341466478952bffc37c44286f3208f6fc5f7df1091ba7dcab065c86ea
 
 pkgname = wmake-zones

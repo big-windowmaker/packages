@@ -51,6 +51,7 @@ makedepends=(
 )
 checkdepends=(
   appstream          # valida os metadados (sem rede)
+  imagemagick        # import: captura do ladrilho do dockapp
   python             # cliente "mudo" do teste do socket
   python-gobject     # janelas GTK de teste (vários monitores)
   python-pillow      # o modo na tela do dockapp, conferido pelos pixels
@@ -60,6 +61,7 @@ checkdepends=(
   xorg-server-xephyr # dois monitores (Xinerama) dentro do Xvfb
   xorg-server-xvfb
   xorg-xprop
+  xorg-xwininfo      # acha o ladrilho do dockapp e os quadros
   xterm
 )
 optdepends=(
@@ -73,10 +75,10 @@ optdepends=(
 options=(staticlibs !lto)
 source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}"
         # Só teste, depois da tag (já no main): o teste do dockapp espera o
-        # ladrilho aparecer em vez de 1 s fixo (falhava no CI).
+        # ladrilho aparecer em vez de 1 s fixo e pula sem o xwininfo.
         0001-tests-dockapp-waits-for-the-tile.patch)
 sha256sums=('SKIP'
-            'a55fdeecdd5dd12eaf08de4d49995d84ae709f05b59000ba0af1ba632de9262a')
+            '753de49341466478952bffc37c44286f3208f6fc5f7df1091ba7dcab065c86ea')
 
 prepare() {
   # A versão do PKGBUILD precisa ser a do projeto (meson.build).

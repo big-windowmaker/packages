@@ -1,7 +1,7 @@
 From 799ae62d35fc698ceaeaa41837c520356b80b690 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Fri, 6 Nov 2026 11:33:08 -0300
-Subject: [PATCH] tests: o dockapp espera o ladrilho aparecer (CI lento)
+Subject: [PATCH 1/2] tests: o dockapp espera o ladrilho aparecer (CI lento)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -65,6 +65,39 @@ index 194b130..3f075d2 100755
  [ -n "${tx:-}" ] || { echo "1..$n"; exit 1; }
  
  mode() { "$WZ" status | sed -n 's/^mode=//p' | head -1; }
+-- 
+2.56.0
+
+
+From 38d112ffd97bbeec0737c60af90d354fd91a1999 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Fri, 6 Nov 2026 11:41:07 -0300
+Subject: [PATCH 2/2] tests: o teste do dockapp pula sem o xwininfo
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+No container do CI dos pacotes o xwininfo não existia e o teste falhava
+procurando o ladrilho, em vez de pular como faz sem as outras ferramentas.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ tests/x11-dockapp.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/x11-dockapp.sh b/tests/x11-dockapp.sh
+index 3f075d2..5f0ad7c 100755
+--- a/tests/x11-dockapp.sh
++++ b/tests/x11-dockapp.sh
+@@ -18,7 +18,7 @@ ok() { n=$((n + 1)); echo "ok $n - $*"; }
+ nok() { n=$((n + 1)); fails=$((fails + 1)); echo "not ok $n - $*"; }
+ check() { if eval "$2"; then ok "$1"; else nok "$1"; fi; }
+ 
+-for tool in wmaker xdotool import python3; do
++for tool in wmaker xdotool xwininfo import python3; do
+ 	command -v $tool >/dev/null || { echo "1..0 # SKIP sem $tool"; exit 0; }
+ done
+ [ -x "$XVFB" ] || { echo "1..0 # SKIP sem Xvfb"; exit 0; }
 -- 
 2.56.0
 
