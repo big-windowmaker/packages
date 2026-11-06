@@ -1,0 +1,70 @@
+From 799ae62d35fc698ceaeaa41837c520356b80b690 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Fri, 6 Nov 2026 11:33:08 -0300
+Subject: [PATCH] tests: o dockapp espera o ladrilho aparecer (CI lento)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+No CI dos pacotes o ladrilho ainda não existia 1 s depois de o serviço
+responder e o teste falhava no primeiro caso. Agora procura por até 10 s
+e, se não achar, mostra as janelas da raiz e o log do serviço.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ tests/x11-dockapp.sh | 25 ++++++++++++++++++++-----
+ 1 file changed, 20 insertions(+), 5 deletions(-)
+
+diff --git a/tests/x11-dockapp.sh b/tests/x11-dockapp.sh
+index 194b130..3f075d2 100755
+--- a/tests/x11-dockapp.sh
++++ b/tests/x11-dockapp.sh
+@@ -7,6 +7,7 @@
+ #
+ #   tests/x11-dockapp.sh BUILD_DIR
+ 
++# shellcheck disable=SC2016,SC2034,SC2155 # as expressões do check rodam depois, por eval
+ set -u
+ B=${1:?uso: $0 BUILD_DIR}
+ WZ=$B/wmake-zones
+@@ -59,18 +60,32 @@ for _ in $(seq 1 50); do "$WZ" status >/dev/null 2>&1 && break; sleep 0.1; done
+ sleep 1
+ 
+ # O ladrilho: o ícone de aplicativo do wmaker (quadro 64x64 na fileira de
+-# baixo, solto, sem Dock).
+-read -r tx ty < <(python3 - <<'PY'
++# baixo, solto, sem Dock). Numa máquina lenta (CI) ele demora: até 10 s.
++find_tile() {
++	python3 - <<'PY'
+ import re, subprocess
+ out = subprocess.run(["xwininfo", "-root", "-children"], capture_output=True, text=True).stdout
+ for m in re.finditer(r"(0x[0-9a-f]+) .*?\s(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", out):
+     w, h, x, y = map(int, m.group(2, 3, 4, 5))
+     if (w, h) == (64, 64) and y >= 600:
+-        print(x, y)
+-        break
++        g = subprocess.run(["xwininfo", "-id", m.group(1)], capture_output=True, text=True).stdout
++        if "IsViewable" in g:
++            print(x, y)
++            break
+ PY
+-)
++}
++tx=
++for _ in $(seq 1 50); do
++	read -r tx ty < <(find_tile)
++	[ -n "${tx:-}" ] && break
++	sleep 0.2
++done
++sleep 0.5
+ check "ladrilho do dockapp aberto" '[ -n "${tx:-}" ]'
++if [ -z "${tx:-}" ]; then
++	echo "# janelas na raiz:"; xwininfo -root -children | sed 's/^/# /' | head -30
++	echo "# log do serviço:"; sed 's/^/# /' "$TMP/wz.log" | tail -10
++fi
+ [ -n "${tx:-}" ] || { echo "1..$n"; exit 1; }
+ 
+ mode() { "$WZ" status | sed -n 's/^mode=//p' | head -1; }
+-- 
+2.56.0
+

@@ -39,6 +39,8 @@ pkgbase = wmake-zones
 	options = staticlibs
 	options = !lto
 	source = wmake-zones::git+https://github.com/big-windowmaker/wmake-zones.git#tag=v0.3.1
+	source = 0001-tests-dockapp-waits-for-the-tile.patch
 	sha256sums = SKIP
+	sha256sums = a55fdeecdd5dd12eaf08de4d49995d84ae709f05b59000ba0af1ba632de9262a
 
 pkgname = wmake-zones

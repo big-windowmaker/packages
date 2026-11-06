@@ -71,8 +71,12 @@ optdepends=(
 # com lto (padrão do makepkg.conf do Manjaro) os objetos são "slim", só
 # bytecode do GCC, e o strip os deixa vazios: o wlmaker não ligava no CI.
 options=(staticlibs !lto)
-source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}")
-sha256sums=('SKIP')
+source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}"
+        # Só teste, depois da tag (já no main): o teste do dockapp espera o
+        # ladrilho aparecer em vez de 1 s fixo (falhava no CI).
+        0001-tests-dockapp-waits-for-the-tile.patch)
+sha256sums=('SKIP'
+            'a55fdeecdd5dd12eaf08de4d49995d84ae709f05b59000ba0af1ba632de9262a')
 
 prepare() {
   # A versão do PKGBUILD precisa ser a do projeto (meson.build).
@@ -81,6 +85,10 @@ prepare() {
   if [[ ${v} != "${pkgver}" ]]; then
     echo "meson.build diz ${v}, mas pkgver=${pkgver}" >&2
     return 1
+  fi
+  # Sem o WMAKE_ZONES_SOURCE (fonte local do main), o patch de teste da tag.
+  if ! grep -q 'Numa máquina lenta (CI)' wmake-zones/tests/x11-dockapp.sh; then
+    patch -d wmake-zones -Np1 -i "${srcdir}/0001-tests-dockapp-waits-for-the-tile.patch"
   fi
 }
 
