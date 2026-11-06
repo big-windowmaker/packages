@@ -49,6 +49,7 @@ pkgbase = windowmaker
 	source = 0014-icons-standard-margin-smooth-scaling-and-clip-shadow.patch
 	source = 0015-wmspec-a-dock-that-takes-no-input-is-not-focusable.patch
 	source = 0016-dock-a-docked-dockapp-starts-with-Window-Maker.patch
+	source = 0017-motif-follow-MOTIF_WM_HINTS-changed-after-the-window-is-mapped.patch
 	sha256sums = a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf
 	sha256sums = 08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337
 	sha256sums = 077b2a6e5274420751a8e9ae40bed7ea3b944e7b0e16d29fbf461afed1d3e685
@@ -66,5 +67,6 @@ pkgbase = windowmaker
 	sha256sums = 3fa37118725d16faf948dfbc2f75cc6a57a0d6ff2b59f5ad77ea5186d94ca6d1
 	sha256sums = e4bf626c79668918aaa2457055000492b06138232cfb78674829a3f5f7c35957
 	sha256sums = f4a5da451bd7497b532687904bef6f4859bae7761c37a659ed0712aa481118cb
+	sha256sums = 9f0cae967a7326c3b424a4db5564cf7c2f7b00d71f8a05a9708f44bb1f235318
 
 pkgname = windowmaker
