@@ -1,0 +1,49 @@
+From 9b669615ed1f26af6b751da757b2c968430e3742 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Fri, 6 Nov 2026 10:44:40 -0300
+Subject: [PATCH] zones: algorithm next|prev
+
+The dock-app arrows and its wheel in Tiling mode cycle the tiling
+algorithm, like "layout next|prev" does for the zones. Same command as
+wmake-zones on X11.
+
+Tested with wmake-zones' Wayland functional suite (algorithm next/prev,
+48/48) and the wmake-zones-wl tile clicked in a nested wlmaker.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/zones.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/src/zones.c b/src/zones.c
+index 8aec078..b8784fd 100644
+--- a/src/zones.c
++++ b/src/zones.c
+@@ -2455,12 +2455,21 @@ void wlmaker_zones_command(wlmaker_zones_t *zones_ptr,
+         _wlmaker_zones_tile_mark(zones_ptr);
+         _out(out_ptr, out_len, "autotile=%s\n", v ? "on" : "off");
+     } else if (0 == strcmp(buf, "algorithm") && NULL != arg_ptr &&
+-               0 <= wz_algo_from_name(arg_ptr)) {
++               (0 <= wz_algo_from_name(arg_ptr) || 0 == strcmp(arg_ptr, "next") ||
++                0 == strcmp(arg_ptr, "prev"))) {
++        // next/prev: the following or the previous algorithm (dock-app
++        // arrows, the wheel in Tiling mode).
++        const char *name_ptr = arg_ptr;
++        if (0 == strcmp(arg_ptr, "next") || 0 == strcmp(arg_ptr, "prev")) {
++            int step = 'n' == arg_ptr[0] ? 1 : WZ_TILE_N - 1;
++            name_ptr = wz_algo_name(
++                (wz_algo)(((int)zones_ptr->cfg.tile.algo + step) % WZ_TILE_N));
++        }
+         wz_hist_entry *e = _hist_begin(zones_ptr);
+         _hist_add_cfg(zones_ptr, e, "Tiling", "Algorithm");
+         wz_history_commit(&zones_ptr->history);
+-        zones_ptr->cfg.tile.algo = wz_algo_from_name(arg_ptr);
+-        _save(zones_ptr, "Tiling", "Algorithm", arg_ptr);
++        zones_ptr->cfg.tile.algo = wz_algo_from_name(name_ptr);
++        _save(zones_ptr, "Tiling", "Algorithm", name_ptr);
+         _wlmaker_zones_tile_mark(zones_ptr);
+     } else if (0 == strcmp(buf, "layout") && NULL != arg_ptr) {
+         if (0 == strcmp(arg_ptr, "next")) {
+-- 
+2.56.0
+

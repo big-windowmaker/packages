@@ -1,0 +1,330 @@
+From 0a1f499f67ce452e500100f4222f6210fb932c55 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Fri, 6 Nov 2026 10:28:10 -0300
+Subject: [PATCH] zones: Tiling follows the usable area and the outputs
+
+The tiling cells were computed when a window came or went, never when the
+usable area changed: a Dock, Clip or panel with an exclusive zone that
+appeared, moved or went away left the cells under it (or a gap) until the
+user asked to apply again; same after an output was plugged, unplugged or
+changed mode or scale.
+
+The toolkit raises wlmtk_desktop_events_t::usable_area_changed when the
+usable area of an output changes (only then: a panel without exclusive
+zone does not), and zones relayouts on it and on the output layout's
+change signal (closing the picker and the overlay).
+
+Tests: unit test layer usable_area_signal; wmake-zones' Wayland
+functional suite with a layer-shell panel with an exclusive zone (47/47;
+without this change the panel case fails). ctest 29/29.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/toolkit/desktop.h |   5 ++
+ include/toolkit/layer.h   |  12 +++++
+ src/toolkit/desktop.c     |   4 ++
+ src/toolkit/layer.c       | 102 ++++++++++++++++++++++++++++++++++++--
+ src/zones.c               |  34 +++++++++++++
+ 5 files changed, 153 insertions(+), 4 deletions(-)
+
+diff --git a/include/toolkit/desktop.h b/include/toolkit/desktop.h
+index 2ff2dcc..2995e54 100644
+--- a/include/toolkit/desktop.h
++++ b/include/toolkit/desktop.h
+@@ -79,6 +79,11 @@ typedef struct {
+      * size). Data: @ref wlmtk_window_move_event_t.
+      */
+     struct wl_signal          window_resize_end;
++    /**
++     * The usable area of an output changed (a Dock, Clip or panel with an
++     * exclusive zone moved, appeared or went away). Data: NULL.
++     */
++    struct wl_signal          usable_area_changed;
+ } wlmtk_desktop_events_t;
+ 
+ /** Data of the window move signals. Coordinates in layout space. */
+diff --git a/include/toolkit/layer.h b/include/toolkit/layer.h
+index 1887e0d..a888239 100644
+--- a/include/toolkit/layer.h
++++ b/include/toolkit/layer.h
+@@ -107,6 +107,18 @@ void wlmtk_layer_reconfigure(wlmtk_layer_t *layer_ptr);
+  *
+  * @param layer_output_ptr
+  */
++/**
++ * Sets the signal raised (data: NULL) whenever the usable area of an output
++ * changes: a panel with an exclusive zone (Dock, Clip, tray) was added,
++ * moved, resized or removed. For window organizers that follow it.
++ *
++ * @param layer_ptr
++ * @param signal_ptr          May be NULL.
++ */
++void wlmtk_layer_set_usable_area_signal(
++    wlmtk_layer_t *layer_ptr,
++    struct wl_signal *signal_ptr);
++
+ void wlmtk_layer_output_reconfigure(wlmtk_layer_output_t *layer_output_ptr);
+ 
+ /**
+diff --git a/src/toolkit/desktop.c b/src/toolkit/desktop.c
+index 0ab429f..2bc6e12 100644
+--- a/src/toolkit/desktop.c
++++ b/src/toolkit/desktop.c
+@@ -170,6 +170,8 @@ wlmtk_desktop_t *wlmtk_desktop_create(
+         &desktop_ptr->container.super_element,
+         &_wlmtk_desktop_element_vmt);
+ 
++    // Before the layers: they hold a pointer to it.
++    wl_signal_init(&desktop_ptr->events.usable_area_changed);
+     for (int i = 0; i <= WLMTK_DESKTOP_LAYER_OVERLAY; ++i) {
+         wlmtk_layer_t *layer_ptr = wlmtk_layer_create(wlr_output_layout_ptr);
+         if (NULL == layer_ptr) {
+@@ -180,6 +182,8 @@ wlmtk_desktop_t *wlmtk_desktop_create(
+         wlmtk_container_add_element(
+             &desktop_ptr->container, wlmtk_layer_element(layer_ptr));
+         desktop_ptr->layer_ptrs[i] = layer_ptr;
++        wlmtk_layer_set_usable_area_signal(
++            layer_ptr, &desktop_ptr->events.usable_area_changed);
+     }
+ 
+     if (!wlmtk_container_init(&desktop_ptr->workspace_window_container)) {
+diff --git a/src/toolkit/layer.c b/src/toolkit/layer.c
+index a572e58..c55acbe 100644
+--- a/src/toolkit/layer.c
++++ b/src/toolkit/layer.c
+@@ -44,6 +44,10 @@ struct _wlmtk_layer_t {
+     wlmtk_container_t         super_container;
+     /** Tracks the outputs. */
+     wlmtk_output_tracker_t    *output_tracker_ptr;
++    /** The output layout. */
++    struct wlr_output_layout  *wlr_output_layout_ptr;
++    /** Raised when the usable area of an output changes. May be NULL. */
++    struct wl_signal          *usable_area_changed_ptr;
+ };
+ 
+ /** State of the layer on the given output. */
+@@ -54,6 +58,8 @@ struct _wlmtk_layer_output_t {
+     struct wlr_box            usable_area;
+     /** Panels. Holds nodes at @ref wlmtk_panel_t::dlnode. */
+     bs_dllist_t               panels;
++    /** The layer this belongs to. */
++    wlmtk_layer_t             *layer_ptr;
+ };
+ 
+ static void _wlmtk_layer_output_remove_dlnode_panel(
+@@ -92,9 +98,10 @@ wlmtk_layer_t *wlmtk_layer_create(
+         return NULL;
+     }
+ 
++    layer_ptr->wlr_output_layout_ptr = wlr_output_layout_ptr;
+     layer_ptr->output_tracker_ptr = wlmtk_output_tracker_create(
+         wlr_output_layout_ptr,
+-        wlr_output_layout_ptr,
++        layer_ptr,
+         _wlmtk_layer_output_create,
+         _wlmtk_layer_output_update,
+         _wlmtk_layer_output_destroy);
+@@ -202,7 +209,21 @@ void wlmtk_layer_output_reconfigure(
+                 panel_dimensions.y);
+         }
+     }
+-    layer_output_ptr->usable_area = usable_area;
++    if (!wlr_box_equal(&usable_area, &layer_output_ptr->usable_area)) {
++        layer_output_ptr->usable_area = usable_area;
++        if (NULL != layer_output_ptr->layer_ptr &&
++            NULL != layer_output_ptr->layer_ptr->usable_area_changed_ptr) {
++            wl_signal_emit(layer_output_ptr->layer_ptr->usable_area_changed_ptr, NULL);
++        }
++    }
++}
++
++/* ------------------------------------------------------------------------- */
++void wlmtk_layer_set_usable_area_signal(
++    wlmtk_layer_t *layer_ptr,
++    struct wl_signal *signal_ptr)
++{
++    layer_ptr->usable_area_changed_ptr = signal_ptr;
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -266,10 +287,12 @@ void *_wlmtk_layer_output_create(
+     struct wlr_output *wlr_output_ptr,
+     void *ud_ptr)
+ {
+-    struct wlr_output_layout *wlr_output_layout_ptr = ud_ptr;
++    wlmtk_layer_t *layer_ptr = ud_ptr;
++    struct wlr_output_layout *wlr_output_layout_ptr = layer_ptr->wlr_output_layout_ptr;
+     wlmtk_layer_output_t *layer_output_ptr = logged_calloc(
+         1, sizeof(wlmtk_layer_output_t));
+     if (NULL == layer_output_ptr) return NULL;
++    layer_output_ptr->layer_ptr = layer_ptr;
+ 
+     wlr_output_layout_get_box(
+         wlr_output_layout_ptr,
+@@ -287,7 +310,8 @@ void _wlmtk_layer_output_update(
+     void *ud_ptr,
+     void *output_ptr)
+ {
+-    struct wlr_output_layout *wlr_output_layout_ptr = ud_ptr;
++    wlmtk_layer_t *layer_ptr = ud_ptr;
++    struct wlr_output_layout *wlr_output_layout_ptr = layer_ptr->wlr_output_layout_ptr;
+     wlmtk_layer_output_t *layer_output_ptr = output_ptr;
+ 
+     struct wlr_box new_extents;
+@@ -322,12 +346,14 @@ void _wlmtk_layer_output_destroy(
+ static void test_multi_output(bs_test_t *test_ptr);
+ static void test_layout(bs_test_t *test_ptr);
+ static void test_full_edge(bs_test_t *test_ptr);
++static void test_usable_area_signal(bs_test_t *test_ptr);
+ 
+ /** Test cases */
+ static const bs_test_case_t _wlmtk_layer_test_cases[] = {
+     { 1, "multi_output", test_multi_output },
+     { 1, "layout", test_layout },
+     { 1, "full_edge", test_full_edge },
++    { 1, "usable_area_signal", test_usable_area_signal },
+     BS_TEST_CASE_SENTINEL()
+ };
+ 
+@@ -569,4 +595,72 @@ void test_full_edge(bs_test_t *test_ptr)
+     wl_display_destroy(display_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Counts emissions of the usable area signal. */
++typedef struct {
++    struct wl_listener        listener;
++    int                       count;
++} _usable_area_counter_t;
++
++static void _usable_area_counter(struct wl_listener *listener_ptr,
++                                 __UNUSED__ void *data_ptr)
++{
++    BS_CONTAINER_OF(listener_ptr, _usable_area_counter_t, listener)->count++;
++}
++
++/** The signal fires when a panel with an exclusive zone comes or goes, not
++ * for a panel that leaves the usable area as it was. */
++void test_usable_area_signal(bs_test_t *test_ptr)
++{
++    struct wl_display *display_ptr = wl_display_create();
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, display_ptr);
++    struct wlr_output_layout *wlr_output_layout_ptr =
++        wlr_output_layout_create(display_ptr);
++    struct wlr_output output = { .width = 1280, .height = 800, .scale = 1 };
++    wlmtk_test_wlr_output_init(&output);
++    wlr_output_layout_add(wlr_output_layout_ptr, &output, 0, 0);
++    wlmtk_layer_t *layer_ptr = wlmtk_layer_create(wlr_output_layout_ptr);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, layer_ptr);
++    struct wl_signal signal;
++    wl_signal_init(&signal);
++    _usable_area_counter_t counter = { .count = 0 };
++    counter.listener.notify = _usable_area_counter;
++    wl_signal_add(&signal, &counter.listener);
++    wlmtk_layer_set_usable_area_signal(layer_ptr, &signal);
++
++    // A Dock: exclusive on the right. Changes the area: one emission.
++    wlmtk_panel_positioning_t dock_pos = {
++        .desired_width = 64, .desired_height = 64, .exclusive_zone = 64,
++        .anchor = WLR_EDGE_RIGHT | WLR_EDGE_TOP,
++        .exclusive_edge = WLR_EDGE_RIGHT };
++    wlmtk_fake_panel_t *dock_ptr = wlmtk_fake_panel_create(&dock_pos);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, dock_ptr);
++    wlmtk_element_set_visible(wlmtk_panel_element(&dock_ptr->panel), true);
++    wlmtk_layer_add_panel(layer_ptr, &dock_ptr->panel, &output);
++    BS_TEST_VERIFY_EQ(test_ptr, 1, counter.count);
++
++    // A panel without exclusive zone: same area, no emission.
++    wlmtk_panel_positioning_t pos = dock_pos;
++    pos.exclusive_zone = 0;
++    pos.anchor = WLR_EDGE_LEFT | WLR_EDGE_BOTTOM;
++    wlmtk_fake_panel_t *p_ptr = wlmtk_fake_panel_create(&pos);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, p_ptr);
++    wlmtk_element_set_visible(wlmtk_panel_element(&p_ptr->panel), true);
++    wlmtk_layer_add_panel(layer_ptr, &p_ptr->panel, &output);
++    BS_TEST_VERIFY_EQ(test_ptr, 1, counter.count);
++
++    // The Dock goes away: the area grows back.
++    wlmtk_layer_remove_panel(layer_ptr, &dock_ptr->panel);
++    BS_TEST_VERIFY_EQ(test_ptr, 2, counter.count);
++
++    wlmtk_layer_remove_panel(layer_ptr, &p_ptr->panel);
++    wlmtk_fake_panel_destroy(p_ptr);
++    wlmtk_fake_panel_destroy(dock_ptr);
++    wl_list_remove(&counter.listener.link);
++    wlmtk_layer_destroy(layer_ptr);
++    wlr_output_layout_remove(wlr_output_layout_ptr, &output);
++    wlr_output_layout_destroy(wlr_output_layout_ptr);
++    wl_display_destroy(display_ptr);
++}
++
+ /* == End of layer.c ======================================================= */
+diff --git a/src/zones.c b/src/zones.c
+index c4bb1cc..8aec078 100644
+--- a/src/zones.c
++++ b/src/zones.c
+@@ -274,6 +274,10 @@ struct _wlmaker_zones_t {
+     struct wl_listener        window_unmapped_listener;
+     /** Listener for @ref wlmtk_desktop_events_t::workspace_changed. */
+     struct wl_listener        workspace_changed_listener;
++    /** Listener for @ref wlmtk_desktop_events_t::usable_area_changed. */
++    struct wl_listener        usable_area_listener;
++    /** Listener for wlr_output_layout::events.change (hotplug, mode, scale). */
++    struct wl_listener        output_layout_change_listener;
+ };
+ 
+ static void _wlmaker_zones_overlay_hide(wlmaker_zones_t *zones_ptr);
+@@ -2056,6 +2060,30 @@ static void _wlmaker_zones_handle_window_unmapped(
+ }
+ 
+ /** The workspace changed. */
++/**
++ * The usable area changed (the Dock, the Clip or a panel moved, appeared or
++ * went away): the tiling follows it. Before, the cells stayed where they
++ * were, under the Dock or leaving a gap, until "apply again".
++ */
++static void _wlmaker_zones_handle_usable_area(
++    struct wl_listener *listener_ptr, __UNUSED__ void *data_ptr)
++{
++    wlmaker_zones_t *zones_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_zones_t, usable_area_listener);
++    _wlmaker_zones_tile_mark(zones_ptr);
++}
++
++/** An output was added, removed, moved or changed mode or scale. */
++static void _wlmaker_zones_handle_output_layout_change(
++    struct wl_listener *listener_ptr, __UNUSED__ void *data_ptr)
++{
++    wlmaker_zones_t *zones_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_zones_t, output_layout_change_listener);
++    _picker_close(zones_ptr);
++    _wlmaker_zones_overlay_hide(zones_ptr);
++    _wlmaker_zones_tile_mark(zones_ptr);
++}
++
+ static void _wlmaker_zones_handle_workspace_changed(
+     struct wl_listener *listener_ptr, __UNUSED__ void *data_ptr)
+ {
+@@ -2766,6 +2794,10 @@ wlmaker_zones_t *wlmaker_zones_create(wlmaker_server_t *server_ptr)
+         &zones_ptr->window_unmapped_listener, _wlmaker_zones_handle_window_unmapped);
+     wlmtk_util_connect_listener_signal(&e->workspace_changed,
+         &zones_ptr->workspace_changed_listener, _wlmaker_zones_handle_workspace_changed);
++    wlmtk_util_connect_listener_signal(&e->usable_area_changed,
++        &zones_ptr->usable_area_listener, _wlmaker_zones_handle_usable_area);
++    wlmtk_util_connect_listener_signal(&server_ptr->wlr_output_layout_ptr->events.change,
++        &zones_ptr->output_layout_change_listener, _wlmaker_zones_handle_output_layout_change);
+ 
+     struct wl_event_loop *loop_ptr = wl_display_get_event_loop(server_ptr->wl_display_ptr);
+     zones_ptr->tile_timer_ptr = wl_event_loop_add_timer(
+@@ -2831,6 +2863,8 @@ void wlmaker_zones_destroy(wlmaker_zones_t *zones_ptr)
+     for (size_t i = 0; i < sizeof(timers) / sizeof(timers[0]); ++i) {
+         if (NULL != timers[i]) wl_event_source_remove(timers[i]);
+     }
++    wlmtk_util_disconnect_listener(&zones_ptr->output_layout_change_listener);
++    wlmtk_util_disconnect_listener(&zones_ptr->usable_area_listener);
+     wlmtk_util_disconnect_listener(&zones_ptr->workspace_changed_listener);
+     wlmtk_util_disconnect_listener(&zones_ptr->window_unmapped_listener);
+     wlmtk_util_disconnect_listener(&zones_ptr->window_mapped_listener);
+-- 
+2.56.0
+
