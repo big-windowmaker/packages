@@ -197,7 +197,7 @@
 #   0108  ícones fora das pastas XDG não são procurados na árvore de build
 #         (com WLMAKER_INSTALLED_ONLY, definido em build())
 #   0109  áreas de trabalho contadas a partir de 1 nas zonas ([Workspace N])
-#   0110-0120: paridade das zonas com o X11 (branch big-wm/zones do fork)
+#   0110-0121: paridade das zonas com o X11 (branch big-wm/zones do fork)
 #   0110  a janela guarda o app_id (ou WM_CLASS no XWayland) e se é diálogo:
 #         regras por aplicativo e diálogos fora do mosaico
 #   0111  a área de trabalho segura o ponteiro durante mover/redimensionar
@@ -215,9 +215,12 @@
 #   0119  o mosaico acompanha a área útil (Dock, Clip, painéis com zona
 #         exclusiva) e as saídas (ligar, desligar, resolução, escala)
 #   0120  algorithm next|prev (setas e roda do dockapp no Mosaico)
+#   0121  o mosaico confere o tamanho mínimo do cliente (GTK4/libadwaita:
+#         Pamac 760x200): troca de lugar ou flutua, sem sobrepor as outras;
+#         "windows -d" com o motivo
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=18
+pkgrel=19
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -367,6 +370,7 @@ _patches=(
   0118-zones-Picker-hint-in-words-without-arrow-glyphs.patch
   0119-zones-Tiling-follows-the-usable-area-and-the-outputs.patch
   0120-zones-algorithm-next-prev.patch
+  0121-zones-Tiling-checks-the-client-s-minimum-size.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -488,7 +492,8 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'ba075fbb1f7314b0e5aa3f85b0f6d21c9abc20f62ce96fc97f3127a19d57b0e4'
             'b4b56fd1f15cd3868941a1e7d48bf9ca1a5c14dd299fff1b990b7ba111898be3'
             '81782152b1808752a4f5a30dd9be0b6c8650977399b4c6efeb075b3bf8b4cff0'
-            '127274661a9461d37f4a90825a88b3a4b3c3a68ec7df9f6bb328cae40426a0f2')
+            '127274661a9461d37f4a90825a88b3a4b3c3a68ec7df9f6bb328cae40426a0f2'
+            '14a1d0aec5b95a798b122d3e32893ab38d7e73af01ee221bd18ad51632becd63')
 
 prepare() {
   cd wlmaker

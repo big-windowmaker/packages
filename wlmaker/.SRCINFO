@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r80.g7481afe
-	pkgrel = 18
+	pkgrel = 19
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -143,6 +143,7 @@ pkgbase = wlmaker
 	source = 0118-zones-Picker-hint-in-words-without-arrow-glyphs.patch
 	source = 0119-zones-Tiling-follows-the-usable-area-and-the-outputs.patch
 	source = 0120-zones-algorithm-next-prev.patch
+	source = 0121-zones-Tiling-checks-the-client-s-minimum-size.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
 	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
@@ -258,5 +259,6 @@ pkgbase = wlmaker
 	sha256sums = b4b56fd1f15cd3868941a1e7d48bf9ca1a5c14dd299fff1b990b7ba111898be3
 	sha256sums = 81782152b1808752a4f5a30dd9be0b6c8650977399b4c6efeb075b3bf8b4cff0
 	sha256sums = 127274661a9461d37f4a90825a88b3a4b3c3a68ec7df9f6bb328cae40426a0f2
+	sha256sums = 14a1d0aec5b95a798b122d3e32893ab38d7e73af01ee221bd18ad51632becd63
 
 pkgname = wlmaker
