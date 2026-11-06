@@ -52,9 +52,12 @@ makedepends=(
 checkdepends=(
   appstream          # valida os metadados (sem rede)
   python             # cliente "mudo" do teste do socket
+  python-gobject     # janelas GTK de teste (vários monitores)
+  python-pillow      # o modo na tela do dockapp, conferido pelos pixels
   python-xlib        # confere que o seletor e o menu do dockapp largam o teclado
   windowmaker        # o teste funcional roda o wmaker de verdade num Xvfb
   xdotool
+  xorg-server-xephyr # dois monitores (Xinerama) dentro do Xvfb
   xorg-server-xvfb
   xorg-xprop
   xterm

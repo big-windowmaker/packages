@@ -53,7 +53,7 @@ pkgbase = big-dockapps
 	source = wmcliphist-popup-signal.patch
 	source = wmcliphist-clipboard-utf8.patch
 	source = wmcliphist-big-wm-history.patch
-	source = wmeyes-1.2.tar.gz::https://web.archive.org/web/2016id_/http://www.bstern.org/wmeyes/wmeyes-1.2.tar.gz
+	source = wmeyes-1.2.tar.gz::http://distcache.FreeBSD.org/ports-distfiles/wmeyes-1.2.tar.gz
 	source = wmeyes-modern.patch
 	source = wmsystemtray-symbolic-colors.patch
 	sha256sums = cc9753fa925323b52110c595f4920da1aec6e1ae124a40be4062048991daed81
@@ -342,6 +342,7 @@ pkgname = wmcliphist
 	depends = glibc
 	depends = gtk3
 	depends = libx11
+	optdepends = big-wm-session: histórico persistente, busca e favoritos (big-wm-clipboard, Super+V)
 
 pkgname = wmgtemp
 	pkgdesc = Window Maker dockapp showing CPU and system temperatures (lm_sensors)

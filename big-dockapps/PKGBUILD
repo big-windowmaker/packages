@@ -21,8 +21,9 @@
 #   - wmweather (Mike Henderson e Martin Godisch, da Debian): tarball da release
 #     2.4.8, que já busca o METAR por HTTPS (libcurl).
 #   - wmeyes 1.2 (Ben Stern e Bryan Feir, licença MIT): o site do autor
-#     (bstern.org) saiu do ar; o tarball vem da cópia do Internet Archive,
-#     conferida pelo sha256. wmeyes-modern.patch: compila no C23 (GCC 15+) e
+#     (bstern.org) saiu do ar; o tarball vem do cache de distfiles do FreeBSD
+#     (o Internet Archive ficou fora do ar), conferido pelo sha256, o mesmo
+#     da cópia do Internet Archive. wmeyes-modern.patch: compila no C23 (GCC 15+) e
 #     só redesenha quando o ponteiro anda ou as pálpebras mudam.
 #
 # Versão: o makepkg não permite pkgver diferente por pacote num split, então
@@ -162,7 +163,8 @@ source=(
   wmcliphist-popup-signal.patch
   wmcliphist-clipboard-utf8.patch
   wmcliphist-big-wm-history.patch
-  "wmeyes-${_wmeyes_ver}.tar.gz::https://web.archive.org/web/2016id_/http://www.bstern.org/wmeyes/wmeyes-${_wmeyes_ver}.tar.gz"
+  # Sem HTTPS no cache do FreeBSD; a integridade vem do sha256.
+  "wmeyes-${_wmeyes_ver}.tar.gz::http://distcache.FreeBSD.org/ports-distfiles/wmeyes-${_wmeyes_ver}.tar.gz"
   wmeyes-modern.patch
   wmsystemtray-symbolic-colors.patch
 )
@@ -726,6 +728,7 @@ package_wmcliphist() {
   url='https://www.dockapps.net/wmcliphist'
   license=('GPL-2.0-or-later')
   depends=(cairo glib2 glibc gtk3 libx11)
+  optdepends=('big-wm-session: histórico persistente, busca e favoritos (big-wm-clipboard, Super+V)')
 
   cd dockapps/wmcliphist
   make DESTDIR="${pkgdir}" PREFIX=/usr install
