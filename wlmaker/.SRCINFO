@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r80.g7481afe
-	pkgrel = 17
+	pkgrel = 18
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -141,6 +141,8 @@ pkgbase = wlmaker
 	source = 0116-share-Icon-style-of-the-big-wm-tray-dock-app-symboli.patch
 	source = 0117-zones-Picker-yields-the-keyboard-to-the-lock-screen.patch
 	source = 0118-zones-Picker-hint-in-words-without-arrow-glyphs.patch
+	source = 0119-zones-Tiling-follows-the-usable-area-and-the-outputs.patch
+	source = 0120-zones-algorithm-next-prev.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
 	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
@@ -254,5 +256,7 @@ pkgbase = wlmaker
 	sha256sums = b464d15663fb52d203d31ad22f6337f3da46f23cf178e95ca9c99fcbfa863048
 	sha256sums = ba075fbb1f7314b0e5aa3f85b0f6d21c9abc20f62ce96fc97f3127a19d57b0e4
 	sha256sums = b4b56fd1f15cd3868941a1e7d48bf9ca1a5c14dd299fff1b990b7ba111898be3
+	sha256sums = 81782152b1808752a4f5a30dd9be0b6c8650977399b4c6efeb075b3bf8b4cff0
+	sha256sums = 127274661a9461d37f4a90825a88b3a4b3c3a68ec7df9f6bb328cae40426a0f2
 
 pkgname = wlmaker

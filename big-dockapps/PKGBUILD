@@ -21,8 +21,9 @@
 #   - wmweather (Mike Henderson e Martin Godisch, da Debian): tarball da release
 #     2.4.8, que já busca o METAR por HTTPS (libcurl).
 #   - wmeyes 1.2 (Ben Stern e Bryan Feir, licença MIT): o site do autor
-#     (bstern.org) saiu do ar; o tarball vem da cópia do Internet Archive,
-#     conferida pelo sha256. wmeyes-modern.patch: compila no C23 (GCC 15+) e
+#     (bstern.org) saiu do ar; o tarball vem do cache de distfiles do FreeBSD
+#     (o Internet Archive ficou fora do ar), conferido pelo sha256, o mesmo
+#     da cópia do Internet Archive. wmeyes-modern.patch: compila no C23 (GCC 15+) e
 #     só redesenha quando o ponteiro anda ou as pálpebras mudam.
 #
 # Versão: o makepkg não permite pkgver diferente por pacote num split, então
@@ -91,7 +92,7 @@ _wmeyes_ver=1.2
 # são código-fonte); o namcap avisa por causa dele.
 _zenwalk=https://download.zenwalk.org/x86_64/people/jp/dockapps
 pkgver=20260412
-pkgrel=8
+pkgrel=9
 pkgdesc='Curated Window Maker dockapps for Big WindowMaker'
 arch=(x86_64)
 url='https://www.dockapps.net/'
@@ -161,7 +162,9 @@ source=(
   wmnet-default-route.patch
   wmcliphist-popup-signal.patch
   wmcliphist-clipboard-utf8.patch
-  "wmeyes-${_wmeyes_ver}.tar.gz::https://web.archive.org/web/2016id_/http://www.bstern.org/wmeyes/wmeyes-${_wmeyes_ver}.tar.gz"
+  wmcliphist-big-wm-history.patch
+  # Sem HTTPS no cache do FreeBSD; a integridade vem do sha256.
+  "wmeyes-${_wmeyes_ver}.tar.gz::http://distcache.FreeBSD.org/ports-distfiles/wmeyes-${_wmeyes_ver}.tar.gz"
   wmeyes-modern.patch
   wmsystemtray-symbolic-colors.patch
 )
@@ -188,6 +191,7 @@ sha256sums=('cc9753fa925323b52110c595f4920da1aec6e1ae124a40be4062048991daed81'
             'b56ff1ecf00bf75ac26e4fdbc97deb6f61753449bb0afea7e0968f5aa27a2248'
             '69509c2ff48e227c7de4ffedc67524ff47560cb3ed47dc28df405349ffaf4ff7'
             '48b9fb39fe495848b947aa97b6d25065e9008722a051ebc775fe48efac3c4bef'
+            'ced8f978d6a59fe505ad9896b6e33c1fd9da3d76efdd6a2ff345c988ab33a25c'
             'c09c88d4915cb06ddf116f474d33ecd9c5d813103c350d1817c72e8cc33ae551'
             'dfbc12399ff18680dd493381add40fdde9ff667ef17d6cb80b566c26c4663aba'
             '1f66d3cbd0c6b6675deb57492d04935ccb6318652f0d2c570116d3b12dec5bdc')
@@ -215,6 +219,10 @@ prepare() {
   # eventos do XFixes em vez de consultar a cada 250 ms, conteúdo
   # preservado quando o aplicativo fecha, senhas fora do histórico.
   patch -Np1 -i ../wmcliphist-clipboard-utf8.patch
+  # wmcliphist: o histórico fica no banco do big-wm-clipboard (o mesmo das
+  # duas sessões e da janela do Super+V): grava cada cópia, começa com o
+  # histórico salvo, o cadeado vira favorito, SIGUSR2 recarrega o menu.
+  patch -Np1 -i ../wmcliphist-big-wm-history.patch
   local _d
   for _d in "${_autotools[@]}"; do
     (cd "${_d}" && autoreconf -fi)
@@ -720,6 +728,7 @@ package_wmcliphist() {
   url='https://www.dockapps.net/wmcliphist'
   license=('GPL-2.0-or-later')
   depends=(cairo glib2 glibc gtk3 libx11)
+  optdepends=('big-wm-session: histórico persistente, busca e favoritos (big-wm-clipboard, Super+V)')
 
   cd dockapps/wmcliphist
   make DESTDIR="${pkgdir}" PREFIX=/usr install

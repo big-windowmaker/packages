@@ -1,0 +1,66 @@
+From 53d41896208411d76b57e9f8d3a6ba4a3e21e0c6 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Fri, 6 Nov 2026 09:23:06 -0300
+Subject: [PATCH] dock: a docked dockapp starts with Window Maker
+
+Window Maker docked every icon with "Start when Window Maker is started"
+off. For a dockapp that is never what the user wants: stopped, it is an
+empty tile at the next login, and the user has to click each one
+(wmfsm, wmglobe, wmgtemp, wmcliphist, wmeyes...). A dockapp left in the
+Dock or in the Clip now starts with Window Maker; the user can still turn
+it off in the icon settings, and icons attracted by the Clip keep it off.
+
+The app icon is owned by the window made by makeMainWindow(), which never
+got the is_dockapp flag; it now follows the same rule as wManageWindow()
+(class DockApp or initial state Withdrawn).
+
+Tested in Xvfb, dragging the icon to the Dock: wmcpuload, wmglobe, wmfsm,
+wmcliphist and wmeyes -w are saved with AutoLaunch = Yes; xterm keeps
+AutoLaunch = No. The unpatched wmaker saves No for all of them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/application.c | 7 +++++++
+ src/dock.c        | 8 ++++++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/src/application.c b/src/application.c
+index d076c411..54e18a69 100644
+--- a/src/application.c
++++ b/src/application.c
+@@ -55,6 +55,13 @@ static WWindow *makeMainWindow(WScreen * scr, Window window)
+ 
+ 	PropGetWMClass(window, &wwin->wm_class, &wwin->wm_instance);
+ 
++	/* Same rule as wManageWindow(): the app icon of a dockapp is owned by
++	 * this window, and the Dock asks it whether it is a dockapp. */
++	if ((wwin->wm_class && strcmp(wwin->wm_class, "DockApp") == 0) ||
++	    (wwin->wm_hints && (wwin->wm_hints->flags & StateHint) &&
++	     wwin->wm_hints->initial_state == WithdrawnState))
++		wwin->flags.is_dockapp = 1;
++
+ 	wDefaultFillAttributes(wwin->wm_instance, wwin->wm_class, &wwin->user_flags,
+ 			       &wwin->defined_user_flags, True);
+ 
+diff --git a/src/dock.c b/src/dock.c
+index 9e697103..167fc5c7 100644
+--- a/src/dock.c
++++ b/src/dock.c
+@@ -2449,6 +2449,14 @@ Bool wDockAttachIcon(WDock *dock, WAppIcon *icon, int x, int y, Bool update_icon
+ 	icon->launching = 0;
+ 	icon->docked = 1;
+ 	icon->dock = dock;
++	/*
++	 * A dockapp left in the Dock or in the Clip by the user is meant to
++	 * stay there: stopped, it is just an empty tile at the next login. It
++	 * starts with Window Maker unless the user turns that off in the icon
++	 * settings. Icons attracted by the Clip are temporary and keep it off.
++	 */
++	if (!icon->attracted && icon->icon->owner && icon->icon->owner->flags.is_dockapp)
++		icon->auto_launch = 1;
+ 	icon->icon->core->descriptor.handle_mousedown = iconMouseDown;
+ 	icon->icon->core->descriptor.handle_enternotify = clipEnterNotify;
+ 	icon->icon->core->descriptor.handle_leavenotify = clipLeaveNotify;
+-- 
+2.56.0
+

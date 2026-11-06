@@ -1,0 +1,188 @@
+From 7d9fb53d6adbe232d8d013ee9eae713596a4b0ca Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Fri, 6 Nov 2026 10:00:27 -0300
+Subject: [PATCH] motif: follow _MOTIF_WM_HINTS changed after the window is
+ mapped
+
+The Motif hints were read only when a window was managed. Qt changes
+them on a mapped window when an application turns its own title bar on
+or off (Telegram's "Use system window frame"), and the window kept the
+decorations of the old hints until it was reopened. A PropertyNotify of
+_MOTIF_WM_HINTS now re-reads them and reconfigures the frame, like the
+Inspector does when attributes change.
+
+Only windows whose decorations come from the application: not desktops,
+docks, menus, tooltips, notifications or splash screens (a type unknown
+to wmaker, such as _KDE_NET_WM_WINDOW_TYPE_OVERRIDE that Qt puts before
+NORMAL, counts as normal). User attributes and IgnoreDecorationChanges
+still win, and so does IgnoreGtkHints for GTK applications.
+
+Tested in Xvfb with a client that maps without decorations and asks for
+them afterwards (and the reverse): decorated/undecorated as asked; the
+unpatched wmaker keeps the first state.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/client.c |  7 ++++++
+ src/motif.c  | 63 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ src/motif.h  |  2 ++
+ src/wmspec.c | 15 +++++++++++++
+ src/wmspec.h |  1 +
+ 5 files changed, 88 insertions(+)
+
+diff --git a/src/client.c b/src/client.c
+index 03584646..d2a569f3 100644
+--- a/src/client.c
++++ b/src/client.c
+@@ -41,6 +41,7 @@
+ #include "appicon.h"
+ #include "appmenu.h"
+ #include "wmspec.h"
++#include "motif.h"
+ #include "misc.h"
+ 
+ 
+@@ -564,6 +565,12 @@ void wClientCheckProperty(WWindow * wwin, XPropertyEvent * event)
+ 			if (wwin->frame)
+ 				wWindowUpdateButtonImages(wwin);
+ 
++#ifdef USE_MWM_HINTS
++		} else if (wMWMIsHintsAtom(event->atom)) {
++
++			wMWMUpdateClientHints(wwin);
++
++#endif
+ 		} else if (event->atom == w_global.atom.wm.colormap_windows) {
+ 
+ 			GetColormapWindows(wwin);
+diff --git a/src/motif.c b/src/motif.c
+index 8acaa389..3d9ebd8d 100644
+--- a/src/motif.c
++++ b/src/motif.c
+@@ -33,6 +33,8 @@
+ #include "icon.h"
+ #include "client.h"
+ #include "motif.h"
++#include "actions.h"
++#include "wmspec.h"
+ 
+ /* Motif window hints */
+ #define MWM_HINTS_FUNCTIONS           (1L << 0)
+@@ -193,3 +195,64 @@ void wMWMCheckClientHints(WWindow *wwin)
+ 	if (getMWMHints(wwin->client_win, &hints))
+ 		setupMWMHints(wwin, &hints);
+ }
++
++/* Same test as discard_hints_from_gtk() in window.c */
++static Bool isGtkApp(WWindow *wwin)
++{
++	Atom type;
++	int format;
++	unsigned long nb_item, nb_remain;
++	unsigned char *result = NULL;
++
++	if (XGetWindowProperty(dpy, wwin->client_win, w_global.atom.desktop.gtk_object_path, 0, 16, False,
++			       AnyPropertyType, &type, &format, &nb_item, &nb_remain, &result) != Success)
++		return False;
++	if (result)
++		XFree(result);
++	return type != None;
++}
++
++Bool wMWMIsHintsAtom(Atom atom)
++{
++	if (!_XA_MOTIF_WM_HINTS)
++		_XA_MOTIF_WM_HINTS = XInternAtom(dpy, "_MOTIF_WM_HINTS", False);
++	return atom == _XA_MOTIF_WM_HINTS;
++}
++
++/*
++ * The client changed _MOTIF_WM_HINTS after the window was mapped. Qt does
++ * that when an application turns its own title bar on or off (Telegram maps
++ * its main window without decorations and asks for them right after): the
++ * hints were only read when the window was managed, so the window stayed
++ * without title bar. The decorations follow the new hints now, like the
++ * Inspector applies its changes. Only normal windows and dialogs: docks,
++ * desktops and splash screens keep what their type gave them; the user's
++ * attributes (and IgnoreDecorationChanges) still win.
++ */
++void wMWMUpdateClientHints(WWindow *wwin)
++{
++	MWMHints hints;
++	WWindowAttributes old = wwin->client_flags;
++
++	if (!wwin->frame || wwin->user_flags.ignore_decoration_changes || !wNETWMHasDecoratedType(wwin))
++		return;
++	if (wPreferences.ignore_gtk_decoration_hints && isGtkApp(wwin))
++		return;
++
++	wwin->client_flags.no_titlebar = 0;
++	wwin->client_flags.no_close_button = 0;
++	wwin->client_flags.no_miniaturize_button = 0;
++	wwin->client_flags.no_resizebar = 0;
++	wwin->client_flags.no_border = 0;
++	if (getMWMHints(wwin->client_win, &hints))
++		setupMWMHints(wwin, &hints);
++
++	if (memcmp(&old, &wwin->client_flags, sizeof(old)) == 0)
++		return;
++	if (WFLAGP(wwin, no_titlebar) && wwin->flags.shaded)
++		wUnshadeWindow(wwin);
++	wwin->frame->flags.need_texture_change = 1;
++	wWindowConfigureBorders(wwin);
++	wFrameWindowPaint(wwin->frame);
++	wNETWMUpdateActions(wwin, False);
++}
+diff --git a/src/motif.h b/src/motif.h
+index f0354dc4..fa08df21 100644
+--- a/src/motif.h
++++ b/src/motif.h
+@@ -23,5 +23,7 @@
+ #define WMMWM_H_
+ 
+ void wMWMCheckClientHints(WWindow *wwin);
++Bool wMWMIsHintsAtom(Atom atom);
++void wMWMUpdateClientHints(WWindow *wwin);
+ 
+ #endif
+diff --git a/src/wmspec.c b/src/wmspec.c
+index f6390b87..ca2b4f03 100644
+--- a/src/wmspec.c
++++ b/src/wmspec.c
+@@ -1500,6 +1500,21 @@ void wNETWMPositionSplash(WWindow *wwin, int *x, int *y, int width, int height)
+ 	}
+ }
+ 
++/* A window whose decorations come from the application, not from its type:
++ * not a desktop, dock, menu, tooltip, splash... A type wmaker does not know
++ * (Qt puts _KDE_NET_WM_WINDOW_TYPE_OVERRIDE before NORMAL) counts as normal. */
++Bool wNETWMHasDecoratedType(WWindow *wwin)
++{
++	Atom t = wwin->type;
++
++	return !(t == net_wm_window_type_desktop || t == net_wm_window_type_dock ||
++		 t == net_wm_window_type_toolbar || t == net_wm_window_type_menu ||
++		 t == net_wm_window_type_dropdown_menu || t == net_wm_window_type_popup_menu ||
++		 t == net_wm_window_type_combo || t == net_wm_window_type_tooltip ||
++		 t == net_wm_window_type_notification || t == net_wm_window_type_dnd ||
++		 t == net_wm_window_type_splash);
++}
++
+ static void updateWindowType(WWindow *wwin)
+ {
+ 	Atom type_ret;
+diff --git a/src/wmspec.h b/src/wmspec.h
+index a6e3955c..20dd2afb 100644
+--- a/src/wmspec.h
++++ b/src/wmspec.h
+@@ -52,6 +52,7 @@ void wNETWMCleanup(WScreen *scr);
+ void wNETWMUpdateWorkarea(WScreen *scr);
+ Bool wNETWMGetUsableArea(WScreen *scr, int head, WArea *area);
+ void wNETWMCheckInitialClientState(WWindow *wwin);
++Bool wNETWMHasDecoratedType(WWindow *wwin);
+ void wNETWMCheckInitialFrameState(WWindow *wwin);
+ Bool wNETWMProcessClientMessage(XClientMessageEvent *event);
+ void wNETWMCheckClientHints(WWindow *wwin, int *layer, int *workspace);
+-- 
+2.56.0
+
