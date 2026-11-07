@@ -1,9 +1,9 @@
 Subject: [PATCH] wayland dockapp: draw the configured tile size
 
-big-windowmaker/wmake-zones#7 and #8: wlmaker suggests the tile minus 6 px.
+big-windowmaker/wmake-zones#7 and #8: wlmaker suggests the tile minus 6 px; never less than 64.
 ---
 diff --git a/src/wayland/wzw-dockapp.c b/src/wayland/wzw-dockapp.c
-index 687e97c..f248ba6 100644
+index 687e97c..b08eec2 100644
 --- a/src/wayland/wzw-dockapp.c
 +++ b/src/wayland/wzw-dockapp.c
 @@ -362,8 +362,12 @@ static void
@@ -14,10 +14,10 @@ index 687e97c..f248ba6 100644
 -    a->height = h > 0 ? h : 64;
 +    /* O ladrilho inteiro, com o relevo próprio, como o dockapp do X11 (a
 +     * janela de ícone de 64x64): o wlmaker sugere aos dockapps nativos o
-+     * ladrilho menos a borda de 3 px de cada lado (58 no de 64). Sem
-+     * sugestão, 64. */
-+    a->width = w > 0 ? w + 6 : 64;
-+    a->height = h > 0 ? h + 6 : 64;
++     * ladrilho menos a borda de 3 px de cada lado (58 no de 64). Nunca
++     * menos de 64: um wlmaker sem essa regra sugere o ContentSize (48). */
++    a->width = w + 6 > 64 ? w + 6 : 64;
++    a->height = h + 6 > 64 ? h + 6 : 64;
      zwlmaker_toplevel_icon_v1_ack_configure(icon, serial);
      a->configured = 1;
      redraw(a);
