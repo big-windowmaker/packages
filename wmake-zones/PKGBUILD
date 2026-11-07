@@ -23,7 +23,7 @@
 # para compilar um clone local antes do push).
 pkgname=wmake-zones
 pkgver=0.3.1
-pkgrel=2
+pkgrel=3
 pkgdesc='Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look'
 arch=(x86_64)
 url='https://github.com/big-windowmaker/wmake-zones'
@@ -79,10 +79,14 @@ source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}"
         0001-tests-dockapp-waits-for-the-tile.patch
         # Mosaico com aplicativos GTK4 (mínimos grandes): troca de lugar ou
         # flutua, "windows -d" com o motivo, compatibilidade nas preferências.
-        0002-tiling-gtk4-minimum-size.patch)
+        0002-tiling-gtk4-minimum-size.patch
+        # Dockapp: arrastar para o Dock e o Clip e o menu do Window Maker
+        # (clique direito na borda e "Opções do Window Maker...").
+        0003-dockapp-drag-and-window-maker-menu.patch)
 sha256sums=('SKIP'
             '753de49341466478952bffc37c44286f3208f6fc5f7df1091ba7dcab065c86ea'
-            '2a7c02e91f37841da09f19d67ce45e2d1a0b52fdf8265f91503c86c502c31a2b')
+            '2a7c02e91f37841da09f19d67ce45e2d1a0b52fdf8265f91503c86c502c31a2b'
+            '45e420229132aca70b5d38cf351eeeb008b800f234acf04f1950dd415ef6530e')
 
 prepare() {
   # A versão do PKGBUILD precisa ser a do projeto (meson.build).
@@ -98,6 +102,9 @@ prepare() {
   fi
   if ! grep -q 'wzx_tile_reason' wmake-zones/src/x11/wzx-tile.c; then
     patch -d wmake-zones -Np1 -i "${srcdir}/0002-tiling-gtk4-minimum-size.patch"
+  fi
+  if ! grep -q 'wm_forward' wmake-zones/src/x11/wzx-dockapp.c; then
+    patch -d wmake-zones -Np1 -i "${srcdir}/0003-dockapp-drag-and-window-maker-menu.patch"
   fi
 }
 

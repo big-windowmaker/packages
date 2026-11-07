@@ -1,0 +1,372 @@
+From 7d9479a0e0f34eb387dc4e74d8b092b5a8c68520 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Fri, 6 Nov 2026 21:45:59 -0300
+Subject: [PATCH] Dockapp: arrastar para o Dock e o Clip e o menu do Window
+ Maker
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+O ladrilho cobre o ícone inteiro e pede os cliques; como o servidor só
+entrega ButtonPress a um cliente por janela, o Window Maker não os
+recebia: não dava para arrastar o ladrilho para o Dock ou o Clip (só com
+Alt) nem ter o menu dele no clique direito.
+
+- Clique esquerdo vale ao soltar; se o ponteiro anda mais de 4 pontos
+  antes, o clique vai para o Window Maker (evento sintético na janela do
+  ícone, depois de soltar a captura implícita), que move o ícone: para o
+  Dock, o Clip, um gaveteiro.
+- Borda de 3 pontos: arrastar move e o clique direito abre o menu do
+  Window Maker, como nos outros dockapps.
+- Menu do ladrilho: "Opções do Window Maker..." abre o menu do Window
+  Maker para o lugar dele (Dock: posição, monitor, gaveteiro, executar,
+  trazer aqui, esconder, configurações, terminar; Clip: o do Clip; solto:
+  o do ícone).
+- Testes: menu do Window Maker pela borda e fechado ao soltar fora,
+  ladrilho solto arrastado para o Dock, clique sem arrastar troca o modo.
+  Com o binário anterior, o menu e o arrastar falham.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ data/man/wmake-zones.1 |   6 ++
+ docs/testing.md        |   7 ++-
+ docs/x11-backend.md    |  13 +++++
+ po/pt_BR.po            |   3 +
+ src/x11/wzx-dockapp.c  | 127 ++++++++++++++++++++++++++++++++++++++---
+ tests/x11-dockapp.sh   |  57 ++++++++++++++++++
+ 6 files changed, 202 insertions(+), 11 deletions(-)
+
+diff --git a/data/man/wmake-zones.1 b/data/man/wmake-zones.1
+index f8e7fc7..908cf26 100644
+--- a/data/man/wmake-zones.1
++++ b/data/man/wmake-zones.1
+@@ -72,6 +72,12 @@ everything off and back on, the wheel cycles the layouts and the right
+ button opens the menu (all configurable in the
+ .B [Dockapp]
+ section).
++Dragging the tile moves it like any Window Maker icon (into the Dock, the
++Clip or a drawer, or out of them with the modifier); the right button on
++its 3-pixel border, or the menu item
++.IR "Window Maker options..." ,
++opens Window Maker's own menu for that place (Dock position, monitor,
++drawers, launch, bring here, hide, settings, kill; or the Clip's menu).
+ In a Wayland session this runs
+ .BR wmake-zones-wl .
+ .TP
+diff --git a/docs/testing.md b/docs/testing.md
+index 3d0063e..9b97009 100644
+--- a/docs/testing.md
++++ b/docs/testing.md
+@@ -71,12 +71,15 @@ e some refaz o mosaico; uma janela com tamanho mínimo que não cabe fica
+ flutuando e entra quando passa a caber; uma janela levada para o outro
+ monitor (como pelo teclado do Window Maker) entra no mosaico de lá.
+ 
+-## Dockapp (`tests/x11-dockapp.sh`, 13 verificações)
++## Dockapp (`tests/x11-dockapp.sh`, 17 verificações)
+ 
+ O ladrilho aberto com `--dockapp`: o modo na tela pelos pixels (LED Z ou M,
+ zona destacada, barra da janela principal, pausa), as teclas Z e M, as setas
+ no Mosaico (algoritmo) e nas Zonas (layout), setas sem efeito com tudo
+-desligado e o clique esquerdo na tela.
++desligado e o clique esquerdo na tela. Depois, com o Window Maker: clique
++direito na borda abre o menu dele e soltar fora o fecha; arrastar o
++ladrilho solto até a coluna do Dock o encaixa; um clique sem arrastar
++continua trocando o modo.
+ 
+ ## Wayland (`tests/wayland-functional.sh`, 48 verificações)
+ 
+diff --git a/docs/x11-backend.md b/docs/x11-backend.md
+index 6099d93..9ad673d 100644
+--- a/docs/x11-backend.md
++++ b/docs/x11-backend.md
+@@ -91,6 +91,19 @@ mudam; uma troca de zonas só redesenha.
+   `~/GNUstep/Defaults/WindowMaker` (MenuTitleBack, MenuTextBack,
+   HighlightColor...). O balão de troca de modo some sozinho em 1,5 s; a
+   dica ao parar o ponteiro é a do próprio Window Maker.
++* Arrastar e o menu do Window Maker: o ladrilho cobre o ícone e pede os
++  cliques, e o servidor só entrega ButtonPress a um cliente por janela: o
++  Window Maker não os recebe (só moveria com Alt). O clique esquerdo vale
++  ao soltar; se o ponteiro anda mais de 4 pontos antes, o serviço solta a
++  captura implícita e passa o clique à janela do ícone (a pai do ladrilho)
++  como evento sintético, como o Window Maker prevê para dockapps; ele pega
++  o ponteiro e move o ícone (Dock, Clip, gaveteiro). O clique direito na
++  borda de 3 pontos, e o item "Opções do Window Maker..." do menu, passam o
++  botão 3 do mesmo jeito: o menu do Dock, do Clip ou do ícone solto. O
++  windowmaker do Big WindowMaker (patch 0018) pega o ponteiro ao arrastar,
++  fecha esse menu com o próximo clique quando o botão já foi solto e
++  devolve o ponteiro no fim; sem ele o arrastar só acompanha o ponteiro
++  devagar e o menu aberto pelo item espera um clique direito.
+ * Monitores: `RRScreenChangeNotify` e `RRNotify` (CRTC e saída) marcam a
+   lista para ser refeita depois do lote; se ela mudou, o seletor e o
+   overlay fecham, o mosaico se refaz e janelas que ficaram fora de todos os
+diff --git a/po/pt_BR.po b/po/pt_BR.po
+index a195410..a4e8f9e 100644
+--- a/po/pt_BR.po
++++ b/po/pt_BR.po
+@@ -1291,3 +1291,6 @@ msgstr "Compatibilidade de aplicativos"
+ 
+ msgid "Windows and tiling"
+ msgstr "Janelas e mosaico"
++
++msgid "Window Maker options..."
++msgstr "Opções do Window Maker..."
+diff --git a/src/x11/wzx-dockapp.c b/src/x11/wzx-dockapp.c
+index 3b5d156..cb60e24 100644
+--- a/src/x11/wzx-dockapp.c
++++ b/src/x11/wzx-dockapp.c
+@@ -5,8 +5,22 @@
+  *
+  *   clique esquerdo   Zonas <-> Mosaico          ([Dockapp] LeftClick)
+  *   clique do meio    desliga / religa o último   ([Dockapp] MiddleClick)
+- *   clique direito    menu no estilo do Window Maker, com submenus
++ *   clique direito    menu no estilo do Window Maker, com submenus, e
++ *                     "Opções do Window Maker..." (o menu do Dock, do Clip
++ *                     ou do ícone, do próprio Window Maker)
+  *   roda              layout anterior/seguinte    ([Dockapp] Wheel)
++ *   arrastar          move o ladrilho como qualquer ícone do Window Maker
++ *                     (para o Dock, o Clip, um gaveteiro, fora deles)
++ *   borda (3 px)      como a borda dos outros dockapps: arrastar move,
++ *                     clique direito abre o menu do Window Maker
++ *
++ * O ladrilho cobre o ícone inteiro e pede os cliques; o Window Maker então
++ * não os recebe (um cliente só pode pedir ButtonPress numa janela) e só
++ * moveria o ladrilho com Alt. Por isso o arrastar e o menu dele chegam como
++ * o próprio Window Maker prevê para dockapps: o clique vai para a janela do
++ * ícone, a pai da nossa, como evento sintético (send_event), depois de
++ * soltarmos a captura implícita do ponteiro; ele então pega o ponteiro e
++ * move o ícone ou abre o menu (dock.c e appicon.c tratam send_event).
+  *
+  * O ladrilho mostra a miniatura do layout ativo numa "tela" afundada e,
+  * embaixo, duas teclas com LED: Z (zonas, verde) e M (mosaico, âmbar);
+@@ -286,8 +300,8 @@ void
+ wzx_dockapp_create(wzx *z)
+ {
+     XSetWindowAttributes a = { 0 };
+-    a.event_mask = ExposureMask | ButtonPressMask | ButtonReleaseMask | StructureNotifyMask | EnterWindowMask |
+-                   LeaveWindowMask;
++    a.event_mask = ExposureMask | ButtonPressMask | ButtonReleaseMask | Button1MotionMask | StructureNotifyMask |
++                   EnterWindowMask | LeaveWindowMask;
+     a.background_pixmap = ParentRelative;
+     z->dock_win = XCreateWindow(z->dpy, z->root, 0, 0, TILE, TILE, 0, CopyFromParent, InputOutput, CopyFromParent,
+                                 CWEventMask, &a);
+@@ -441,7 +455,7 @@ balloon_show(wzx *z, long ms)
+ enum { K_ACT = 0, K_SUB, K_RADIO };
+ enum { M_TOP = 0, M_MODE, M_LAYOUT, M_ALGO, M_SETTINGS, M_HELP };
+ enum {
+-    A_NONE = 0, A_UNDO, A_REDO, A_RESTORE, A_RESTORE_ALL, A_ARRANGE, A_FLOAT, A_EDITOR, A_PREFS, A_KEYS, A_RULES,
++    A_NONE = 0, A_WM_MENU, A_UNDO, A_REDO, A_RESTORE, A_RESTORE_ALL, A_ARRANGE, A_FLOAT, A_EDITOR, A_PREFS, A_KEYS, A_RULES,
+     A_MONITORS, A_HELP_KEYS, A_ABOUT, A_MODE_ZONES, A_MODE_TILING, A_MODE_OFF, A_EMERGENCY,
+     A_LAYOUT0 = 100, A_ALGO0 = 1000,
+ };
+@@ -492,6 +506,65 @@ menu_title(int menu)
+     }
+ }
+ 
++/* A janela do ícone do Window Maker em que o ladrilho está (Dock, Clip,
++ * gaveteiro ou ícone solto); None sem gerenciador que o tenha adotado. */
++static Window
++wm_parent(wzx *z)
++{
++    Window root, parent = None, *kids = NULL;
++    unsigned nk = 0;
++    if (!z->dock_icon || !XQueryTree(z->dpy, z->dock_icon, &root, &parent, &kids, &nk))
++        return None;
++    if (kids)
++        XFree(kids);
++    return parent == z->root ? None : parent;
++}
++
++/* Passa um clique ao Window Maker como ele prevê para dockapps: evento
++ * sintético na janela do ícone, com a nossa captura implícita solta antes
++ * (senão a dele falha). Botão 1: ele move o ícone; botão 3: o menu. */
++static int
++wm_forward(wzx *z, unsigned button, int x, int y, int xr, int yr, unsigned state)
++{
++    Window parent = wm_parent(z), child;
++    if (parent == None)
++        return 0;
++    int px = x, py = y;
++    XTranslateCoordinates(z->dpy, z->dock_icon, parent, x, y, &px, &py, &child);
++    XUngrabPointer(z->dpy, CurrentTime);
++    XEvent ev = { 0 };
++    ev.xbutton.type = ButtonPress;
++    ev.xbutton.display = z->dpy;
++    ev.xbutton.window = parent;
++    ev.xbutton.root = z->root;
++    ev.xbutton.subwindow = None;
++    ev.xbutton.time = CurrentTime;
++    ev.xbutton.x = px;
++    ev.xbutton.y = py;
++    ev.xbutton.x_root = xr;
++    ev.xbutton.y_root = yr;
++    ev.xbutton.state = state;
++    ev.xbutton.button = button;
++    ev.xbutton.same_screen = True;
++    XSendEvent(z->dpy, parent, False, ButtonPressMask, &ev);
++    XFlush(z->dpy);
++    return 1;
++}
++
++/* Clique esquerdo no ladrilho: vale ao soltar; se o ponteiro andar antes,
++ * é um arrastar e vai para o Window Maker. Último clique direito: onde o
++ * menu do Window Maker abre. */
++#define DRAG_THRESHOLD 4
++#define EDGE 3
++static struct {
++    int pending, x, y, xr, yr;
++    unsigned state;
++} press;
++static struct {
++    int x, y, xr, yr;
++    unsigned state;
++} last_right;
++
+ static void
+ fill_menu(wzx *z, mpop *p, int menu)
+ {
+@@ -511,6 +584,11 @@ fill_menu(wzx *z, mpop *p, int menu)
+         add(p, K_ACT, A_FLOAT, 0, _("Active window: floating/tiled"));
+         add(p, K_SUB, M_SETTINGS, 0, _("Settings"));
+         add(p, K_SUB, M_HELP, 0, _("Help"));
++        /* O menu do Window Maker para este lugar (Dock: posição, monitor,
++         * gaveteiro, executar, trazer aqui, esconder, configurações,
++         * terminar; Clip: o do Clip; solto: o do ícone). */
++        if (wm_parent(z) != None)
++            add(p, K_ACT, A_WM_MENU, 0, _("Window Maker options..."));
+         break;
+     case M_MODE:
+         add(p, K_RADIO, A_MODE_ZONES, m == WZ_MODE_ZONES, _("Zones"));
+@@ -845,6 +923,9 @@ do_action(wzx *z, int id)
+ {
+     char cmd[300];
+     switch (id) {
++    case A_WM_MENU:
++        wm_forward(z, Button3, last_right.x, last_right.y, last_right.xr, last_right.yr, last_right.state);
++        break;
+     case A_UNDO: wzx_command(z, "undo", NULL, 0); break;
+     case A_REDO: wzx_command(z, "redo", NULL, 0); break;
+     case A_RESTORE: wzx_command(z, "restore", NULL, 0); break;
+@@ -1089,20 +1170,48 @@ wzx_dockapp_event(wzx *z, XEvent *e)
+         if (balloon && !balloon_hide_at)
+             balloon_close(z);
+         break;
+-    case ButtonPress:
++    case ButtonPress: {
+         tip_at = 0;
+-        if (e->xbutton.button == 1 && row_hit(e->xbutton.x, e->xbutton.y) != HIT_NONE) {
+-            row_click(z, row_hit(e->xbutton.x, e->xbutton.y));
++        XButtonEvent *b = &e->xbutton;
++        int edge = b->x < EDGE || b->y < EDGE || b->x >= TILE - EDGE || b->y >= TILE - EDGE;
++        /* A borda é do Window Maker, como nos outros dockapps. */
++        if (edge && (b->button == 1 || b->button == 3) &&
++            wm_forward(z, b->button, b->x, b->y, b->x_root, b->y_root, b->state)) {
++            press.pending = 0;
++            break;
++        }
++        if (b->button == 1) {
++            press = (typeof(press)){ 1, b->x, b->y, b->x_root, b->y_root, b->state };
+             break;
+         }
+-        switch (e->xbutton.button) {
+-        case 1: click(z, z->cfg.click[0], 0); break;
++        if (b->button == 3)
++            last_right = (typeof(last_right)){ b->x, b->y, b->x_root, b->y_root, b->state };
++        switch (b->button) {
+         case 2: click(z, z->cfg.click[1], 0); break;
+         case 3: click(z, z->cfg.click[2], 0); break;
+         case 4: click(z, z->cfg.click[3], -1); break;
+         case 5: click(z, z->cfg.click[3], 1); break;
+         }
+         break;
++    }
++    case MotionNotify:
++        /* Andou com o botão esquerdo apertado: o Window Maker move o ícone
++         * (e o encaixa no Dock, no Clip ou num gaveteiro). */
++        if (press.pending && (abs(e->xmotion.x - press.x) > DRAG_THRESHOLD ||
++                              abs(e->xmotion.y - press.y) > DRAG_THRESHOLD)) {
++            press.pending = 0;
++            wm_forward(z, Button1, press.x, press.y, press.xr, press.yr, press.state);
++        }
++        break;
++    case ButtonRelease:
++        if (e->xbutton.button == 1 && press.pending) {
++            press.pending = 0;
++            if (row_hit(press.x, press.y) != HIT_NONE)
++                row_click(z, row_hit(press.x, press.y));
++            else
++                click(z, z->cfg.click[0], 0);
++        }
++        break;
+     case DestroyNotify:
+         if (w == z->dock_win) {
+             /* Tirado do Dock e fechado: o daemon continua, sem ladrilho. */
+diff --git a/tests/x11-dockapp.sh b/tests/x11-dockapp.sh
+index 5f0ad7c..19703a8 100755
+--- a/tests/x11-dockapp.sh
++++ b/tests/x11-dockapp.sh
+@@ -125,5 +125,62 @@ check "seta ▶ nas Zonas: o layout seguinte" '[ "$("$WZ" status | sed -n "s/^la
+ press 32 20
+ check "clique na tela: alterna Zonas e Mosaico (clique esquerdo padrão) ($(mode))" '[ "$(mode)" = tiling ]'
+ check "o serviço continua no ar" '"$WZ" status >/dev/null 2>&1'
++
++# O ladrilho cobre o ícone e pede os cliques; arrastar e o menu do Window
++# Maker chegam a ele como eventos sintéticos (send_event) na janela do
++# ícone. Borda, clique direito (apertado, como a mão): o menu do Window
++# Maker (aqui o do ícone solto) muda a tela em volta do ladrilho; soltar
++# fora dele o fecha.
++around() {
++	import -window root -crop 300x300+"$tx"+$((ty - 236)) +repage "$TMP/$1.png"
++}
++changed() {
++	python3 -I -c 'import sys
++from PIL import Image, ImageChops
++d = ImageChops.difference(Image.open(sys.argv[1]).convert("RGB"), Image.open(sys.argv[2]).convert("RGB"))
++print(sum(1 for p in d.getdata() if p != (0, 0, 0)))' "$TMP/$1.png" "$TMP/$2.png"
++}
++xdotool mousemove 500 200
++sleep 2 # o balão da última troca de modo some
++around a0
++xdotool mousemove $((tx + 1)) $((ty + 30)) mousedown 3
++sleep 0.8
++around a1
++c1=$(changed a0 a1)
++check "borda, clique direito: o menu do Window Maker ($c1 pontos mudaram)" '[ "$c1" -gt 2000 ]'
++xdotool mousemove 500 200 mouseup 3
++sleep 0.8
++around a2
++c2=$(changed a0 a2)
++check "soltar fora do menu o fecha ($c2 pontos diferentes)" '[ "$c2" -lt 2000 ]'
++# Arrastar o ladrilho solto até a coluna do Dock (no canto de cima, à
++# direita, só com o ícone principal): ele entra no Dock.
++xdotool mousemove $((tx + 32)) $((ty + 20))
++sleep 0.3
++xdotool mousedown 1
++sleep 0.2
++for i in $(seq 1 30); do
++	xdotool mousemove $((tx + 32 + (992 - tx - 32) * i / 30)) $((ty + 20 + (84 - ty - 20) * i / 30))
++	sleep 0.06
++done
++sleep 0.3
++xdotool mouseup 1
++sleep 1.2
++docked=$(python3 - <<'PY'
++import re, subprocess
++out = subprocess.run(["xwininfo", "-root", "-children"], capture_output=True, text=True).stdout
++for m in re.finditer(r"(0x[0-9a-f]+) .*?\s(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", out):
++    w, h, x, y = map(int, m.group(2, 3, 4, 5))
++    if (w, h) == (64, 64) and x >= 960 and 32 <= y <= 160:
++        g = subprocess.run(["xwininfo", "-id", m.group(1)], capture_output=True, text=True).stdout
++        if "IsViewable" in g:
++            print(x, y)
++PY
++)
++check "arrastar o ladrilho até a coluna do Dock: ele entra no Dock (${docked:-não entrou})" '[ -n "$docked" ]'
++[ -n "$docked" ] && read -r tx ty <<<"$docked"
++mode_before=$(mode)
++press 32 20
++check "um clique (sem arrastar) continua trocando o modo ($mode_before -> $(mode))" '[ "$(mode)" != "$mode_before" ]'
+ echo "1..$n"
+ [ "$fails" = 0 ]
+-- 
+2.56.0
+

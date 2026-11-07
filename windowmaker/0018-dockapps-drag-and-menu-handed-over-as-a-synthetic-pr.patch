@@ -1,0 +1,123 @@
+From 36407391e51a24a69efc1ee547d6378dec0746cc Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Fri, 6 Nov 2026 21:45:19 -0300
+Subject: [PATCH] dockapps: drag and menu handed over as a synthetic press
+
+A dockapp whose window covers the icon and selects the clicks (the
+wmake-zones tile) gets every press itself: Window Maker sees nothing and
+the tile could only be moved with the modifier. Window Maker already
+accepts a synthetic ButtonPress on the icon from such a dockapp (the
+menu of a docked icon, dock.c and appicon.c check send_event), but the
+hand-over broke in three places:
+
+- wHandleAppIconMove relied on the implicit grab of a real press. With a
+  synthetic one the motion stopped reaching it as soon as the pointer
+  left the icon. It now takes the pointer itself, and does nothing when
+  the button is already up.
+- menuMouseDown waited for the release of the very button of the press.
+  When that button was already up (a quick click, or the menu opened
+  from an item of the dockapp's own menu) the release never came and the
+  menu stayed open. Then the next release of any button ends it.
+- The explicit pointer grab taken for a synthetic press was never given
+  back, so the following clicks kept coming to Window Maker. The menu
+  now releases it when it ends.
+
+Tested in Xvfb with the wmake-zones tile: dragged from the Dock to the
+Clip and back, a loose tile into the Dock, the Dock and Clip menus from
+the tile's border and from its "Window Maker options..." item, closed by
+a click outside, and the tile's own menu working afterwards.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/appicon.c | 23 +++++++++++++++++++++++
+ src/menu.c    | 26 +++++++++++++++++++++++++-
+ 2 files changed, 48 insertions(+), 1 deletion(-)
+
+diff --git a/src/appicon.c b/src/appicon.c
+index 7e127cb9..e06f0231 100644
+--- a/src/appicon.c
++++ b/src/appicon.c
+@@ -777,6 +777,29 @@ Bool wHandleAppIconMove(WAppIcon *aicon, XEvent *event)
+ 	if (wPreferences.flags.noupdates && originalDock != NULL)
+ 		return False;
+ 
++	/* A dockapp whose window takes all the clicks passes a drag on to us as
++	 * a synthetic ButtonPress on the icon (as for the menu, see
++	 * appIconMouseDown and iconMouseDown). There is no implicit grab of ours
++	 * then: without one the motion stops reaching us as soon as the
++	 * pointer leaves the icon, so take the pointer here. */
++	if (event->xbutton.send_event) {
++		Window qroot, qchild;
++		int qrx, qry, qwx, qwy;
++		unsigned int qmask;
++
++		if (XGrabPointer(dpy, icon->core->window, True, ButtonMotionMask
++				 | ButtonReleaseMask | ButtonPressMask, GrabModeAsync,
++				 GrabModeAsync, None, None, CurrentTime) != GrabSuccess)
++			wwarning("pointer grab failed for appicon move");
++		/* The button is already up: no drag to follow (its release will
++		 * never come). */
++		if (XQueryPointer(dpy, scr->root_win, &qroot, &qchild, &qrx, &qry, &qwx, &qwy, &qmask) &&
++		    !(qmask & (Button1Mask << (event->xbutton.button - Button1)))) {
++			XUngrabPointer(dpy, CurrentTime);
++			return False;
++		}
++	}
++
+ 	if (!(event->xbutton.state & MOD_MASK))
+ 		wRaiseFrame(icon->core);
+ 	else {
+diff --git a/src/menu.c b/src/menu.c
+index 989ca5ed..2eb2a290 100644
+--- a/src/menu.c
++++ b/src/menu.c
+@@ -1822,6 +1822,23 @@ static void menuMouseDown(WObjDescriptor * desc, XEvent * event)
+ 
+ 	close_on_exit = (bev->send_event || menu->flags.brother);
+ 
++	/* A dockapp that takes its own clicks passes the right click on as a
++	 * synthetic event (the menu of a docked dockapp). When the button is
++	 * already up by then (the click was quicker than the hand-over, or it
++	 * came from an item of the dockapp's own menu), the release of that
++	 * button never comes: the next release of any button ends it instead,
++	 * as a click does on a menu opened by a click. */
++	Bool any_release = False;
++	if (bev->send_event && bev->button >= Button1 && bev->button <= Button5) {
++		Window qroot, qchild;
++		int qrx, qry, qwx, qwy;
++		unsigned int qmask;
++
++		if (XQueryPointer(dpy, scr->root_win, &qroot, &qchild, &qrx, &qry, &qwx, &qwy, &qmask) &&
++		    !(qmask & (Button1Mask << (bev->button - Button1))))
++			any_release = True;
++	}
++
+ 	smenu = findMenu(scr, &x, &y);
+ 	if (!smenu) {
+ 		x = -1;
+@@ -2028,7 +2045,7 @@ static void menuMouseDown(WObjDescriptor * desc, XEvent * event)
+ 			break;
+ 
+ 		case ButtonRelease:
+-			if (ev.xbutton.button == event->xbutton.button)
++			if (ev.xbutton.button == event->xbutton.button || any_release)
+ 				done = 1;
+ 			break;
+ 
+@@ -2096,6 +2113,13 @@ static void menuMouseDown(WObjDescriptor * desc, XEvent * event)
+ 		wMenuMove(parentMenu(desc->parent), old_frame_x, old_frame_y, True);
+ 
+  byebye:
++	/* A synthetic press (a dockapp handing its click over, or a menu opened
++	 * from a click elsewhere) came with an explicit pointer grab
++	 * (appIconMouseDown, iconMouseDown), which a button release does not
++	 * end: give the pointer back, or the next clicks keep coming here. */
++	if (bev->send_event)
++		XUngrabPointer(dpy, CurrentTime);
++
+ 	/* Just to be sure in case we skip the 2 above because of a goto byebye */
+ 	if (menu && menu->timer) {
+ 		WMDeleteTimerHandler(menu->timer);
+-- 
+2.56.0
+
