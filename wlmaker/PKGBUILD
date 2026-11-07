@@ -218,7 +218,7 @@
 #   0121  o mosaico confere o tamanho mínimo do cliente (GTK4/libadwaita:
 #         Pamac 760x200): troca de lugar ou flutua, sem sobrepor as outras;
 #         "windows -d" com o motivo
-#   0122-0137: dockapps e Clip do X11 no Wayland, Info Panel, menu e tema (branch big-wm/missao-2026-11)
+#   0122-0139: dockapps e Clip do X11 no Wayland, Info Panel, menu e tema (branch big-wm/missao-2026-11)
 #   0122  os espaços dos lançadores no Clip deixam o ponteiro passar
 #   0123  dockapps do X11 (XWayland) no Dock e no Clip: a janela de ícone
 #         vira o ladrilho, como no Window Maker
@@ -247,9 +247,15 @@
 #         de redimensionar
 #   0137  revisão: líder X11 continua fora da tela; atributos refeitos no
 #         commit das janelas X11
+#   0138  XWayland: _NET_WM_MOVERESIZE (Steam, Chromium/Electron, GTK com
+#         decoração do cliente arrastam e redimensionam), maximizar, tela
+#         cheia e ativar pedidos pelo programa; o X sabe a posição real
+#   0139  xdg: a janela é a geometria (Chrome sem margens a mais), a moldura
+#         recorta a sombra do cliente, estados tiled nas zonas, modo de
+#         decoração relido no SIGHUP
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=21
+pkgrel=22
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -416,6 +422,8 @@ _patches=(
   0135-Window-Maker-s-root-mouse-actions-and-ViKeyMenus-WPr.patch
   0136-Window-attributes-WMWindowAttributes-and-no-resize-b.patch
   0137-xwl-Review-fixes-leader-stays-off-screen-attributes-.patch
+  0138-xwl-_NET_WM_MOVERESIZE-maximize-fullscreen-activate-.patch
+  0139-xdg-window-geometry-as-the-window-frame-crops-it-til.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -554,7 +562,9 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'f177306ce1bb72cadd94bda63e6e8fa01a665812c6785df7a575cc58b027f6fa'
             '2cc38ad6e5b1a8c0f73a04ddf41ee8ac08843c09c4f3660482340bcc4fd8061e'
             '8bd61bdacf36d52559fa27632381a1bc1c4eaa71405a23c4b85f4f27b0ba2faa'
-            '4bbfa0c2b4457f2462d515bd31bce712fa4864b33483ac110d360b46216310a5')
+            '4bbfa0c2b4457f2462d515bd31bce712fa4864b33483ac110d360b46216310a5'
+            '90b915faaea43904e260b677e12e487d37f07dc3feda6fdc5442c7717b07c48a'
+            'ef8b86f47a43266c641bbba9bf67ac5f8a302f2c1f664a0ccefd431b9f5c66a9')
 
 prepare() {
   cd wlmaker

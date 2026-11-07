@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r80.g7481afe
-	pkgrel = 21
+	pkgrel = 22
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -160,6 +160,8 @@ pkgbase = wlmaker
 	source = 0135-Window-Maker-s-root-mouse-actions-and-ViKeyMenus-WPr.patch
 	source = 0136-Window-attributes-WMWindowAttributes-and-no-resize-b.patch
 	source = 0137-xwl-Review-fixes-leader-stays-off-screen-attributes-.patch
+	source = 0138-xwl-_NET_WM_MOVERESIZE-maximize-fullscreen-activate-.patch
+	source = 0139-xdg-window-geometry-as-the-window-frame-crops-it-til.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
 	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
@@ -292,5 +294,7 @@ pkgbase = wlmaker
 	sha256sums = 2cc38ad6e5b1a8c0f73a04ddf41ee8ac08843c09c4f3660482340bcc4fd8061e
 	sha256sums = 8bd61bdacf36d52559fa27632381a1bc1c4eaa71405a23c4b85f4f27b0ba2faa
 	sha256sums = 4bbfa0c2b4457f2462d515bd31bce712fa4864b33483ac110d360b46216310a5
+	sha256sums = 90b915faaea43904e260b677e12e487d37f07dc3feda6fdc5442c7717b07c48a
+	sha256sums = ef8b86f47a43266c641bbba9bf67ac5f8a302f2c1f664a0ccefd431b9f5c66a9
 
 pkgname = wlmaker
