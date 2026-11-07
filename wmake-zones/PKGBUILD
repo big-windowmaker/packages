@@ -117,7 +117,9 @@ prepare() {
   if ! grep -q 'Manter este aplicativo sempre _flutuante' wmake-zones/po/pt_BR.po; then
     patch -d wmake-zones -Np1 -i "${srcdir}/0004-review-wm-menu-swap-translation.patch"
   fi
-  if ! grep -q 'w + 6 > 64 ? w + 6 : 64' wmake-zones/src/wayland/wzw-dockapp.c; then
+  # Uma fonte local (WMAKE_ZONES_SOURCE) que já tem o tamanho novo, de
+  # qualquer revisão (#7, #8), não recebe o patch da tag.
+  if ! grep -q 'w + 6' wmake-zones/src/wayland/wzw-dockapp.c; then
     patch -d wmake-zones -Np1 -i "${srcdir}/0005-wayland-dockapp-whole-64-px-tile.patch"
   fi
 }
