@@ -1,0 +1,242 @@
+From da15d627d1d38cb1e6a81c32411d6e3e90cdbc25 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sat, 7 Nov 2026 03:01:23 -0300
+Subject: [PATCH 125/128] wlmdock: A double-click on the Dock's main tile shows
+ the Info Panel
+
+Window Maker shows its Info Panel on a double-click on the Dock's top tile.
+The state's `Dock.InfoCommand` is the command for that (Big WindowMaker:
+big-wm-about), run with Window Maker's double-click time.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/dock/launcher.c |  6 +++++
+ src/dock/launcher.h |  3 +++
+ src/dock/maintile.c | 61 +++++++++++++++++++++++++++++++++++++++++++++
+ src/dock/maintile.h | 14 +++++++++++
+ src/wlmdock.c       | 17 +++++++++++++
+ 5 files changed, 101 insertions(+)
+
+diff --git a/src/dock/launcher.c b/src/dock/launcher.c
+index 68efb30..23db994 100644
+--- a/src/dock/launcher.c
++++ b/src/dock/launcher.c
+@@ -399,6 +399,12 @@ void wlmdock_launcher_set_drawer_side(bool left)
+     _wlmdock_launcher_drawer_left = left;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++uint32_t wlmdock_launcher_double_click_msec(void)
++{
++    return _wlmdock_launcher_double_click_msec;
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmdock_launcher_autolaunch(wlmdock_launcher_t *launcher_ptr)
+ {
+diff --git a/src/dock/launcher.h b/src/dock/launcher.h
+index 89a375e..73f3427 100644
+--- a/src/dock/launcher.h
++++ b/src/dock/launcher.h
+@@ -119,6 +119,9 @@ void wlmdock_launcher_autolaunch(wlmdock_launcher_t *launcher_ptr);
+ 
+ extern const bs_test_set_t wlmdock_launcher_test_set;
+ 
++/** @return Window Maker's double-click time, as set by the click mode. */
++uint32_t wlmdock_launcher_double_click_msec(void);
++
+ #ifdef __cplusplus
+ }  // extern "C"
+ #endif  // __cplusplus
+diff --git a/src/dock/maintile.c b/src/dock/maintile.c
+index 4ab9e66..95b2333 100644
+--- a/src/dock/maintile.c
++++ b/src/dock/maintile.c
+@@ -25,6 +25,8 @@
+ #include <stdlib.h>
+ #include <sys/stat.h>
+ 
++#include "launcher.h"
++
+ /* == Declarations ========================================================= */
+ 
+ /** State of the Dock's main tile. */
+@@ -39,6 +41,12 @@ struct _wlmdock_maintile_t {
+     wlmdock_maintile_menu_handler_t menu_handler;
+     /** Argument for @ref wlmdock_maintile_t::menu_handler. */
+     void                      *menu_handler_ud_ptr;
++    /** Command for a double-click (the Info Panel). NULL: None. */
++    char                      *info_command_ptr;
++    /** Monitor that the Info Panel's process is passed to. */
++    wlm_util_subprocess_monitor_t *monitor_ptr;
++    /** Time of the last click, for telling a double-click. 0: None. */
++    uint32_t                  last_click_msec;
+ };
+ 
+ static void _wlmdock_maintile_element_destroy(wlmtk_element_t *element_ptr);
+@@ -151,6 +159,9 @@ void wlmdock_maintile_destroy(wlmdock_maintile_t *maintile_ptr)
+         maintile_ptr->image_ptr = NULL;
+     }
+     wlmtk_tile_fini(&maintile_ptr->super_tile);
++    if (NULL != maintile_ptr->info_command_ptr) {
++        free(maintile_ptr->info_command_ptr);
++    }
+     free(maintile_ptr);
+ }
+ 
+@@ -205,9 +216,46 @@ bool _wlmdock_maintile_pointer_button(
+         maintile_ptr->menu_handler(maintile_ptr,
+                                    maintile_ptr->menu_handler_ud_ptr);
+     }
++    // Window Maker: A double-click on the Dock's top tile shows the Info
++    // Panel.
++    if (BTN_LEFT == button_event_ptr->button &&
++        WLMTK_BUTTON_CLICK == button_event_ptr->type &&
++        NULL != maintile_ptr->info_command_ptr) {
++        uint32_t t = button_event_ptr->time_msec;
++        bool double_click = 0 != maintile_ptr->last_click_msec &&
++            t - maintile_ptr->last_click_msec <=
++            wlmdock_launcher_double_click_msec();
++        maintile_ptr->last_click_msec = double_click ? 0 : (t ? t : 1);
++        if (double_click && NULL != maintile_ptr->monitor_ptr) {
++            bs_subprocess_t *sp_ptr = bs_subprocess_create_cmdline(
++                maintile_ptr->info_command_ptr);
++            if (NULL == sp_ptr ||
++                !wlm_util_subprocess_monitor_run(
++                    maintile_ptr->monitor_ptr, sp_ptr)) {
++                bs_log(BS_ERROR, "Failed to run '%s'",
++                       maintile_ptr->info_command_ptr);
++            }
++        }
++    }
+     return true;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmdock_maintile_set_info_command(
++    wlmdock_maintile_t *maintile_ptr,
++    const char *cmdline_ptr,
++    wlm_util_subprocess_monitor_t *monitor_ptr)
++{
++    if (NULL != maintile_ptr->info_command_ptr) {
++        free(maintile_ptr->info_command_ptr);
++        maintile_ptr->info_command_ptr = NULL;
++    }
++    if (NULL != cmdline_ptr) {
++        maintile_ptr->info_command_ptr = logged_strdup(cmdline_ptr);
++    }
++    maintile_ptr->monitor_ptr = monitor_ptr;
++}
++
+ /* == Unit tests =========================================================== */
+ 
+ static void test_create(bs_test_t *test_ptr);
+@@ -262,6 +310,19 @@ void test_create(bs_test_t *test_ptr)
+         wlmtk_tile_element(wlmdock_maintile_tile(m)), &e);
+     BS_TEST_VERIFY_EQ(test_ptr, 1, calls);
+ 
++    // A double-click with an Info command and no monitor: Nothing runs.
++    wlmdock_maintile_set_info_command(m, "true", NULL);
++    BS_TEST_VERIFY_STREQ(test_ptr, "true", m->info_command_ptr);
++    e.type = WLMTK_BUTTON_CLICK;
++    e.time_msec = 100;
++    wlmtk_element_pointer_button(
++        wlmtk_tile_element(wlmdock_maintile_tile(m)), &e);
++    BS_TEST_VERIFY_EQ(test_ptr, 100, m->last_click_msec);
++    e.time_msec = 200;
++    wlmtk_element_pointer_button(
++        wlmtk_tile_element(wlmdock_maintile_tile(m)), &e);
++    BS_TEST_VERIFY_EQ(test_ptr, 0, m->last_click_msec);
++
+     wlmdock_maintile_destroy(m);
+     wlm_util_files_destroy(files_ptr);
+ }
+diff --git a/src/dock/maintile.h b/src/dock/maintile.h
+index a634a56..0912c07 100644
+--- a/src/dock/maintile.h
++++ b/src/dock/maintile.h
+@@ -24,6 +24,7 @@
+ 
+ #include "toolkit/toolkit.h"
+ #include "util/files.h"
++#include "util/subprocess_monitor.h"
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -72,6 +73,19 @@ void wlmdock_maintile_set_menu_handler(
+     wlmdock_maintile_menu_handler_t handler,
+     void *ud_ptr);
+ 
++/**
++ * Sets the command that a double-click on the main tile runs: Window Maker
++ * shows its Info Panel there. NULL: Nothing.
++ *
++ * @param maintile_ptr
++ * @param cmdline_ptr
++ * @param monitor_ptr         Monitor the started process is passed to.
++ */
++void wlmdock_maintile_set_info_command(
++    wlmdock_maintile_t *maintile_ptr,
++    const char *cmdline_ptr,
++    wlm_util_subprocess_monitor_t *monitor_ptr);
++
+ /**
+  * Resolves an icon file: A path (starting with '/' or '~'), or a name looked
+  * up in `${XDG_DATA_DIRS}/wlmaker/icons`.
+diff --git a/src/wlmdock.c b/src/wlmdock.c
+index 591016a..1a0f890 100644
+--- a/src/wlmdock.c
++++ b/src/wlmdock.c
+@@ -190,6 +190,13 @@ struct wlmdock_state {
+     char                      *icon_ptr;
+     /** Whether `Icon` was given. */
+     bool                      has_icon;
++    /**
++     * Command for a double-click on the main tile: Window Maker shows its
++     * Info Panel ("About") there.
++     */
++    char                      *info_command_ptr;
++    /** Whether `InfoCommand` was given. */
++    bool                      has_info_command;
+ };
+ 
+ static wlmdock_t *_wlmdock_create(
+@@ -317,6 +324,8 @@ const bspl_desc_t _wlmdock_plist_desc[] = {
+                     margin, has_margin, 0),
+     BSPL_DESC_STRING("Icon", false, struct wlmdock_state,
+                      icon_ptr, has_icon, ""),
++    BSPL_DESC_STRING("InfoCommand", false, struct wlmdock_state,
++                     info_command_ptr, has_info_command, ""),
+     BSPL_DESC_SENTINEL(),
+ };
+ 
+@@ -444,11 +453,18 @@ int main(int argc, const char **argv)
+         if (NULL == dock_ptr->maintile_ptr) return EXIT_FAILURE;
+         wlmdock_maintile_set_menu_handler(
+             dock_ptr->maintile_ptr, _wlmdock_open_main_menu, dock_ptr);
++        if (state.has_info_command && NULL != state.info_command_ptr &&
++            '\0' != *state.info_command_ptr) {
++            wlmdock_maintile_set_info_command(
++                dock_ptr->maintile_ptr, state.info_command_ptr,
++                dock_ptr->subprocess_monitor_ptr);
++        }
+         wlmdock_tilebox_add_tile(
+             dock_ptr->tilebox_ptr,
+             wlmdock_maintile_tile(dock_ptr->maintile_ptr));
+     }
+     if (NULL != state.icon_ptr) free(state.icon_ptr);
++    if (NULL != state.info_command_ptr) free(state.info_command_ptr);
+ 
+     _wlmdock_set_launchers(dock_ptr, state.launchers_array_ptr);
+     if (state.launchers_array_ptr) bspl_array_unref(state.launchers_array_ptr);
+@@ -830,6 +846,7 @@ bool _wlmdock_load_positioning(
+         bspl_array_unref(state.launchers_array_ptr);
+     }
+     if (NULL != state.icon_ptr) free(state.icon_ptr);
++    if (NULL != state.info_command_ptr) free(state.info_command_ptr);
+     *positioning_ptr = state.positioning;
+     positioning_ptr->margin = state.margin;
+     positioning_ptr->overlay = dock_ptr->positioning.overlay;
+-- 
+2.56.0
+
