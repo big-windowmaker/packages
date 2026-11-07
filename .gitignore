@@ -6,3 +6,7 @@
 /*/*.tar.gz
 # Saída do build local com podman
 /out/
+# Clones das fontes git (updpkgsums/makepkg rodados no diretório do pacote)
+/wlmaker/wlmaker/
+/wlmaker/libbase/
+/wlmaker/inih/

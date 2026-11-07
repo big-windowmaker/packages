@@ -1,0 +1,256 @@
+From fbdc86875e73d3d3647c959326005054291fabbd Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sat, 7 Nov 2026 03:19:23 -0300
+Subject: [PATCH 126/128] root_menu: Dragging the title bar pins the menu, as
+ in Window Maker
+
+A root menu opened by a click took any press outside of it as "close",
+the title bar included: It could not be moved nor kept. Now, as in
+Window Maker, dragging its title bar pins it: It moves along, gets the
+close button, and stays open (after a click elsewhere, and after choosing
+an item) until closed.
+
+The menu offers a press outside of it to its listeners first
+(wlmtk_menu_events_t::outside_press); the root menu takes the ones on its
+title bar.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/toolkit/menu.h | 20 ++++++++++++++
+ src/action_item.c      |  3 ++-
+ src/root_menu.c        | 61 ++++++++++++++++++++++++++++++++++++++++++
+ src/root_menu.h        |  6 +++++
+ src/toolkit/menu.c     | 11 +++++++-
+ 5 files changed, 99 insertions(+), 2 deletions(-)
+
+diff --git a/include/toolkit/menu.h b/include/toolkit/menu.h
+index e3cbe8c..480a34d 100644
+--- a/include/toolkit/menu.h
++++ b/include/toolkit/menu.h
+@@ -77,8 +77,28 @@ typedef struct {
+     struct wl_signal          request_close;
+     /** The dtor has been called. */
+     struct wl_signal          destroy;
++    /**
++     * A right-click menu that stays open (opened by a click) got a press
++     * outside of it. The argument is a @ref wlmtk_menu_outside_press_t: A
++     * listener that takes the press (eg. on the menu window's title bar, to
++     * pin the menu, as Window Maker does) sets `claimed`. Else, the menu
++     * closes.
++     */
++    struct wl_signal          outside_press;
+ } wlmtk_menu_events_t;
+ 
++/** Argument of @ref wlmtk_menu_events_t::outside_press. */
++typedef struct {
++    /** The button event. */
++    const wlmtk_button_event_t *button_event_ptr;
++    /** Pointer position, relative to the menu element. */
++    double                    x;
++    /** Pointer position, relative to the menu element. */
++    double                    y;
++    /** Set by a listener that took the press: The menu stays open. */
++    bool                      claimed;
++} wlmtk_menu_outside_press_t;
++
+ /**
+  * Creates a menu.
+  *
+diff --git a/src/action_item.c b/src/action_item.c
+index bfac611..4575476 100644
+--- a/src/action_item.c
++++ b/src/action_item.c
+@@ -200,7 +200,8 @@ void _wlmaker_action_item_handle_triggered(
+         action_item_ptr->action,
+         action_item_ptr->action_arg_ptr);
+ 
+-    if (NULL != action_item_ptr->server_ptr->root_menu_ptr) {
++    if (NULL != action_item_ptr->server_ptr->root_menu_ptr &&
++        !wlmaker_root_menu_pinned(action_item_ptr->server_ptr->root_menu_ptr)) {
+         wlmtk_menu_set_open(
+             wlmaker_root_menu_menu(action_item_ptr->server_ptr->root_menu_ptr),
+             false);
+diff --git a/src/root_menu.c b/src/root_menu.c
+index 0312217..da54ed2 100644
+--- a/src/root_menu.c
++++ b/src/root_menu.c
+@@ -32,6 +32,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <unistd.h>
++#include <linux/input-event-codes.h>
+ #include <wayland-server-core.h>
+ #define WLR_USE_UNSTABLE
+ #include <wlr/types/wlr_cursor.h>
+@@ -65,6 +66,8 @@ struct _wlmaker_root_menu_t {
+     struct wl_listener        menu_open_changed_listener;
+     /** Listener for @ref wlmtk_menu_events_t::request_close. */
+     struct wl_listener        menu_request_close_listener;
++    /** Listener for @ref wlmtk_menu_events_t::outside_press. */
++    struct wl_listener        menu_outside_press_listener;
+ 
+     /** Listener for @ref wlmtk_window_events_t::request_close. */
+     struct wl_listener        window_request_close_listener;
+@@ -75,6 +78,8 @@ struct _wlmaker_root_menu_t {
+     wlmaker_server_t          *server_ptr;
+     /** Scrolls the menu at the edge of the output. */
+     wlmaker_menu_scroll_t     *menu_scroll_ptr;
++    /** Pinned (by dragging its title bar): Stays open after an action. */
++    bool                      pinned;
+ };
+ 
+ /** State of a menu generator, while waiting for subprocess to complete. */
+@@ -103,6 +108,9 @@ static void _wlmaker_root_menu_handle_window_set_activated(
+ static void _wlmaker_root_menu_handle_menu_open_changed(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
++static void _wlmaker_root_menu_handle_outside_press(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
+ static void _wlmaker_root_menu_handle_request_close(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
+@@ -152,6 +160,8 @@ static wlmtk_menu_item_t *_wlmaker_root_menu_create_disabled_item(
+ 
+ /** Indicates to load the file specified in following argument. */
+ static const char *_wlmaker_root_menu_statement_include = "IncludePlistMenu";
++/** How far above the menu a press counts as on its title bar, in pixels. */
++static const double _wlmaker_root_menu_titlebar_reach = 32;
+ 
+ /**
+  * Indicates to generate the menu using a shell command specified in the
+@@ -225,6 +235,10 @@ wlmaker_root_menu_t *wlmaker_root_menu_create(
+         &wlmtk_menu_events(root_menu_ptr->menu_ptr)->request_close,
+         &root_menu_ptr->menu_request_close_listener,
+         _wlmaker_root_menu_handle_request_close);
++    wlmtk_util_connect_listener_signal(
++        &wlmtk_menu_events(root_menu_ptr->menu_ptr)->outside_press,
++        &root_menu_ptr->menu_outside_press_listener,
++        _wlmaker_root_menu_handle_outside_press);
+ 
+     root_menu_ptr->window_ptr = wlmtk_window_create(
+         wlmtk_menu_element(root_menu_ptr->menu_ptr),
+@@ -295,6 +309,8 @@ void wlmaker_root_menu_destroy(wlmaker_root_menu_t *root_menu_ptr)
+     if (NULL != root_menu_ptr->menu_ptr) {
+         wlmtk_util_disconnect_listener(
+             &root_menu_ptr->menu_request_close_listener);
++        wlmtk_util_disconnect_listener(
++            &root_menu_ptr->menu_outside_press_listener);
+         wlmtk_util_disconnect_listener(
+             &root_menu_ptr->menu_open_changed_listener);
+         wlmtk_menu_destroy(root_menu_ptr->menu_ptr);
+@@ -343,6 +359,12 @@ wlmtk_window_t *wlmaker_root_menu_window(wlmaker_root_menu_t *root_menu_ptr)
+     return root_menu_ptr->window_ptr;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++bool wlmaker_root_menu_pinned(wlmaker_root_menu_t *root_menu_ptr)
++{
++    return root_menu_ptr->pinned;
++}
++
+ /* ------------------------------------------------------------------------- */
+ wlmtk_menu_t *wlmaker_root_menu_menu(wlmaker_root_menu_t *root_menu_ptr)
+ {
+@@ -421,6 +443,9 @@ void _wlmaker_root_menu_handle_menu_open_changed(
+ {
+     wlmaker_root_menu_t *root_menu_ptr = BS_CONTAINER_OF(
+         listener_ptr, wlmaker_root_menu_t, menu_open_changed_listener);
++    if (!wlmtk_menu_is_open(root_menu_ptr->menu_ptr)) {
++        root_menu_ptr->pinned = false;
++    }
+     if (!wlmtk_menu_is_open(root_menu_ptr->menu_ptr) &&
+         NULL != wlmtk_window_get_workspace(root_menu_ptr->window_ptr)) {
+         wlmtk_workspace_unmap_window(
+@@ -444,6 +469,42 @@ void _wlmaker_root_menu_handle_menu_open_changed(
+     }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Listens to @ref wlmtk_menu_events_t::outside_press. Window Maker: Dragging
++ * the title bar of a menu opened by a click pins it. It stays open (also
++ * after choosing an item), with the close button, and moves along.
++ */
++void _wlmaker_root_menu_handle_outside_press(
++    struct wl_listener *listener_ptr,
++    void *data_ptr)
++{
++    wlmaker_root_menu_t *root_menu_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_root_menu_t, menu_outside_press_listener);
++    wlmtk_menu_outside_press_t *press_ptr = data_ptr;
++    wlmtk_element_t *e = wlmtk_menu_element(root_menu_ptr->menu_ptr);
++    int width = 0;
++    wlmtk_element_get_dimensions(e, NULL, NULL, &width, NULL);
++    // The title bar is right above the menu.
++    if (BTN_LEFT != press_ptr->button_event_ptr->button ||
++        press_ptr->y >= 0 ||
++        press_ptr->y < -_wlmaker_root_menu_titlebar_reach ||
++        press_ptr->x < 0 || press_ptr->x >= width) return;
++    wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(
++        root_menu_ptr->window_ptr);
++    if (NULL == workspace_ptr) return;
++
++    press_ptr->claimed = true;
++    root_menu_ptr->pinned = true;
++    if (NULL != e->parent_container_ptr) {
++        wlmtk_container_pointer_grab_release(e->parent_container_ptr, e);
++    }
++    wlmtk_menu_set_mode(root_menu_ptr->menu_ptr, WLMTK_MENU_MODE_NORMAL);
++    wlmtk_window_set_properties(root_menu_ptr->window_ptr,
++                                WLMTK_WINDOW_PROPERTY_CLOSABLE);
++    wlmtk_workspace_begin_window_move(workspace_ptr, root_menu_ptr->window_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Listens to @ref wlmtk_menu_events_t::request_close. Closes the menu. */
+ void _wlmaker_root_menu_handle_request_close(
+diff --git a/src/root_menu.h b/src/root_menu.h
+index 4506ee1..5bc8b2b 100644
+--- a/src/root_menu.h
++++ b/src/root_menu.h
+@@ -77,6 +77,12 @@ wlmtk_window_t *wlmaker_root_menu_window(wlmaker_root_menu_t *root_menu_ptr);
+ /** @return Pointer to @ref wlmtk_menu_t of the root menu. */
+ wlmtk_menu_t *wlmaker_root_menu_menu(wlmaker_root_menu_t *root_menu_ptr);
+ 
++/**
++ * @return Whether the root menu is pinned (its title bar was dragged, as in
++ *     Window Maker): It stays open after an action.
++ */
++bool wlmaker_root_menu_pinned(wlmaker_root_menu_t *root_menu_ptr);
++
+ /**
+  * Opens the root menu at the pointer, on the current workspace. It is kept
+  * within the usable area of the output: Not under docks and panels. That is
+diff --git a/src/toolkit/menu.c b/src/toolkit/menu.c
+index b6007e5..fe56377 100644
+--- a/src/toolkit/menu.c
++++ b/src/toolkit/menu.c
+@@ -210,6 +210,7 @@ wlmtk_menu_t *wlmtk_menu_create(wlmtk_menu_style_ref_t *style_ref_ptr)
+     wl_signal_init(&menu_ptr->events.open_changed);
+     wl_signal_init(&menu_ptr->events.request_close);
+     wl_signal_init(&menu_ptr->events.destroy);
++    wl_signal_init(&menu_ptr->events.outside_press);
+     return menu_ptr;
+ }
+ 
+@@ -746,7 +747,15 @@ bool _wlmtk_menu_sticky_pointer_button(
+ 
+     if (WLMTK_BUTTON_DOWN == button_event_ptr->type &&
+         !element_ptr->pointer_inside) {
+-        wl_signal_emit(&menu_ptr->events.request_close, NULL);
++        wlmtk_menu_outside_press_t press = {
++            .button_event_ptr = button_event_ptr,
++            .x = element_ptr->last_pointer_motion_event.x,
++            .y = element_ptr->last_pointer_motion_event.y,
++        };
++        wl_signal_emit(&menu_ptr->events.outside_press, &press);
++        if (!press.claimed) {
++            wl_signal_emit(&menu_ptr->events.request_close, NULL);
++        }
+         return true;
+     }
+ 
+-- 
+2.56.0
+

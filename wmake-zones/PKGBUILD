@@ -11,7 +11,7 @@
 #   wmake-zones-wl     dockapp nativo do wlmaker, sem XWayland
 #   libwmake-zones-engine.a
 #                      núcleo de geometria, mosaico e configuração; o
-#                      wlmaker liga nele (patches 0104-0120 do pacote
+#                      wlmaker liga nele (patches 0104-0121 do pacote
 #                      wlmaker) para ter as mesmas zonas no Wayland
 #
 # Zonas ligadas por padrão (desde a 0.3), mosaico desligado: as janelas
@@ -23,7 +23,7 @@
 # para compilar um clone local antes do push).
 pkgname=wmake-zones
 pkgver=0.3.1
-pkgrel=1
+pkgrel=4
 pkgdesc='Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look'
 arch=(x86_64)
 url='https://github.com/big-windowmaker/wmake-zones'
@@ -66,7 +66,7 @@ checkdepends=(
 )
 optdepends=(
   'windowmaker: zonas e mosaico na sessão X11'
-  'wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patches 0104-0120)'
+  'wlmaker: zonas e mosaico na sessão Wayland (wlmaker do Big WindowMaker, patches 0104-0121)'
   'picom: zonas translúcidas (sem compositor, contornos com o destino em listras)'
 )
 # O núcleo estático (libwmake-zones-engine.a) é usado pelo wlmaker. Sem LTO:
@@ -76,9 +76,21 @@ options=(staticlibs !lto)
 source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}"
         # Só teste, depois da tag (já no main): o teste do dockapp espera o
         # ladrilho aparecer em vez de 1 s fixo e pula sem o xwininfo.
-        0001-tests-dockapp-waits-for-the-tile.patch)
+        0001-tests-dockapp-waits-for-the-tile.patch
+        # Mosaico com aplicativos GTK4 (mínimos grandes): troca de lugar ou
+        # flutua, "windows -d" com o motivo, compatibilidade nas preferências.
+        0002-tiling-gtk4-minimum-size.patch
+        # Dockapp: arrastar para o Dock e o Clip e o menu do Window Maker
+        # (clique direito na borda e "Opções do Window Maker...").
+        0003-dockapp-drag-and-window-maker-menu.patch
+        # Revisão: menu do Window Maker na posição atual do ladrilho, uma
+        # troca de lugar por vez no mosaico, tradução, teste com python3 -I.
+        0004-review-wm-menu-swap-translation.patch)
 sha256sums=('SKIP'
-            '753de49341466478952bffc37c44286f3208f6fc5f7df1091ba7dcab065c86ea')
+            '753de49341466478952bffc37c44286f3208f6fc5f7df1091ba7dcab065c86ea'
+            '2a7c02e91f37841da09f19d67ce45e2d1a0b52fdf8265f91503c86c502c31a2b'
+            '45e420229132aca70b5d38cf351eeeb008b800f234acf04f1950dd415ef6530e'
+            '7fc8ed37ee0563e8f382f3c4ba578d97d50c6944752d094d7612bed3c24d4568')
 
 prepare() {
   # A versão do PKGBUILD precisa ser a do projeto (meson.build).
@@ -91,6 +103,15 @@ prepare() {
   # Sem o WMAKE_ZONES_SOURCE (fonte local do main), o patch de teste da tag.
   if ! grep -q 'Numa máquina lenta (CI)' wmake-zones/tests/x11-dockapp.sh; then
     patch -d wmake-zones -Np1 -i "${srcdir}/0001-tests-dockapp-waits-for-the-tile.patch"
+  fi
+  if ! grep -q 'wzx_tile_reason' wmake-zones/src/x11/wzx-tile.c; then
+    patch -d wmake-zones -Np1 -i "${srcdir}/0002-tiling-gtk4-minimum-size.patch"
+  fi
+  if ! grep -q 'wm_forward' wmake-zones/src/x11/wzx-dockapp.c; then
+    patch -d wmake-zones -Np1 -i "${srcdir}/0003-dockapp-drag-and-window-maker-menu.patch"
+  fi
+  if ! grep -q 'Manter este aplicativo sempre _flutuante' wmake-zones/po/pt_BR.po; then
+    patch -d wmake-zones -Np1 -i "${srcdir}/0004-review-wm-menu-swap-translation.patch"
   fi
 }
 

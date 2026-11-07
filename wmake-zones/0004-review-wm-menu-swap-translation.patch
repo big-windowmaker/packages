@@ -1,0 +1,117 @@
+From 6c0398cf85c5d664cc845ae09c88284e4e7bfb1b Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sat, 7 Nov 2026 04:28:28 -0300
+Subject: [PATCH] =?UTF-8?q?Revis=C3=A3o=20do=20PR=20#5:=20menu=20do=20Wind?=
+ =?UTF-8?q?ow=20Maker,=20troca=20no=20mosaico,=20tradu=C3=A7=C3=A3o,=20tes?=
+ =?UTF-8?q?te?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Dockapp: "Opções do Window Maker..." manda o clique sintético na posição
+  em que o ladrilho está agora (o menu pode ter sido aberto por outro botão
+  e o ladrilho, mudado de lugar); sem clique direito anotado, o centro.
+- Mosaico: no máximo uma troca de lugar por monitor a cada organização (o
+  mesmo conflito trocava e destrocava, gastando as passadas antes de a
+  janela flutuar), com o conjunto BSP que o compute pode ter criado.
+- pt_BR: "Manter este aplicativo sempre _flutuante".
+- tests/x11-dockapp.sh: o Pillow conferido com o mesmo python3 -I das
+  comparações (sem ele, pula em vez de falhar).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ po/pt_BR.po           |  2 +-
+ src/x11/wzx-dockapp.c | 12 ++++++++++--
+ src/x11/wzx-tile.c    |  9 ++++++++-
+ tests/x11-dockapp.sh  |  2 +-
+ 4 files changed, 20 insertions(+), 5 deletions(-)
+
+diff --git a/po/pt_BR.po b/po/pt_BR.po
+index a4e8f9e..0b2fb71 100644
+--- a/po/pt_BR.po
++++ b/po/pt_BR.po
+@@ -1273,7 +1273,7 @@ msgid "Title"
+ msgstr "Título"
+ 
+ msgid "Always _float this application"
+-msgstr "Sempre _flutuante este aplicativo"
++msgstr "Manter este aplicativo sempre _flutuante"
+ 
+ msgid ""
+ "A window whose minimum size is larger than its cell floats instead of "
+diff --git a/src/x11/wzx-dockapp.c b/src/x11/wzx-dockapp.c
+index cb60e24..956218e 100644
+--- a/src/x11/wzx-dockapp.c
++++ b/src/x11/wzx-dockapp.c
+@@ -923,9 +923,17 @@ do_action(wzx *z, int id)
+ {
+     char cmd[300];
+     switch (id) {
+-    case A_WM_MENU:
+-        wm_forward(z, Button3, last_right.x, last_right.y, last_right.xr, last_right.yr, last_right.state);
++    case A_WM_MENU: {
++        /* A posição na raiz vem de onde o ladrilho está agora (o menu pode
++         * ter sido aberto por outro botão, e o ladrilho, mudado de lugar);
++         * sem um clique direito anotado, o centro do ladrilho. */
++        int ix, iy;
++        tile_origin(z, &ix, &iy);
++        int x = last_right.x ? last_right.x : TILE / 2;
++        int y = last_right.y ? last_right.y : TILE / 2;
++        wm_forward(z, Button3, x, y, ix + x, iy + y, last_right.state);
+         break;
++    }
+     case A_UNDO: wzx_command(z, "undo", NULL, 0); break;
+     case A_REDO: wzx_command(z, "redo", NULL, 0); break;
+     case A_RESTORE: wzx_command(z, "restore", NULL, 0); break;
+diff --git a/src/x11/wzx-tile.c b/src/x11/wzx-tile.c
+index 7802770..9bbaffb 100644
+--- a/src/x11/wzx-tile.c
++++ b/src/x11/wzx-tile.c
+@@ -358,8 +358,14 @@ wzx_tile_run(wzx *z)
+          * crescem e as outras podem passar a caber. Tirar todas as que não
+          * cabiam numa passada só deixava de fora quem cabia na seguinte. */
+         tset *ts = set_for(z, mon, 0);
++        /* Uma troca de lugar por vez no monitor: sem ela, o mesmo conflito
++         * podia trocar e destrocar a cada passada, gastando as 16 antes de
++         * a janela flutuar. */
++        int swaps = 0;
+         for (int pass = 0; pass < 16; pass++) {
+             n = compute(z, mon, ws, rects, WZX_MAX_WIN);
++            /* O conjunto (BSP) que o compute pode ter criado agora. */
++            ts = set_for(z, mon, 0);
+             /* Uma única janela não cabe: antes de tirá-la, ela troca de
+              * lugar com outra do conjunto quando assim as duas cabem (a
+              * célula maior para quem pede mais; GTK4/libadwaita declaram
+@@ -374,7 +380,7 @@ wzx_tile_run(wzx *z)
+                 conflicts += wz_fit(&ri, &li) == WZ_FIT_CONFLICT;
+             }
+             int swapped = 0;
+-            for (int i = 0; i < n && !swapped && conflicts == 1; i++) {
++            for (int i = 0; i < n && !swapped && conflicts == 1 && swaps == 0; i++) {
+                 wz_limits li = limits(ws[i]);
+                 wz_rect ri = rects[i];
+                 if (wz_fit(&ri, &li) != WZ_FIT_CONFLICT)
+@@ -395,6 +401,7 @@ wzx_tile_run(wzx *z)
+                             ws[i]->wm_class ? ws[i]->wm_class : "?", ws[j]->wm_class ? ws[j]->wm_class : "?",
+                             li.min_w, li.min_h);
+                     swapped = 1;
++                    swaps++;
+                 }
+             }
+             if (swapped)
+diff --git a/tests/x11-dockapp.sh b/tests/x11-dockapp.sh
+index 19703a8..ff28f99 100755
+--- a/tests/x11-dockapp.sh
++++ b/tests/x11-dockapp.sh
+@@ -22,7 +22,7 @@ for tool in wmaker xdotool xwininfo import python3; do
+ 	command -v $tool >/dev/null || { echo "1..0 # SKIP sem $tool"; exit 0; }
+ done
+ [ -x "$XVFB" ] || { echo "1..0 # SKIP sem Xvfb"; exit 0; }
+-python3 -c 'import PIL' 2>/dev/null || { echo "1..0 # SKIP sem python-pillow"; exit 0; }
++python3 -I -c 'import PIL' 2>/dev/null || { echo "1..0 # SKIP sem python-pillow"; exit 0; }
+ 
+ TMP=$(mktemp -d "${TMPDIR:-/tmp}/wzd.XXXXXX")
+ [ ${#TMP} -le 60 ] || { rmdir "$TMP"; TMP=$(mktemp -d /tmp/wzd.XXXXXX); }
+-- 
+2.56.0
+

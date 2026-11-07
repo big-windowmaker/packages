@@ -1,0 +1,3 @@
+# O teste do dockapp (arrastar até o Dock, menu do Window Maker) precisa do
+# Window Maker com o patch 0018: o deste repositório, não o do Manjaro.
+windowmaker

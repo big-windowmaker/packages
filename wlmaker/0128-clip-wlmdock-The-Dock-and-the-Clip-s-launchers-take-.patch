@@ -1,0 +1,132 @@
+From a7b12527cd34daf72c081bd5b39215212015f84f Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sat, 7 Nov 2026 03:24:54 -0300
+Subject: [PATCH 128/128] clip, wlmdock: The Dock and the Clip's launchers take
+ a new theme at once
+
+A new theme (eg. the dark mode, through the configuration reload) styled
+the windows, menus, the Clip and the dock-apps' tiles, but not the tiles
+of `wlmdock` (the Dock, and the Clip's launchers): Those kept the old
+theme until the next login. Window Maker's Dock changes at once.
+
+The Clip's theme handler sends SIGHUP to the `wlmdock` processes, which
+start over with the same arguments, reading the new theme.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/clip.c    | 20 ++++++++++++++++++--
+ src/wlmdock.c | 24 ++++++++++++++++++++++++
+ 2 files changed, 42 insertions(+), 2 deletions(-)
+
+diff --git a/src/clip.c b/src/clip.c
+index c1fddb0..b50530d 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -260,6 +260,9 @@ static void _wlmaker_clip_handle_pointer_leave(
+ static void _wlmaker_clip_handle_theme_changed(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
++static void _wlmaker_clip_signal_wlmdock_with(
++    wlmaker_server_t *server_ptr,
++    int signal_number);
+ 
+ /* == Data ================================================================= */
+ 
+@@ -641,6 +644,15 @@ void wlmaker_clip_destroy(wlmaker_clip_t *clip_ptr)
+ /** Tells `wlmdock` processes (the Dock, the Clip's launchers) to re-read
+  * the state file: Sends SIGUSR1. */
+ static void _wlmaker_clip_signal_wlmdock(wlmaker_server_t *server_ptr)
++{
++    _wlmaker_clip_signal_wlmdock_with(server_ptr, SIGUSR1);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Sends `signal_number` to the `wlmdock` processes. SIGHUP: New theme. */
++static void _wlmaker_clip_signal_wlmdock_with(
++    wlmaker_server_t *server_ptr,
++    int signal_number)
+ {
+     // wlmdock (the Dock, and the Clip's launchers) re-reads the state file
+     // on SIGUSR1.
+@@ -653,9 +665,9 @@ static void _wlmaker_clip_signal_wlmdock(wlmaker_server_t *server_ptr)
+         if (0 == strcmp(name_ptr, "wlmdock")) {
+             pid_t pid = 0;
+             wl_client_get_credentials(wl_client_ptr, &pid, NULL, NULL);
+-            if (1 < pid && 0 != kill(pid, SIGUSR1)) {
++            if (1 < pid && 0 != kill(pid, signal_number)) {
+                 bs_log(BS_WARNING | BS_ERRNO, "Failed kill(%"PRIdMAX
+-                       ", SIGUSR1)", (intmax_t)pid);
++                       ", %d)", (intmax_t)pid, signal_number);
+             }
+         }
+         free(name_ptr);
+@@ -1994,6 +2006,10 @@ void _wlmaker_clip_handle_theme_changed(
+     // overwrites.
+     _wlmaker_clip_apply_button_state(clip_ptr);
+     _wlmaker_clip_update_spacers(clip_ptr, &style_ptr->tile);
++
++    // The Dock and the Clip's launchers (wlmdock) take the new theme too,
++    // as Window Maker's Dock does at once.
++    _wlmaker_clip_signal_wlmdock_with(clip_ptr->server_ptr, SIGHUP);
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/wlmdock.c b/src/wlmdock.c
+index 1a0f890..4380601 100644
+--- a/src/wlmdock.c
++++ b/src/wlmdock.c
+@@ -204,6 +204,8 @@ static wlmdock_t *_wlmdock_create(
+     wlmaker_config_style_t *style_ptr);
+ static void _wlmdock_destroy(wlmdock_t *dock_ptr);
+ static int handle_client_signal(int fd, uint32_t mask, void *data_ptr);
++/** The program's arguments, for starting over (SIGHUP). */
++static char **_wlmdock_argv;
+ static void _wlmdock_handle_backend_destroy(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
+@@ -333,6 +335,11 @@ const bspl_desc_t _wlmdock_plist_desc[] = {
+ /** The dock's main program. */
+ int main(int argc, const char **argv)
+ {
++    // For starting over with a new theme (SIGHUP): The arguments as given.
++    _wlmdock_argv = calloc(argc + 1, sizeof(char *));
++    for (int i = 0; NULL != _wlmdock_argv && i < argc; ++i) {
++        _wlmdock_argv[i] = strdup(argv[i]);
++    }
+     if (!wlm_util_backtrace_setup(argv[0]) ||
+         // Ideally: xdgStateHome. But: libxdg-basedir is using FreeDesktop
+         // specification v0.7, and XDG_STATE_HOME was added with v0.8 only.
+@@ -537,6 +544,11 @@ wlmdock_t *_wlmdock_create(
+         _wlmdock_destroy(dock_ptr);
+         return NULL;
+     }
++    // SIGHUP: The compositor loaded another theme (eg. the dark mode).
++    if (!wlmcl_client_add_signal(dock_ptr->client_ptr, SIGHUP)) {
++        _wlmdock_destroy(dock_ptr);
++        return NULL;
++    }
+     wlmtk_util_connect_listener_signal(
+         &wlmcl_client_events(dock_ptr->client_ptr)->pointer_leave,
+         &dock_ptr->pointer_leave_listener,
+@@ -800,6 +812,18 @@ int handle_client_signal(int fd, uint32_t mask, void *data_ptr)
+                 "Launchers");
+             if (NULL != a) _wlmdock_set_launchers(dock_ptr, a);
+             bspl_dict_unref(state_dict_ptr);
++        } else if (rd == sizeof(siginfo) && SIGHUP == siginfo.ssi_signo &&
++                   NULL != _wlmdock_argv) {
++            // A new theme: Start over with it (the same arguments). Every
++            // tile, the menus and the balloons take it.
++            bs_log(BS_INFO, "wlmdock: New theme, restarting.");
++            sigset_t set;
++            sigemptyset(&set);
++            sigaddset(&set, SIGHUP);
++            sigaddset(&set, SIGUSR1);
++            sigprocmask(SIG_UNBLOCK, &set, NULL);
++            execv("/proc/self/exe", _wlmdock_argv);
++            bs_log(BS_ERROR | BS_ERRNO, "Failed execv(/proc/self/exe)");
+         } else if (rd == sizeof(siginfo)) {
+             bs_log(BS_INFO, "wlmdock: Signal %d caught, exiting loop.",
+                    siginfo.ssi_signo);
+-- 
+2.56.0
+
