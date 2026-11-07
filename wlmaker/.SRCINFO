@@ -151,6 +151,7 @@ pkgbase = wlmaker
 	source = 0126-root_menu-Dragging-the-title-bar-pins-the-menu-as-in.patch
 	source = 0127-i18n-Dock-position-as-in-the-X11-session-Posi-o-do-D.patch
 	source = 0128-clip-wlmdock-The-Dock-and-the-Clip-s-launchers-take-.patch
+	source = 0129-layer-desktop-Exclusive-zones-count-for-the-panels-o.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
 	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
@@ -274,5 +275,6 @@ pkgbase = wlmaker
 	sha256sums = 16612bb746ebcb4ecd659096901ec1d71fc44a066def6cafe1d0298cdeaa1ef7
 	sha256sums = 227ddb1e0499763cfacdb5b159e5a407758070e30c49d2afcdb9ad9bb983e21b
 	sha256sums = 492a6fe15b6ea977138a57fa3de29bd086c96929f6b2df6d461d42b19654dbc3
+	sha256sums = 9aa7de11d8a47fcdbb541f0c918a00f2a9560b4268e981052630f60d39e4eadc
 
 pkgname = wlmaker
