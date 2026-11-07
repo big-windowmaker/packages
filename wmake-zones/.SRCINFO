@@ -1,7 +1,7 @@
 pkgbase = wmake-zones
 	pkgdesc = Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look
 	pkgver = 0.3.1
-	pkgrel = 3
+	pkgrel = 4
 	url = https://github.com/big-windowmaker/wmake-zones
 	arch = x86_64
 	license = GPL-2.0-or-later
@@ -44,9 +44,11 @@ pkgbase = wmake-zones
 	source = 0001-tests-dockapp-waits-for-the-tile.patch
 	source = 0002-tiling-gtk4-minimum-size.patch
 	source = 0003-dockapp-drag-and-window-maker-menu.patch
-	sha256sums = SKIP
+	source = 0004-review-wm-menu-swap-translation.patch
+	sha256sums = 5a20dc0faf4eb1de322ca3d11c35230a7306e2cc6b184897c9702bfa2d7a905b
 	sha256sums = 753de49341466478952bffc37c44286f3208f6fc5f7df1091ba7dcab065c86ea
 	sha256sums = 2a7c02e91f37841da09f19d67ce45e2d1a0b52fdf8265f91503c86c502c31a2b
 	sha256sums = 45e420229132aca70b5d38cf351eeeb008b800f234acf04f1950dd415ef6530e
+	sha256sums = 7fc8ed37ee0563e8f382f3c4ba578d97d50c6944752d094d7612bed3c24d4568
 
 pkgname = wmake-zones

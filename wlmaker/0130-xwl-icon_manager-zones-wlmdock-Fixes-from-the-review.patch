@@ -1,0 +1,218 @@
+From cbe798efa2c4aedf4f9a78b5c558d251b9aff396 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sat, 7 Nov 2026 04:22:35 -0300
+Subject: [PATCH] xwl, icon_manager, zones, wlmdock: Fixes from the review of
+ wlmaker 20
+
+- X11 dock-apps: An icon window left where its tile was before the tiles
+  moved took the clicks meant for the tile now there (the X server gives
+  the pointer to the topmost X window at its position: clicks on
+  wmcliphist opened wmshutdown's dialog). When the pointer comes to an X11
+  tile, all icon windows are placed where their tiles are, and that one
+  goes on top (only managed windows: wmshutdown's is override-redirect).
+- A menu of an X11 program without a parent keeps the pointer through the
+  release of the click that opened it; only the release of a press
+  outside of it ends the grab.
+- zones: A window out of the mosaic (or all, with autotile off) forgets
+  that it did not fit: `windows -d` no longer says so, and back in the
+  mosaic it starts afresh.
+- wlmdock: If starting over with the new theme fails, the signals stay
+  blocked (taken through the signalfd).
+- xwl.h: The doc comment of xwl_atom_name back on it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/icon_manager.c | 31 +++++++++++++++++++++++++++++++
+ src/wlmdock.c      |  3 +++
+ src/xwl.h          |  2 +-
+ src/xwl_surface.c  | 17 ++++++++++++++++-
+ src/zones.c        |  9 ++++++++-
+ 5 files changed, 59 insertions(+), 3 deletions(-)
+
+diff --git a/src/icon_manager.c b/src/icon_manager.c
+index 950a32e..a494a0c 100644
+--- a/src/icon_manager.c
++++ b/src/icon_manager.c
+@@ -86,6 +86,8 @@ struct _wlmaker_icon_manager_t {
+      * the first popup.
+      */
+     wlmtk_dock_t              *popup_dock_ptr;
++    /** Adopted X11 icon windows. @see wlmaker_toplevel_icon_t::xwl_link. */
++    struct wl_list            xwl_icons;
+ };
+ 
+ /** State of a toplevel icon. */
+@@ -180,6 +182,8 @@ struct _wlmaker_toplevel_icon_t {
+     int                       xwl_width;
+     /** See @ref wlmaker_toplevel_icon_t::xwl_width. */
+     int                       xwl_height;
++    /** Node in @ref wlmaker_icon_manager_t::xwl_icons. */
++    struct wl_list            xwl_link;
+     /** Shape of the X11 icon window: The rectangles shown. None: All. */
+     struct wlr_box            *xwl_shape_ptr;
+     /** Number of rectangles at @ref wlmaker_toplevel_icon_t::xwl_shape_ptr. */
+@@ -326,6 +330,7 @@ wlmaker_icon_manager_t *wlmaker_icon_manager_create(
+     if (NULL == icon_manager_ptr) return NULL;
+     icon_manager_ptr->server_ptr = server_ptr;
+     icon_manager_ptr->wl_display_ptr = wl_display_ptr;
++    wl_list_init(&icon_manager_ptr->xwl_icons);
+ 
+     icon_manager_ptr->wl_global_ptr = wl_global_create(
+         wl_display_ptr,
+@@ -645,6 +650,10 @@ void wlmaker_toplevel_icon_destroy(
+     if (NULL != toplevel_icon_ptr->xwl_name_ptr) {
+         free(toplevel_icon_ptr->xwl_name_ptr);
+     }
++    if (NULL != toplevel_icon_ptr->xwl_link.prev) {
++        wl_list_remove(&toplevel_icon_ptr->xwl_link);
++        toplevel_icon_ptr->xwl_link.prev = NULL;
++    }
+     _wlmaker_toplevel_icon_xwl_forget_shape_trees(toplevel_icon_ptr);
+     if (NULL != toplevel_icon_ptr->xwl_shape_ptr) {
+         free(toplevel_icon_ptr->xwl_shape_ptr);
+@@ -1210,6 +1219,27 @@ bool _wlmaker_toplevel_icon_element_pointer_accepts_motion(
+         element_ptr, wlmaker_toplevel_icon_t,
+         super_tile.super_container.super_element);
+     wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
++#if defined(WLMAKER_HAVE_XWAYLAND)
++    // An X11 dock-app: The X server gives the pointer to the topmost X window
++    // at its position. Another dock-app's icon window, left where its tile
++    // was before the tiles moved, could be there: This one is where its
++    // tile is, and on top, before the pointer comes.
++    if (NULL != toplevel_icon_ptr->wlr_xwayland_surface_ptr &&
++        !element_ptr->pointer_inside) {
++        wlmaker_toplevel_icon_t *i_ptr;
++        wl_list_for_each(i_ptr, &toplevel_icon_ptr->icon_manager_ptr->xwl_icons,
++                         xwl_link) {
++            _wlmaker_toplevel_icon_xwl_sync_position(i_ptr);
++        }
++        // Only a managed window can be restacked (an icon window may be
++        // override-redirect, eg. wmshutdown's).
++        if (!toplevel_icon_ptr->wlr_xwayland_surface_ptr->override_redirect) {
++            wlr_xwayland_surface_restack(
++                toplevel_icon_ptr->wlr_xwayland_surface_ptr, NULL,
++                XCB_STACK_MODE_ABOVE);
++        }
++    }
++#endif  // defined(WLMAKER_HAVE_XWAYLAND)
+     if (toplevel_icon_ptr->dragging) {
+         struct wlr_cursor *c = wlmim_wlr_cursor(server_ptr->input_manager_ptr);
+         if (NULL == toplevel_icon_ptr->tile_drag_ptr) {
+@@ -1504,6 +1534,7 @@ wlmaker_toplevel_icon_t *wlmaker_icon_manager_adopt_xwayland_surface(
+     toplevel_icon_ptr->server_ptr = server_ptr;
+     toplevel_icon_ptr->wlr_surface_ptr = wlr_xwayland_surface_ptr->surface;
+     toplevel_icon_ptr->wlr_xwayland_surface_ptr = wlr_xwayland_surface_ptr;
++    wl_list_insert(&icon_manager_ptr->xwl_icons, &toplevel_icon_ptr->xwl_link);
+     toplevel_icon_ptr->xwl_pid = pid;
+     toplevel_icon_ptr->xwl_x = INT32_MIN;
+     toplevel_icon_ptr->xwl_y = INT32_MIN;
+diff --git a/src/wlmdock.c b/src/wlmdock.c
+index 4380601..6a7fa48 100644
+--- a/src/wlmdock.c
++++ b/src/wlmdock.c
+@@ -823,7 +823,10 @@ int handle_client_signal(int fd, uint32_t mask, void *data_ptr)
+             sigaddset(&set, SIGUSR1);
+             sigprocmask(SIG_UNBLOCK, &set, NULL);
+             execv("/proc/self/exe", _wlmdock_argv);
++            // Failed: Carry on with the old theme, still taking the signals
++            // through the signalfd.
+             bs_log(BS_ERROR | BS_ERRNO, "Failed execv(/proc/self/exe)");
++            sigprocmask(SIG_BLOCK, &set, NULL);
+         } else if (rd == sizeof(siginfo)) {
+             bs_log(BS_INFO, "wlmdock: Signal %d caught, exiting loop.",
+                    siginfo.ssi_signo);
+diff --git a/src/xwl.h b/src/xwl.h
+index 95ca844..f73e854 100644
+--- a/src/xwl.h
++++ b/src/xwl.h
+@@ -93,10 +93,10 @@ bool xwl_is_window_type(
+     struct wlr_xwayland_surface *wlr_xwayland_surface_ptr,
+     const xwl_atom_identifier_t *atom_identifiers);
+ 
+-/** Returns a human-readable name for the atom. */
+ /** @return The `struct wlr_xwayland` of XWayland. */
+ struct wlr_xwayland *wlmaker_xwl_wlr_xwayland(wlmaker_xwl_t *xwl_ptr);
+ 
++/** Returns a human-readable name for the atom. */
+ const char *xwl_atom_name(
+     wlmaker_xwl_t *xwl_ptr,
+     xcb_atom_t atom);
+diff --git a/src/xwl_surface.c b/src/xwl_surface.c
+index 52a13ec..98a5101 100644
+--- a/src/xwl_surface.c
++++ b/src/xwl_surface.c
+@@ -146,6 +146,11 @@ struct _wlmaker_xwl_surface_t {
+     wlmtk_element_vmt_t       overlay_orig_vmt;
+     /** A menu holds the pointer, as with its grab on X11. */
+     bool                      overlay_grab;
++    /**
++     * A press outside of the menu while it holds the pointer: Its release
++     * ends the grab. Not the release of the click that opened the menu.
++     */
++    bool                      overlay_outside_press;
+ };
+ 
+ static void _xwl_surface_handle_destroy(
+@@ -1545,6 +1550,7 @@ void _xwl_surface_overlay_grab(wlmaker_xwl_surface_t *xs_ptr)
+     if (NULL == e_ptr->parent_container_ptr) return;
+     wlmtk_container_pointer_grab(e_ptr->parent_container_ptr, e_ptr);
+     xs_ptr->overlay_grab = true;
++    xs_ptr->overlay_outside_press = false;
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -1586,6 +1592,9 @@ bool _xwl_surface_overlay_pointer_button(
+         c_ptr->x < xws_ptr->x + s_ptr->current.width &&
+         c_ptr->y < xws_ptr->y + s_ptr->current.height;
+     if (inside || !xs_ptr->overlay_grab) {
++        if (inside && WLMTK_BUTTON_UP == button_event_ptr->type) {
++            xs_ptr->overlay_outside_press = false;
++        }
+         return xs_ptr->overlay_orig_vmt.pointer_button(
+             element_ptr, button_event_ptr);
+     }
+@@ -1601,7 +1610,13 @@ bool _xwl_surface_overlay_pointer_button(
+             WL_POINTER_BUTTON_STATE_PRESSED :
+             WL_POINTER_BUTTON_STATE_RELEASED);
+     }
+-    if (WLMTK_BUTTON_UP == button_event_ptr->type) {
++    if (WLMTK_BUTTON_DOWN == button_event_ptr->type) {
++        xs_ptr->overlay_outside_press = true;
++    } else if (WLMTK_BUTTON_UP == button_event_ptr->type &&
++               xs_ptr->overlay_outside_press) {
++        // The release of an outside press: Done. (The release of the click
++        // that opened the menu, outside of it, keeps the grab.)
++        xs_ptr->overlay_outside_press = false;
+         _xwl_surface_overlay_ungrab(xs_ptr);
+     }
+     return true;
+diff --git a/src/zones.c b/src/zones.c
+index 04995e5..7c40809 100644
+--- a/src/zones.c
++++ b/src/zones.c
+@@ -1918,6 +1918,10 @@ int _wlmaker_zones_tile_run(void *data_ptr)
+         zones_window_t *w = _win(zones_ptr, window_ptr, on);
+         if (NULL == w) continue;
+         if (!on || !_tileable(zones_ptr, window_ptr)) {
++            // Out of the mosaic: No longer "does not fit" (`windows -d`), and
++            // back in it, it starts afresh.
++            w->fit_float = false;
++            w->fit_prev = false;
+             if (w->tiled) {
+                 w->tiled = false;
+                 _tsets_forget(zones_ptr, window_ptr);
+@@ -2119,7 +2123,10 @@ static void _wlmaker_zones_untile_all(wlmaker_zones_t *zones_ptr)
+ {
+     for (int i = 0; i < WINDOWS_MAX; ++i) {
+         zones_window_t *w = &zones_ptr->windows[i];
+-        if (NULL == w->window_ptr || !w->tiled) continue;
++        if (NULL == w->window_ptr) continue;
++        w->fit_float = false;
++        w->fit_prev = false;
++        if (!w->tiled) continue;
+         w->tiled = false;
+         memset(&w->expect, 0, sizeof(w->expect));
+         if (w->has_restore) {
+-- 
+2.56.0
+
