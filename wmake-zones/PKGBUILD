@@ -23,7 +23,7 @@
 # para compilar um clone local antes do push).
 pkgname=wmake-zones
 pkgver=0.3.1
-pkgrel=4
+pkgrel=5
 pkgdesc='Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look'
 arch=(x86_64)
 url='https://github.com/big-windowmaker/wmake-zones'
@@ -85,12 +85,16 @@ source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}"
         0003-dockapp-drag-and-window-maker-menu.patch
         # Revisão: menu do Window Maker na posição atual do ladrilho, uma
         # troca de lugar por vez no mosaico, tradução, teste com python3 -I.
-        0004-review-wm-menu-swap-translation.patch)
+        0004-review-wm-menu-swap-translation.patch
+        # Dockapp do Wayland: o ladrilho inteiro de 64 px (o wlmaker sugere
+        # 58 aos nativos), com o relevo próprio, como o do X11.
+        0005-wayland-dockapp-whole-64-px-tile.patch)
 sha256sums=('SKIP'
             '753de49341466478952bffc37c44286f3208f6fc5f7df1091ba7dcab065c86ea'
             '2a7c02e91f37841da09f19d67ce45e2d1a0b52fdf8265f91503c86c502c31a2b'
             '45e420229132aca70b5d38cf351eeeb008b800f234acf04f1950dd415ef6530e'
-            '7fc8ed37ee0563e8f382f3c4ba578d97d50c6944752d094d7612bed3c24d4568')
+            '7fc8ed37ee0563e8f382f3c4ba578d97d50c6944752d094d7612bed3c24d4568'
+            'f80852c4948c8011ded81b4d2440e7ca39f300cce08c395320d19ca2a2c191c4')
 
 prepare() {
   # A versão do PKGBUILD precisa ser a do projeto (meson.build).
@@ -112,6 +116,9 @@ prepare() {
   fi
   if ! grep -q 'Manter este aplicativo sempre _flutuante' wmake-zones/po/pt_BR.po; then
     patch -d wmake-zones -Np1 -i "${srcdir}/0004-review-wm-menu-swap-translation.patch"
+  fi
+  if ! grep -q 'w > 64 ? w : 64' wmake-zones/src/wayland/wzw-dockapp.c; then
+    patch -d wmake-zones -Np1 -i "${srcdir}/0005-wayland-dockapp-whole-64-px-tile.patch"
   fi
 }
 

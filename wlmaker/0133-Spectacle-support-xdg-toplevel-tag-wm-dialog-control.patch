@@ -1,0 +1,76 @@
+From 525abb61d15c69b3058af8dca1b7cb4921292009 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sat, 7 Nov 2026 10:08:29 -0300
+Subject: [PATCH 133/136] Spectacle support: xdg toplevel tag + wm dialog,
+ control socket 'active'
+
+KF6's KWayland plugin dereferences both globals unconditionally. The 'active'
+command prints the activated window's box (big-wm-kwin-screenshot).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/server.c | 13 +++++++++++++
+ src/zones.c  | 16 ++++++++++++++++
+ 2 files changed, 29 insertions(+)
+
+diff --git a/src/server.c b/src/server.c
+index a6ba239..3c24938 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -42,6 +42,8 @@
+ #include <wlr/types/wlr_seat.h>
+ #include <wlr/types/wlr_scene.h>
+ #include <wlr/types/wlr_xdg_activation_v1.h>
++#include <wlr/types/wlr_xdg_dialog_v1.h>
++#include <wlr/types/wlr_xdg_toplevel_tag_v1.h>
+ #undef WLR_USE_UNSTABLE
+ 
+ #include "action.h"
+@@ -323,6 +325,17 @@ wlmaker_server_t *wlmaker_server_create(
+         return NULL;
+     }
+ 
++    // Toplevel tags and dialog hints: Offered, not used yet. KDE's window
++    // system plugin (KF6) takes them for granted and crashed without them
++    // (Spectacle, as it shows its window).
++    if (NULL == wlr_xdg_toplevel_tag_manager_v1_create(
++            server_ptr->wl_display_ptr, 1)) {
++        bs_log(BS_WARNING, "Failed wlr_xdg_toplevel_tag_manager_v1_create()");
++    }
++    if (NULL == wlr_xdg_wm_dialog_v1_create(server_ptr->wl_display_ptr, 1)) {
++        bs_log(BS_WARNING, "Failed wlr_xdg_wm_dialog_v1_create()");
++    }
++
+     server_ptr->wlr_xdg_activation_v1_ptr = wlr_xdg_activation_v1_create(
+         server_ptr->wl_display_ptr);
+     if (NULL == server_ptr->wlr_xdg_activation_v1_ptr) {
+diff --git a/src/zones.c b/src/zones.c
+index 7c40809..7ed1043 100644
+--- a/src/zones.c
++++ b/src/zones.c
+@@ -2660,6 +2660,22 @@ void wlmaker_zones_command(wlmaker_zones_t *zones_ptr,
+                 _out(out_ptr, out_len, "%s\t%s\t%s\n", cls, ins, title);
+             }
+         }
++    } else if (0 == strcmp(buf, "active")) {
++        // The activated window: Its box (decorations included) and title.
++        // For screenshot tools (big-wm-kwin-screenshot: "active window").
++        wlmtk_workspace_t *ws_ptr = wlmtk_desktop_get_current_workspace(
++            zones_ptr->server_ptr->desktop_ptr);
++        wlmtk_window_t *window_ptr = NULL != ws_ptr ?
++            wlmtk_workspace_get_activated_window(ws_ptr) : NULL;
++        if (NULL == window_ptr) {
++            _out(out_ptr, out_len, "error=nenhuma janela ativa\n");
++        } else {
++            struct wlr_box b = wlmtk_window_get_bounding_box(window_ptr);
++            char title[256];
++            _field(wlmtk_window_get_title(window_ptr), title, sizeof(title));
++            _out(out_ptr, out_len, "%dx%d%+d%+d\t%s\n",
++                 b.width, b.height, b.x, b.y, title);
++        }
+     } else if (0 == strcmp(buf, "layouts")) {
+         for (int i = 0; i < zones_ptr->cfg.nlayouts; ++i) {
+             const wz_layout_def *l = &zones_ptr->cfg.layouts[i];
+-- 
+2.56.0
+

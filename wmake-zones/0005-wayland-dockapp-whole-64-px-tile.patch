@@ -1,0 +1,35 @@
+From d007fb341f591e71106a70d5d7bd081fabbf2d59 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sat, 7 Nov 2026 11:48:36 -0300
+Subject: [PATCH] wayland dockapp: draw the whole 64-px tile, as the X11
+ dockapp (#7)
+
+wlmaker now suggests 58 px to native dockapps (the tile minus its bezel);
+wmake-zones-wl has its own relief, like its X11 icon window of 64x64.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/wayland/wzw-dockapp.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/wayland/wzw-dockapp.c b/src/wayland/wzw-dockapp.c
+index 687e97c..3194db0 100644
+--- a/src/wayland/wzw-dockapp.c
++++ b/src/wayland/wzw-dockapp.c
+@@ -362,8 +362,11 @@ static void
+ icon_configure(void *data, struct zwlmaker_toplevel_icon_v1 *icon, int32_t w, int32_t h, uint32_t serial)
+ {
+     app *a = data;
+-    a->width = w > 0 ? w : 64;
+-    a->height = h > 0 ? h : 64;
++    /* O ladrilho inteiro, com o relevo próprio, como o dockapp do X11 (a
++     * janela de ícone de 64x64): o wlmaker sugere o tamanho dos dockapps
++     * nativos (58), menor que isso. */
++    a->width = w > 64 ? w : 64;
++    a->height = h > 64 ? h : 64;
+     zwlmaker_toplevel_icon_v1_ack_configure(icon, serial);
+     a->configured = 1;
+     redraw(a);
+-- 
+2.56.0
+
