@@ -119,7 +119,7 @@ prepare() {
   fi
   # Uma fonte local (WMAKE_ZONES_SOURCE) que já tem o tamanho novo, de
   # qualquer revisão (#7, #8), não recebe o patch da tag.
-  if ! grep -q 'w + 6' wmake-zones/src/wayland/wzw-dockapp.c; then
+  if ! grep -qE 'w \+ 6|w > 64 \? w : 64' wmake-zones/src/wayland/wzw-dockapp.c; then
     patch -d wmake-zones -Np1 -i "${srcdir}/0005-wayland-dockapp-whole-64-px-tile.patch"
   fi
 }
