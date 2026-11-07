@@ -218,7 +218,7 @@
 #   0121  o mosaico confere o tamanho mínimo do cliente (GTK4/libadwaita:
 #         Pamac 760x200): troca de lugar ou flutua, sem sobrepor as outras;
 #         "windows -d" com o motivo
-#   0122-0136: dockapps e Clip do X11 no Wayland, Info Panel, menu e tema (branch big-wm/missao-2026-11)
+#   0122-0137: dockapps e Clip do X11 no Wayland, Info Panel, menu e tema (branch big-wm/missao-2026-11)
 #   0122  os espaços dos lançadores no Clip deixam o ponteiro passar
 #   0123  dockapps do X11 (XWayland) no Dock e no Clip: a janela de ícone
 #         vira o ladrilho, como no Window Maker
@@ -245,6 +245,8 @@
 #   0135  ações do mouse na área de trabalho (RootMouse) e ViKeyMenus
 #   0136  atributos de janela (WindowAttributes); tamanho fixo sem a barra
 #         de redimensionar
+#   0137  revisão: líder X11 continua fora da tela; atributos refeitos no
+#         commit das janelas X11
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
 pkgrel=21
@@ -413,6 +415,7 @@ _patches=(
   0134-Root-menu-Window-Maker-behaviour-for-submenus-and-cl.patch
   0135-Window-Maker-s-root-mouse-actions-and-ViKeyMenus-WPr.patch
   0136-Window-attributes-WMWindowAttributes-and-no-resize-b.patch
+  0137-xwl-Review-fixes-leader-stays-off-screen-attributes-.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -550,7 +553,8 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             '0fbb59a2a774c3ccbdb9898f0627aa82747e04b536da187c0ffc7940aba6162b'
             'f177306ce1bb72cadd94bda63e6e8fa01a665812c6785df7a575cc58b027f6fa'
             '2cc38ad6e5b1a8c0f73a04ddf41ee8ac08843c09c4f3660482340bcc4fd8061e'
-            '8bd61bdacf36d52559fa27632381a1bc1c4eaa71405a23c4b85f4f27b0ba2faa')
+            '8bd61bdacf36d52559fa27632381a1bc1c4eaa71405a23c4b85f4f27b0ba2faa'
+            '4bbfa0c2b4457f2462d515bd31bce712fa4864b33483ac110d360b46216310a5')
 
 prepare() {
   cd wlmaker
