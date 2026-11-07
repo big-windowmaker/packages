@@ -1,7 +1,7 @@
 pkgbase = windowmaker
 	pkgdesc = X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)
 	pkgver = 0.96.0.r130.g558e67f
-	pkgrel = 13
+	pkgrel = 14
 	url = https://www.windowmaker.org/
 	arch = x86_64
 	license = GPL-2.0-or-later AND WTFPL
@@ -51,6 +51,7 @@ pkgbase = windowmaker
 	source = 0016-dock-a-docked-dockapp-starts-with-Window-Maker.patch
 	source = 0017-motif-follow-MOTIF_WM_HINTS-changed-after-the-window-is-mapped.patch
 	source = 0018-dockapps-drag-and-menu-handed-over-as-a-synthetic-pr.patch
+	source = 0019-screen-_NET_WORKAREA-follows-the-struts.patch
 	sha256sums = a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf
 	sha256sums = 08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337
 	sha256sums = 077b2a6e5274420751a8e9ae40bed7ea3b944e7b0e16d29fbf461afed1d3e685
@@ -70,5 +71,6 @@ pkgbase = windowmaker
 	sha256sums = f4a5da451bd7497b532687904bef6f4859bae7761c37a659ed0712aa481118cb
 	sha256sums = 9f0cae967a7326c3b424a4db5564cf7c2f7b00d71f8a05a9708f44bb1f235318
 	sha256sums = 55906b8ff56cbef6cc064005c2404eeff20554d3e5655d0a6c76466b1eea182d
+	sha256sums = d354019bb30f1e6236d8c8536137a39d24ee1f99ddbfebf2d71d16c739a6ed36
 
 pkgname = windowmaker

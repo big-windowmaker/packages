@@ -12,7 +12,7 @@
 pkgname=windowmaker
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
-pkgrel=13
+pkgrel=14
 pkgdesc='X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)'
 arch=(x86_64)
 url='https://www.windowmaker.org/'
@@ -67,6 +67,7 @@ source=(
   0016-dock-a-docked-dockapp-starts-with-Window-Maker.patch
   0017-motif-follow-MOTIF_WM_HINTS-changed-after-the-window-is-mapped.patch
   0018-dockapps-drag-and-menu-handed-over-as-a-synthetic-pr.patch
+  0019-screen-_NET_WORKAREA-follows-the-struts.patch
 )
 sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337'
@@ -86,7 +87,8 @@ sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             'e4bf626c79668918aaa2457055000492b06138232cfb78674829a3f5f7c35957'
             'f4a5da451bd7497b532687904bef6f4859bae7761c37a659ed0712aa481118cb'
             '9f0cae967a7326c3b424a4db5564cf7c2f7b00d71f8a05a9708f44bb1f235318'
-            '55906b8ff56cbef6cc064005c2404eeff20554d3e5655d0a6c76466b1eea182d')
+            '55906b8ff56cbef6cc064005c2404eeff20554d3e5655d0a6c76466b1eea182d'
+            'd354019bb30f1e6236d8c8536137a39d24ee1f99ddbfebf2d71d16c739a6ed36')
 
 prepare() {
   cd wmaker
@@ -203,6 +205,12 @@ prepare() {
   # o próximo clique quando o botão já foi solto, e o ponteiro volta ao
   # fim do menu. Pode ir ao upstream.
   patch -Np1 -i "${srcdir}/0018-dockapps-drag-and-menu-handed-over-as-a-synthetic-pr.patch"
+
+  # _NET_WORKAREA segue as reservas (struts) de painéis e docas mapeados
+  # depois do início, como o Dock com abas: programas que se centram na área
+  # de trabalho (o instalador, diálogos Qt e GTK) ficavam embaixo dele. Pode
+  # ir ao upstream.
+  patch -Np1 -i "${srcdir}/0019-screen-_NET_WORKAREA-follows-the-struts.patch"
 
   # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
   # sed que o Arch faz na 0.96.0 não é necessário aqui.

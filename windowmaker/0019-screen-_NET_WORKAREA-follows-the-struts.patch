@@ -1,0 +1,38 @@
+From ba4f0f378126fc0c96adcebe3a2d444a472dffd6 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sat, 7 Nov 2026 19:06:07 -0300
+Subject: [PATCH] screen: _NET_WORKAREA follows the struts
+
+wScreenUpdateUsableArea() applied the struts of panels and docks (eg. the
+Big WindowMaker tabbed dock, _NET_WM_STRUT 112 px at the bottom) to the
+areas Window Maker uses for placement and maximizing, but _NET_WORKAREA
+was only republished when workspaces were created or destroyed or the
+outputs changed. A dock mapped after start-up left it at the whole screen,
+so programs that center themselves in the work area (the Calamares
+installer, Qt and GTK dialogs) went under the dock.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/screen.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/screen.c b/src/screen.c
+index 73224e61..a9bcedb9 100644
+--- a/src/screen.c
++++ b/src/screen.c
+@@ -891,6 +891,12 @@ void wScreenUpdateUsableArea(WScreen *scr)
+ 
+ 	if (wPreferences.auto_arrange_icons)
+ 		wArrangeIcons(scr, True);
++
++	/* Tell the clients: _NET_WORKAREA follows the struts (eg. a panel or
++	 * dock that maps after the screen was set up). Programs that center
++	 * themselves in the work area, as installers and dialogs, otherwise
++	 * went under the panel. */
++	wNETWMUpdateWorkarea(scr);
+ }
+ 
+ void wScreenRestoreState(WScreen * scr)
+-- 
+2.56.0
+
