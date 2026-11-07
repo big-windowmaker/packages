@@ -153,6 +153,7 @@ pkgbase = wlmaker
 	source = 0128-clip-wlmdock-The-Dock-and-the-Clip-s-launchers-take-.patch
 	source = 0129-layer-desktop-Exclusive-zones-count-for-the-panels-o.patch
 	source = 0130-xwl-icon_manager-zones-wlmdock-Fixes-from-the-review.patch
+	source = 0131-icon_manager-An-X11-icon-is-listed-only-once-its-til.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
 	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
@@ -278,5 +279,6 @@ pkgbase = wlmaker
 	sha256sums = 492a6fe15b6ea977138a57fa3de29bd086c96929f6b2df6d461d42b19654dbc3
 	sha256sums = 9aa7de11d8a47fcdbb541f0c918a00f2a9560b4268e981052630f60d39e4eadc
 	sha256sums = 827fab55dbd768c816ef5d0a4d1b06474b0afaa4cf6cc88762dcdd0157ce884e
+	sha256sums = f31fdd8dab5c065d33bd8757b8129a7dbb37dc724c1576740f9ea19500657739
 
 pkgname = wlmaker
