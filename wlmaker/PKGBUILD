@@ -218,7 +218,7 @@
 #   0121  o mosaico confere o tamanho mínimo do cliente (GTK4/libadwaita:
 #         Pamac 760x200): troca de lugar ou flutua, sem sobrepor as outras;
 #         "windows -d" com o motivo
-#   0122-0139: dockapps e Clip do X11 no Wayland, Info Panel, menu e tema (branch big-wm/missao-2026-11)
+#   0122-0141: dockapps e Clip do X11 no Wayland, Info Panel, menu e tema (branch big-wm/missao-2026-11)
 #   0122  os espaços dos lançadores no Clip deixam o ponteiro passar
 #   0123  dockapps do X11 (XWayland) no Dock e no Clip: a janela de ícone
 #         vira o ladrilho, como no Window Maker
@@ -253,9 +253,13 @@
 #   0139  xdg: a janela é a geometria (Chrome sem margens a mais), a moldura
 #         recorta a sombra do cliente, estados tiled nas zonas, modo de
 #         decoração relido no SIGHUP
+#   0140  Alt+Tab com o painel de troca do Window Maker: ícones (tema de
+#         ícones, PNG ou SVG), título, Esc volta à janela de antes, Enter,
+#         setas, Home e End
+#   0141  revisão: nome do cliente com barra não abre arquivo nenhum
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=22
+pkgrel=23
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -270,6 +274,7 @@ depends=(
   hicolor-icon-theme
   libglvnd  # libEGL e libGLESv2: o teste do renderizador (0100)
   libinput
+  librsvg  # ícones SVG dos aplicativos no Alt+Tab (0140)
   libpulse  # wlmmixer (fala com o pipewire-pulse ou com o PulseAudio)
   libxcb
   libxdg-basedir
@@ -283,7 +288,7 @@ depends=(
 makedepends=(
   cmake
   git
-  librsvg  # exigido pelo CMake da 0.9; só os exemplos (não instalados) usam
+  librsvg  # o wlmaker desenha os ícones SVG do Alt+Tab (0140)
   wayland-protocols
   'wmake-zones>=0.3.0'  # núcleo das zonas (estático sem LTO, 0104): histórico, foco espacial, modos (0113)
 )
@@ -424,6 +429,8 @@ _patches=(
   0137-xwl-Review-fixes-leader-stays-off-screen-attributes-.patch
   0138-xwl-_NET_WM_MOVERESIZE-maximize-fullscreen-activate-.patch
   0139-xdg-window-geometry-as-the-window-frame-crops-it-til.patch
+  0140-Alt-Tab-Window-Maker-s-switch-panel-icons-title-Esc-.patch
+  0141-app_icon-a-client-s-app-ID-or-WM_CLASS-with-a-path-s.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -564,7 +571,9 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             '8bd61bdacf36d52559fa27632381a1bc1c4eaa71405a23c4b85f4f27b0ba2faa'
             '4bbfa0c2b4457f2462d515bd31bce712fa4864b33483ac110d360b46216310a5'
             '90b915faaea43904e260b677e12e487d37f07dc3feda6fdc5442c7717b07c48a'
-            'ef8b86f47a43266c641bbba9bf67ac5f8a302f2c1f664a0ccefd431b9f5c66a9')
+            'ef8b86f47a43266c641bbba9bf67ac5f8a302f2c1f664a0ccefd431b9f5c66a9'
+            'be865ecdc727083f4e59fada19ad9ad899d4a76eb17de7c273e9a13f513ad887'
+            '8bac57762789d947178fa0e68fc4e7b7e9ce42ee69dd3be2ce9f27d6d0bfe2d8')
 
 prepare() {
   cd wlmaker
