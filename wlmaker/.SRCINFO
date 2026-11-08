@@ -164,6 +164,7 @@ pkgbase = wlmaker
 	source = 0138-xwl-_NET_WM_MOVERESIZE-maximize-fullscreen-activate-.patch
 	source = 0139-xdg-window-geometry-as-the-window-frame-crops-it-til.patch
 	source = 0140-Alt-Tab-Window-Maker-s-switch-panel-icons-title-Esc-.patch
+	source = 0141-app_icon-a-client-s-app-ID-or-WM_CLASS-with-a-path-s.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
 	sha256sums = 2d4001a2c9cffb9c41be68df16a351a97e261157503366c83668b7c49d856582
@@ -299,5 +300,6 @@ pkgbase = wlmaker
 	sha256sums = 90b915faaea43904e260b677e12e487d37f07dc3feda6fdc5442c7717b07c48a
 	sha256sums = ef8b86f47a43266c641bbba9bf67ac5f8a302f2c1f664a0ccefd431b9f5c66a9
 	sha256sums = be865ecdc727083f4e59fada19ad9ad899d4a76eb17de7c273e9a13f513ad887
+	sha256sums = 8bac57762789d947178fa0e68fc4e7b7e9ce42ee69dd3be2ce9f27d6d0bfe2d8
 
 pkgname = wlmaker
