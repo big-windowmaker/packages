@@ -1,0 +1,117 @@
+wmcliphist: the Wayland clipboard on XWayland (Big WindowMaker)
+
+On a Wayland session wmcliphist runs on XWayland, and wlroots bridges the
+clipboard between X11 and Wayland clients only for an X11 window with the
+keyboard focus, which a dock-app never has:
+
+- An item chosen from the menu (or taken up when the application that
+  copied quits) also goes to the Wayland clipboard, through
+  `big-wm-clipboard --copy` (wl-copy; the content on a pipe). Before, it
+  stayed in the X11 CLIPBOARD only, and Ctrl+V in a Wayland client pasted
+  the previous copy.
+- When the compositor's bridge owns the CLIPBOARD (a copy of a Wayland
+  client) and does not answer, wmcliphist no longer takes it up as if the
+  application had quit: that replaced the Wayland copy with the last item
+  of the history. The copies of Wayland clients reach the menu from the
+  history database (big-wm-clipboard --watch records them and sends
+  SIGUSR2).
+- The history (re)loaded from the database (startup, SIGUSR2) no longer
+  takes the selection up: on each reload wmcliphist became the owner,
+  found nothing to give and published the first item, which replaced the
+  copy of the Wayland client that had just been recorded.
+
+Without WAYLAND_DISPLAY (the X11 session) nothing changes.
+
+diff --git a/wmcliphist/bigwm.c b/wmcliphist/bigwm.c
+index 2836137..20a6684 100644
+--- a/wmcliphist/bigwm.c
++++ b/wmcliphist/bigwm.c
+@@ -75,6 +75,29 @@ bigwm_favorite(const gchar *content, gint locked)
+ 	run_with_input("--favorite", locked ? "on" : "off", content);
+ }
+ 
++/* A Wayland session: wmcliphist runs on XWayland. */
++gboolean
++bigwm_wayland(void)
++{
++	const gchar *wayland = g_getenv("WAYLAND_DISPLAY");
++
++	return wayland != NULL && *wayland != '\0';
++}
++
++/*
++ * On XWayland, what wmcliphist publishes reaches the Wayland clients only
++ * through the compositor's bridge, and wlroots opens that bridge only to an
++ * X11 window with the keyboard focus, which a dock-app never has: a chosen
++ * item would stay in the X11 CLIPBOARD alone. It also goes to the Wayland
++ * clipboard (wl-copy, through the helper).
++ */
++void
++bigwm_copy(const gchar *content)
++{
++	if (bigwm_wayland())
++		run_with_input("--copy", NULL, content);
++}
++
+ /*
+  * The saved history, oldest first so that the newest ends on top. Returns 0
+  * when the database answered (even empty), -1 without big-wm-clipboard.
+diff --git a/wmcliphist/clipboard.c b/wmcliphist/clipboard.c
+index 09c711c..efcf11a 100644
+--- a/wmcliphist/clipboard.c
++++ b/wmcliphist/clipboard.c
+@@ -196,6 +196,9 @@ clipboard_publish(const gchar *content)
+ 	g_free(published);
+ 	published = g_strdup(content);
+ 	gtk_clipboard_set_text(gtk_clipboard_get(clipboard), content, -1);
++	/* the CLIPBOARD of the Wayland clients, too (XWayland) */
++	if (g_ascii_strcasecmp(clipboard_str, "CLIPBOARD") == 0)
++		bigwm_copy(content);
+ }
+ 
+ 
+@@ -221,6 +224,14 @@ targets_received(GtkClipboard *cb, GdkAtom *atoms, gint n_atoms, gpointer data)
+ 		if (secret)
+ 			return;
+ 	}
++	if (n_atoms <= 0 && bigwm_wayland()) {
++		/* No answer: on XWayland, the compositor's bridge, which holds
++		 * a copy of a Wayland client and gives it only to an X11 window
++		 * with the keyboard focus (big-wm-clipboard records it, and
++		 * wmcliphist reloads its menu then). Not an application that
++		 * went away: taking the clipboard up would replace that copy. */
++		return;
++	}
+ 	if (content == 0) {
+ 		/* An owner with nothing to give: what is left when the
+ 		 * application that copied quits (Qt keeps a placeholder). Same
+diff --git a/wmcliphist/history.c b/wmcliphist/history.c
+index d8ef55f..9676a3c 100644
+--- a/wmcliphist/history.c
++++ b/wmcliphist/history.c
+@@ -68,8 +68,11 @@ process_item(char *content, gint locked, gboolean exec)
+ 	if (processed == FALSE) {
+ 		hist_item = menu_item_add(content, locked, menu_hist);
+ 
+-		/* when auto_take_up is true, set selection owner to myself */
+-		if (auto_take_up == 1) {
++		/* when auto_take_up is true, set selection owner to myself;
++		 * on XWayland not for the saved history being (re)loaded: the
++		 * clipboard holds a copy of a Wayland client that wmcliphist
++		 * cannot see, and taking it up would replace that copy */
++		if (auto_take_up == 1 && (exec == TRUE || !bigwm_wayland())) {
+ 			selected = hist_item;
+ 			if (gtk_selection_owner_set(dock_app,
+ 						clipboard,
+diff --git a/wmcliphist/wmcliphist.h b/wmcliphist/wmcliphist.h
+index f33920f..96aaa6d 100644
+--- a/wmcliphist/wmcliphist.h
++++ b/wmcliphist/wmcliphist.h
+@@ -343,5 +343,7 @@ void bigwm_init(void);
+ int bigwm_load(void);
+ void bigwm_store(const gchar *content);
+ void bigwm_favorite(const gchar *content, gint locked);
++void bigwm_copy(const gchar *content);
++gboolean bigwm_wayland(void);
+ 
+ #endif
