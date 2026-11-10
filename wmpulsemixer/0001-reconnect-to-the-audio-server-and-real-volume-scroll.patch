@@ -1,0 +1,557 @@
+wmpulsemixer: espera o servidor de áudio em vez de sair; roda do mouse com o volume real
+
+Três defeitos para um dockapp que inicia com a sessão:
+
+- Sem servidor de áudio no momento do login (o PipeWire/pipewire-pulse
+  ainda subindo) ou quando ele reinicia, o contexto do libpulse ia para
+  FAILED/TERMINATED e o dockapp chamava gtk_main_quit(): o ladrilho do Dock
+  ficava vazio até o próximo login. Agora ele descarta o contexto (fora do
+  callback do próprio contexto), mostra "--" com a barra vazia, nunca um
+  volume antigo, e tenta de novo com espera crescente (1, 2, 4... até 30 s;
+  só um timer, sem polling). Ao reconectar, relê servidor, dispositivos
+  padrão e volumes. Uma mensagem por mudança de estado no stderr.
+- A roda do mouse partia do volume mostrado, que é 0 com o canal mudo:
+  rolar para cima num canal mudo em 80% punha o volume em 4%. Agora parte
+  do volume real do dispositivo (o mudo continua mudo).
+- Um clique no menu de dispositivos (clique direito) também chegava aos
+  controles do dockapp nas mesmas coordenadas: podia mudar o volume ou pôr
+  no mudo ao escolher um dispositivo. Agora cliques, arrasto e roda na janela
+  do dockapp são tratados no filtro X dela, antes do GDK, que só recebe os
+  eventos do menu (antes cada clique também registrava
+  "gdk_window_set_user_time called on non-toplevel" no log da sessão).
+- Duas mensagens estavam em alemão.
+
+A enviar ao autor (https://github.com/polletfa/wmpulsemixer).
+
+diff --git a/pulse.c b/pulse.c
+index bb1caeb..8f5df5d 100644
+--- a/pulse.c
++++ b/pulse.c
+@@ -13,6 +13,7 @@
+ #include "menu.h"
+ 
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <math.h>
+ #include <string.h>
+ 
+@@ -25,7 +26,8 @@
+ static double multiply = 100.0;
+ 
+ static pa_glib_mainloop* mainloop;
+-static pa_context* context;
++static pa_context* context = NULL;
++static const char* clientName = NAME;
+ 
+ static char* defaultSinkName = NULL;
+ static int defaultSinkIndex = -1;
+@@ -37,7 +39,17 @@ static int defaultSourceIndex = -1;
+ static int defaultSourceChannels = 1;
+ static struct pulseDeviceList_t sourceList = { NULL, 0 };
+ 
+-static struct pulseState_t state = { {false, 0}, {false, 0} };
++static struct pulseState_t state = { false, {false, 0}, {false, 0} };
++
++// Reconnection: the audio server may start after the dock-app (login), or
++// restart (PipeWire, pipewire-pulse); wait with a growing delay, no polling.
++#define RECONNECT_MIN_SECS 1
++#define RECONNECT_MAX_SECS 30
++static guint reconnectId = 0;
++static guint lostId = 0;
++static guint reconnectDelay = RECONNECT_MIN_SECS;
++static bool reportedOffline = false;
++static bool everConnected = false;
+ 
+ // forward declarations for private functions
+ static void callbackContextState(pa_context* c, void* userdata);
+@@ -46,48 +58,130 @@ static void callbackSinkInfo(pa_context* c, const pa_sink_info* info, int eol, v
+ static void callbackSourceInfo(pa_context* c, const pa_source_info* info, int eol, void* userdata);
+ static void callbackServerInfo(pa_context* c, const pa_server_info* info, void* userdata);
+ static void callbackSetDevice(pa_context* c, int success, void* userdata);
++static void pulseConnect(void);
++static void pulseDisconnect(void);
++static void pulseScheduleReconnect(void);
++static void pulseFreeDevices(void);
++static gboolean pulseLostEvent(gpointer data);
++static bool pulseReady(void);
+ 
+ /**
+  * Initialise connection to PulseAudio server
+  */
+ void pulseInit(const char* name) {
+-  bool success;
+   multiply = 100.0 / (options.boost * PA_VOLUME_NORM);
++  clientName = name;
+ 
+   mainloop = pa_glib_mainloop_new(g_main_context_default());
+-  success = mainloop != NULL;
+-  if(success) {
+-    context = pa_context_new(pa_glib_mainloop_get_api(mainloop), name);
+-    success = context != NULL;
+-  }
+-  if(success) {
+-    pa_context_set_state_callback(context, callbackContextState, NULL);
+-    success = 0 == pa_context_connect(context, NULL, PA_CONTEXT_NOAUTOSPAWN, NULL);
+-  }
+-  if(!success) {
+-    fprintf(stderr, "Unable to connect to PulseAudio.\n");
+-    if(context) {
+-      fprintf(stderr, "%s\n", pa_strerror(pa_context_errno(context)));
+-    } else {
+-      fprintf(stderr, "Context could not be created.\n");
+-    }
++  if(!mainloop) {
++    fprintf(stderr, NAME ": unable to create the PulseAudio main loop.\n");
+     exit(1);
+   }
++  pulseConnect();
++}
++
++/**
++ * Connect (again) to the audio server. On failure, retry later.
++ */
++static void pulseConnect(void) {
++  context = pa_context_new(pa_glib_mainloop_get_api(mainloop), clientName);
++  if(!context) {
++    fprintf(stderr, NAME ": unable to create a PulseAudio context.\n");
++    pulseScheduleReconnect();
++    return;
++  }
++  pa_context_set_state_callback(context, callbackContextState, NULL);
++  if(pa_context_connect(context, NULL, PA_CONTEXT_NOAUTOSPAWN, NULL) < 0) {
++    if(!reportedOffline) {
++      fprintf(stderr, NAME ": audio server unavailable (%s); waiting for it.\n",
++              pa_strerror(pa_context_errno(context)));
++      reportedOffline = true;
++    }
++    pulseDisconnect();
++    pulseScheduleReconnect();
++  }
++}
++
++/**
++ * Drop the connection and everything learned from it.
++ */
++static void pulseDisconnect(void) {
++  bool wasConnected = state.connected;
++  if(context) {
++    pa_context_set_state_callback(context, NULL, NULL);
++    pa_context_set_subscribe_callback(context, NULL, NULL);
++    pa_context_disconnect(context);
++    pa_context_unref(context);
++    context = NULL;
++  }
++  menuClose();
++  pulseFreeDevices();
++  free(defaultSinkName);
++  defaultSinkName = NULL;
++  free(defaultSourceName);
++  defaultSourceName = NULL;
++  defaultSinkIndex = -1;
++  defaultSourceIndex = -1;
++  state.connected = false;
++  state.sink.muted = state.source.muted = false;
++  state.sink.volume = state.source.volume = 0;
++  if(wasConnected) g_idle_add(windowRepaintQuietEvent, NULL);
++}
++
++static gboolean pulseLostEvent(gpointer data) {
++  lostId = 0;
++  pulseDisconnect();
++  pulseScheduleReconnect();
++  return FALSE;
++}
++
++static gboolean pulseReconnectEvent(gpointer data) {
++  reconnectId = 0;
++  pulseConnect();
++  return FALSE;
++}
++
++static void pulseScheduleReconnect(void) {
++  if(reconnectId) return;
++  if(options.verbose) printf("Reconnecting in %u s\n", reconnectDelay);
++  reconnectId = g_timeout_add_seconds(reconnectDelay, pulseReconnectEvent, NULL);
++  reconnectDelay = reconnectDelay * 2 > RECONNECT_MAX_SECS ? RECONNECT_MAX_SECS : reconnectDelay * 2;
++}
++
++static bool pulseReady(void) {
++  return context && pa_context_get_state(context) == PA_CONTEXT_READY;
++}
++
++static void pulseFreeDevices(void) {
++  for(int i = 0; i < sinkList.count; ++i) {
++    free(sinkList.list[i].name);
++    free(sinkList.list[i].description);
++  }
++  free(sinkList.list);
++  sinkList.list = NULL;
++  sinkList.count = 0;
++  for(int i = 0; i < sourceList.count; ++i) {
++    free(sourceList.list[i].name);
++    free(sourceList.list[i].description);
++  }
++  free(sourceList.list);
++  sourceList.list = NULL;
++  sourceList.count = 0;
+ }
+ 
+ /**
+  * Cleanup
+  */
+ void pulseCleanup() {
+-  if(defaultSinkName) {
+-    free(defaultSinkName);
++  if(lostId) {
++    g_source_remove(lostId);
++    lostId = 0;
+   }
+-  if(defaultSourceName) {
+-    free(defaultSourceName);
++  if(reconnectId) {
++    g_source_remove(reconnectId);
++    reconnectId = 0;
+   }
+-  pa_context_set_state_callback(context, NULL, NULL);
+-  pa_context_disconnect(context);
+-  pa_context_unref(context);
++  pulseDisconnect();
+   pa_glib_mainloop_free(mainloop);
+ }
+ 
+@@ -103,8 +197,8 @@ struct pulseState_t pulseGetState()
+  * Set volume
+  */
+ void pulseSetVolume(int channel, int volume) {
+-  if((channel == 0 && defaultSinkIndex < 0) || (channel == 1 && defaultSourceIndex < 0)) {
+-    return; // not yet initialized
++  if(!pulseReady() || (channel == 0 && defaultSinkIndex < 0) || (channel == 1 && defaultSourceIndex < 0)) {
++    return; // not yet initialized, or no audio server
+   }
+ 
+   pa_volume_t pa_volume = (pa_volume_t)(volume / multiply);
+@@ -131,8 +225,8 @@ void pulseSetVolume(int channel, int volume) {
+  * Mute/Unmute
+  */
+ void pulseToggleMute(int channel) {
+-  if((channel == 0 && defaultSinkIndex < 0) || (channel == 1 && defaultSourceIndex < 0)) {
+-    return; // not yet initialized
++  if(!pulseReady() || (channel == 0 && defaultSinkIndex < 0) || (channel == 1 && defaultSourceIndex < 0)) {
++    return; // not yet initialized, or no audio server
+   }
+ 
+   pa_operation* op = NULL;
+@@ -157,6 +251,7 @@ const struct pulseDeviceList_t* pulseGetDevices(int channel) {
+  * Select a device as new default source or sink
+  */
+ void pulseSelectDevice(struct pulseDevice_t* device) {
++  if(!pulseReady()) return;
+   if(device->deviceType == SINK && !device->isDefault) {
+     if(options.verbose) printf("Change sink to: %s (%s)\n", device->name, device->description);
+     pa_context_set_default_sink(context, device->name, callbackSetDevice, NULL);
+@@ -173,9 +268,16 @@ void pulseSelectDevice(struct pulseDevice_t* device) {
+ static void callbackContextState(pa_context* c, void* userdata) {
+   switch (pa_context_get_state(c)) {
+   case PA_CONTEXT_READY: {
++    if(reportedOffline) {
++      fprintf(stderr, NAME ": connected to the audio server.\n");
++      reportedOffline = false;
++    }
+     if(options.verbose) {
+       printf("PulseAudio connection ready.\n");
+     }
++    reconnectDelay = RECONNECT_MIN_SECS;
++    state.connected = true;
++    everConnected = true;
+ 
+     pa_operation *op = pa_context_get_server_info(context, callbackServerInfo, NULL);
+     if (op) pa_operation_unref(op);
+@@ -189,10 +291,16 @@ static void callbackContextState(pa_context* c, void* userdata) {
+ 
+   case PA_CONTEXT_FAILED:
+   case PA_CONTEXT_TERMINATED:
+-    if (options.verbose) {
+-      fprintf(stderr, "PulseAudio connection lost.\n");
++    // Before: the dock-app quit, leaving an empty tile until the next login
++    // (PipeWire restarted, or not up yet at login). Now: wait for it.
++    if(!reportedOffline) {
++      fprintf(stderr, NAME ": audio server %s (%s); waiting for it.\n",
++              everConnected ? "connection lost" : "unavailable",
++              pa_strerror(pa_context_errno(c)));
++      reportedOffline = true;
+     }
+-    gtk_main_quit();
++    // Not from inside the context's own callback: from the main loop.
++    if(!lostId) lostId = g_idle_add(pulseLostEvent, NULL);
+     break;
+ 
+   default:
+@@ -343,30 +451,8 @@ static void callbackServerInfo(pa_context *c, const pa_server_info *info, void *
+     printf("Received server info\n");
+   }
+ 
+-  if(sinkList.list != NULL) {
+-    if(windowState.curchannel == SINK) {
+-      menuClose();
+-    }
+-    for(int i = 0; i < sinkList.count; ++i) {
+-      free(sinkList.list[i].name);
+-      free(sinkList.list[i].description);
+-    }
+-    free(sinkList.list);
+-    sinkList.list = NULL;
+-  }
+-  sinkList.count = 0;
+-  if(sourceList.list != NULL) {
+-    if(windowState.curchannel == SOURCE) {
+-      menuClose();
+-    }
+-    for(int i = 0; i < sourceList.count; ++i) {
+-      free(sourceList.list[i].name);
+-      free(sourceList.list[i].description);
+-    }
+-    free(sourceList.list);
+-    sourceList.list = NULL;
+-  }
+-  sourceList.count = 0;
++  menuClose();
++  pulseFreeDevices();
+ 
+   if(defaultSinkName != NULL) {
+     free(defaultSinkName);
+diff --git a/pulse.h b/pulse.h
+index 07135e2..6687371 100644
+--- a/pulse.h
++++ b/pulse.h
+@@ -19,6 +19,7 @@ struct pulseVolume_t {
+ };
+ 
+ struct pulseState_t {
++  bool connected; // false while there is no audio server (it is retried)
+   struct pulseVolume_t sink;
+   struct pulseVolume_t source;
+ };
+diff --git a/ui.c b/ui.c
+index a9fd2b5..c7beaf4 100644
+--- a/ui.c
++++ b/ui.c
+@@ -32,45 +32,75 @@ static void uiScrollEvent(GdkXEvent* event);
+ static gboolean uiRepeatTimeoutEvent(gpointer data);
+ 
+ void uiGDKEventHandler(GdkEvent *event, gpointer data) {
+-  switch(event->type) {
+-  case GDK_DELETE:
++  // Clicks, drags and the wheel on the dock-app are taken in
++  // uiXEventHandler, before GDK sees them: GDK only gets the device menu's
++  // events. Before, a click in that menu also acted on the dock-app's
++  // controls at the same coordinates (mute, volume), and each click on the
++  // dock-app (a foreign X window for GDK) logged "gdk_window_set_user_time
++  // called on non-toplevel".
++  if(event->type == GDK_DELETE) {
+     if (options.verbose) {
+-      printf("GDK_DELETE empfangen. Beende GTK-Mainloop sauber...\n");
++      printf("GDK_DELETE received, quitting the GTK main loop.\n");
+     }
+     gtk_main_quit();
+     return;
+-  case GDK_BUTTON_PRESS:
+-    uiPressEvent(event);
+-    break;
+-  case GDK_BUTTON_RELEASE:
+-    uiReleaseEvent();
+-    break;
+-  case GDK_MOTION_NOTIFY:
+-    uiMotionEvent(event);
+-    break;
+-  default:
+-    break;
+   }
+-
+   gtk_main_do_event(event);
+ }
+ 
++// A GDK event for the handlers below, from an X event on the dock-app.
++static GdkEvent* uiEventFromX(XEvent* xev) {
++  GdkDisplay* display = gdk_display_get_default();
++  GdkSeat* seat = gdk_display_get_default_seat(display);
++  GdkEvent* event;
++  if(xev->type == MotionNotify) {
++    event = gdk_event_new(GDK_MOTION_NOTIFY);
++    event->motion.x = xev->xmotion.x;
++    event->motion.y = xev->xmotion.y;
++    event->motion.x_root = xev->xmotion.x_root;
++    event->motion.y_root = xev->xmotion.y_root;
++    event->motion.time = xev->xmotion.time;
++  } else {
++    event = gdk_event_new(xev->type == ButtonPress ? GDK_BUTTON_PRESS : GDK_BUTTON_RELEASE);
++    event->button.x = xev->xbutton.x;
++    event->button.y = xev->xbutton.y;
++    event->button.x_root = xev->xbutton.x_root;
++    event->button.y_root = xev->xbutton.y_root;
++    event->button.button = xev->xbutton.button;
++    event->button.time = xev->xbutton.time;
++  }
++  event->any.window = g_object_ref(windowGdkWindow());
++  if(seat) gdk_event_set_device(event, gdk_seat_get_pointer(seat));
++  return event;
++}
++
+ GdkFilterReturn uiXEventHandler(GdkXEvent* xevent, GdkEvent* event, gpointer data) {
+   XEvent* xev = (XEvent*)xevent;
++  GdkEvent* own;
+ 
+   // Some events are not handled correctly if I try to handle them in gdkEventHandler.
+   // - Calling repaint on GDK_EXPOSE, GDK_CONFIGURE and GDK_VISIBILITY_NOTIFY doesn't work as well as
+   //   just Expose here. It still leads to some weird effects when moving the window.
+   // - gdkEventHandler is not called for scroll events.
+-  // I'm not sure why that is but I think it's because the window was not created with GTK and GTK/GDK
+-  // events are not 1-to-1 the same as Xlib events.
+ 
+   switch(xev->type) {
+   case ButtonPress:
+     if(xev->xbutton.button == Button4 || xev->xbutton.button == Button5) {
+       uiScrollEvent(xevent);
++      return GDK_FILTER_REMOVE;
+     }
+-    break;
++    own = uiEventFromX(xev);
++    uiPressEvent(own);
++    gdk_event_free(own);
++    return GDK_FILTER_REMOVE;
++  case ButtonRelease:
++    uiReleaseEvent();
++    return GDK_FILTER_REMOVE;
++  case MotionNotify:
++    own = uiEventFromX(xev);
++    uiMotionEvent(own);
++    gdk_event_free(own);
++    return GDK_FILTER_REMOVE;
+   case Expose:
+     windowRepaint(true);
+     break;
+@@ -82,6 +112,12 @@ GdkFilterReturn uiXEventHandler(GdkXEvent* xevent, GdkEvent* event, gpointer dat
+ }
+ 
+ 
++static void uiPressEvent(GdkEvent* event);
++static void uiReleaseEvent();
++static void uiMotionEvent(GdkEvent* event);
++static void uiScrollEvent(GdkXEvent* event);
++static gboolean uiRepeatTimeoutEvent(gpointer data);
++
+ static void uiPressEvent(GdkEvent* event)
+ {
+   if(options.verbose) printf("uiPressEvent\n");
+@@ -152,7 +188,11 @@ static void uiScrollEvent(GdkXEvent* event)
+ {
+   if(options.verbose) printf("uiScrollEvent\n");
+   XEvent* xev = (XEvent*)event;
+-  int target = windowState.curvol;
++  // The real volume: the displayed one is 0 while muted, and scrolling up
++  // from it used to drop a muted 80% to 4%.
++  struct pulseState_t state = pulseGetState();
++  if(!state.connected) return;
++  int target = windowState.curchannel == SINK ? state.sink.volume : state.source.volume;
+   if(xev->xbutton.button == Button4) target +=4;
+   else target -= 4;
+ 
+diff --git a/window.c b/window.c
+index 05995f2..4a0211a 100644
+--- a/window.c
++++ b/window.c
+@@ -63,6 +63,7 @@ static Window w_main;
+ static Window w_root;
+ static Window w_activewin;
+ static GC gc_gc;
++static GdkWindow* gdk_activewin = NULL;
+ static unsigned long color[5];
+ 
+ // Show text interval
+@@ -86,6 +87,7 @@ static void windowCreate(Window *win, int x, int y);
+ static unsigned long windowMixColor(char *colorname1, int prop1, char *colorname2, int prop2);
+ static void windowDrawMono();
+ static void windowDrawVolLevel();
++static void windowDrawOffline();
+ static void windowDrawText(char *text);
+ static void windowDrawBtn(int x, int y, int w, int h, bool down);
+ static gboolean windowShowTextTimeoutEvent(gpointer data);
+@@ -155,9 +157,10 @@ void windowInit(int argc, char **argv, GdkEventFunc gdkEventHandler, GdkFilterFu
+ 
+   GdkWindow* gdk_win = gdk_x11_window_foreign_new_for_display(gdk_disp, w_activewin);
+   if (!gdk_win) {
+-    fprintf(stderr, "Fehler: Konnte das X11-Fenster nicht bei GDK registrieren.\n");
++    fprintf(stderr, "%s : Unable to register the X11 window with GDK.\n", NAME);
+     exit(1);
+   }
++  gdk_activewin = gdk_win;
+   gdk_window_add_filter(gdk_win, xEventHandler, NULL);
+   gdk_event_handler_set(gdkEventHandler, NULL, NULL);
+ }
+@@ -263,9 +266,16 @@ void windowRepaint(bool _showText)
+   int newmuted = windowState.curchannel == SINK ? state.sink.muted : state.source.muted;
+   windowState.curvol = newvol;
+   windowState.curmuted = newmuted;
++  if(!state.connected) {
++    // No audio server (yet): "--" and an empty bar, never a stale volume.
++    windowState.curvol = 0;
++    windowState.curmuted = false;
++  }
+   windowDrawMono();
+   if(showText) {
+     windowDrawText(small_labels[windowState.curchannel]);
++  } else if(!state.connected) {
++    windowDrawOffline();
+   } else {
+     windowDrawVolLevel();
+   }
+@@ -315,6 +325,21 @@ static void windowDrawVolLevel()
+   }
+ }
+ 
++static void windowDrawOffline()
++{
++  // Unlit digits, then the middle segment of the first two lit: "--".
++  for(int i=0; i<4; i++) {
++    XCopyArea(d_display, pm_digits, pm_disp, gc_gc, 60, 0, 6, 9, 5+(i*6), 5);
++  }
++  for(int i=0; i<2; i++) {
++    XSetForeground(d_display, gc_gc, color[1]);
++    XFillRectangle(d_display, pm_disp, gc_gc, 5+(i*6)+2, 5+4, 3, 1);
++    XSetForeground(d_display, gc_gc, color[2]);
++    XDrawPoint(d_display, pm_disp, gc_gc, 5+(i*6)+1, 5+4);
++    XDrawPoint(d_display, pm_disp, gc_gc, 5+(i*6)+5, 5+4);
++  }
++}
++
+ static void windowDrawMono()
+ {
+   XSetForeground(d_display, gc_gc, color[1]);
+@@ -352,6 +377,16 @@ gboolean windowRepaintEvent(gpointer data) {
+   return FALSE;
+ }
+ 
++// Repaint without showing the channel name (eg. the server went away).
++gboolean windowRepaintQuietEvent(gpointer data) {
++  windowRepaint(false);
++  return FALSE;
++}
++
++GdkWindow* windowGdkWindow(void) {
++  return gdk_activewin;
++}
++
+ static gboolean windowShowTextTimeoutEvent(gpointer data) {
+   if(options.verbose) printf("windowShowTextTimeoutEvent\n");
+   showText = false;
+diff --git a/window.h b/window.h
+index 19de75d..d365181 100644
+--- a/window.h
++++ b/window.h
+@@ -30,5 +30,7 @@ void windowDrawBtns(int btns);
+ void windowRepaint(bool force);
+ 
+ gboolean windowRepaintEvent(gpointer data);
++gboolean windowRepaintQuietEvent(gpointer data);
++GdkWindow* windowGdkWindow(void);
+ 
+ #endif

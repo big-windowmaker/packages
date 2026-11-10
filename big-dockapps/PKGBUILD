@@ -92,7 +92,7 @@ _wmeyes_ver=1.2
 # são código-fonte); o namcap avisa por causa dele.
 _zenwalk=https://download.zenwalk.org/x86_64/people/jp/dockapps
 pkgver=20260412
-pkgrel=9
+pkgrel=10
 pkgdesc='Curated Window Maker dockapps for Big WindowMaker'
 arch=(x86_64)
 url='https://www.dockapps.net/'
@@ -159,6 +159,7 @@ source=(
   wmweather-curl-long.patch
   wmtzrc
   wmusic-segue-player.patch
+  wmusic-light-idle.patch
   wmnet-default-route.patch
   wmcliphist-popup-signal.patch
   wmcliphist-clipboard-utf8.patch
@@ -188,6 +189,7 @@ sha256sums=('cc9753fa925323b52110c595f4920da1aec6e1ae124a40be4062048991daed81'
             'd7be5f4706ceb626961daa9296c98cf920a73786dbbba244d6a83d3a930984fe'
             'cf5040ee03cd9a4bdcad227a5f52744934026980d4b161ad10c428b3f408f48b'
             '957dcade76c8bb417a6bb10ee0ce865b67edb47657cac1f343413dde0b34e719'
+            'ac37056f68828ab98aabfaaaadce5ccaccac84d78a96cee96601ed5a77addfef'
             'b56ff1ecf00bf75ac26e4fdbc97deb6f61753449bb0afea7e0968f5aa27a2248'
             '69509c2ff48e227c7de4ffedc67524ff47560cb3ed47dc28df405349ffaf4ff7'
             '48b9fb39fe495848b947aa97b6d25065e9008722a051ebc775fe48efac3c4bef'
@@ -209,6 +211,7 @@ prepare() {
   patch -Np1 -i ../wmcpufreq-libcpupower.patch
   patch -Np1 -i ../wmglobe-format-security.patch
   patch -Np1 -i ../wmusic-segue-player.patch
+  patch -Np1 -i ../wmusic-light-idle.patch
   # wmnet sem -W olhava "eth0" (gráfico vazio com enp*/wlp*): agora a
   # interface da rota padrão, acompanhada quando muda.
   patch -Np1 -i ../wmnet-default-route.patch

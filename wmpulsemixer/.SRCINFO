@@ -1,0 +1,21 @@
+pkgbase = wmpulsemixer
+	pkgdesc = Window Maker dockapp to control PulseAudio/PipeWire output and microphone volume
+	pkgver = 0.2.2
+	pkgrel = 1
+	url = https://github.com/polletfa/wmpulsemixer
+	arch = x86_64
+	license = GPL-2.0-only
+	makedepends = git
+	depends = glib2
+	depends = glibc
+	depends = gtk3
+	depends = libpulse
+	depends = libx11
+	depends = libxext
+	depends = libxpm
+	source = wmpulsemixer::git+https://github.com/polletfa/wmpulsemixer.git#tag=0.2.2
+	source = 0001-reconnect-to-the-audio-server-and-real-volume-scroll.patch
+	sha256sums = af63291774b11616d5682c53fc5f7a9356a57c56e67bd8b70a1c3b5c5580235d
+	sha256sums = 2d5826cedafa34c822a1abd1cd726bee9a7b59a888986fe23881028e3ad951a2
+
+pkgname = wmpulsemixer

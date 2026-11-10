@@ -1,0 +1,212 @@
+wmusic: leve em repouso (sem player ou parado) e menos chamadas ao player
+
+O wmusic acordava 10 vezes por segundo o tempo todo e, a cada vez,
+listava os players no D-Bus e pedia a posição ao player; também redesenhava
+o dockapp inteiro mesmo sem nada mudar (no Wayland, pelo XWayland, cada
+redesenho é um quadro a compor).
+
+- A lista de players (uma chamada ao D-Bus) vai a uma vez por segundo. O
+  fechamento do player continua imediato: o sinal "exit" do playerctl
+  solta o player na hora (sem consultar um player que já saiu).
+- A posição (que o MPRIS não sinaliza) é pedida uma vez por segundo e
+  contada no intervalo enquanto toca; volta a ser pedida logo depois de
+  um botão (avançar, voltar, faixa).
+- Sem player, ou com o player parado, o visor "--" é desenhado uma vez e o
+  laço acorda uma vez por segundo; tocando ou em pausa, a seta, o título e
+  o tempo seguem animados a 10 quadros por segundo, como antes.
+
+Medido no Xvfb (20 s, ticks de 10 ms): sem player 19 → 3; tocando 16 → 5;
+pedidos ao player ~10/s → ~1/s.
+
+A enviar para wmaker-dev@googlegroups.com.
+
+diff --git a/wmusic/src/wmusic.c b/wmusic/src/wmusic.c
+index d9b4857..9287ae2 100644
+--- a/wmusic/src/wmusic.c
++++ b/wmusic/src/wmusic.c
+@@ -67,6 +67,7 @@ void buttonPress(int button, int state, int x, int y);
+ void buttonRelease(int button, int state, int x, int y);
+ int PlayerConnect(void);
+ void DisplayRoutine();
++Bool PlayerAnimates(void);
+ void DrawTrackNum (int track_num);
+ void DrawTime(gint64 time);
+ void DrawArrow(void);
+@@ -93,6 +94,13 @@ Bool main_vis=0, pl_vis=0, eq_vis=0;
+ unsigned int volume_step = 5;
+ Bool run_excusive=0;
+ Bool ever_connected=0;	/* -R: exit only after the player went away */
++/* Light idle: with no player (or a stopped one) the display does not
++ * change, so the dockapp wakes once a second and does not redraw. */
++Bool animating=0;	/* playing or paused: arrow, title and time move */
++Bool static_drawn=0;	/* the static "--" display is already shown */
++gint64 position_when=0;	/* when the position was last asked (us) */
++gint64 position_cached=0;
++Bool player_exited=0;	/* the player left the bus: let go of it now */
+ 
+ Bool t_time=0;
+ unsigned int art_delay_secs = 0; /* secs of play before art shows */
+@@ -563,6 +571,8 @@ void buttonRelease(int button, int state, int x, int y)
+ 			copyNumArea(0,51, 54, 20, 5,39);
+ 			DASetPixmap(pixmap);
+ 			DAProcessActionRects(x, y, buttonRects, sizeof(buttonRects)/sizeof(DAActionRect), NULL);
++			position_when = 0;	/* seek, next... */
++			static_drawn = 0;
+ 		}
+ 	}
+ }
+@@ -614,14 +624,31 @@ static PlayerctlPlayerName *BestPlayer(GList *players)
+ 	return paused ? paused : (players ? players->data : NULL);
+ }
+ 
++/* playerctl: the player's name left the bus (the player quit). */
++static void PlayerExited(PlayerctlPlayer *p, gpointer data)
++{
++	player_exited = 1;
++}
++
+ int PlayerConnect(void)
+ {
+ 	GError *error = NULL;
+ 	static int previous_error_code = 0;
+-	static unsigned int ticks = 0;
++	static gint64 last_list = 0;
++	gint64 now = g_get_monotonic_time();
+ 	GList *players;
+ 	PlayerctlPlayerName *best = NULL;
+ 
++	/* The player list (a D-Bus call) once a second, not on every 100 ms
++	 * tick: players come and go rarely, and the dockapp follows the
++	 * current one by its D-Bus signals in between. */
++	if (last_list && now - last_list < G_USEC_PER_SEC && !player_exited) {
++		g_main_context_iteration(NULL, FALSE);
++		return player ? 1 : 0;
++	}
++	last_list = now;
++	player_exited = 0;
++
+ 	players = playerctl_list_players(&error);
+ 	if (error)
+ 		DAWarning("%s", error->message);
+@@ -633,15 +660,15 @@ int PlayerConnect(void)
+ 		g_object_unref(player);
+ 		player = NULL;
+ 		UpdateArtCache(NULL);
++		static_drawn = 0;	/* show "--" right away */
+ 	}
+ 
+ 	/* Once a second, while the current player is not playing, follow
+ 	 * another one that started playing. */
+-	if (player && g_list_length(players) > 1 && ++ticks >= 10) {
++	if (player && g_list_length(players) > 1) {
+ 		PlayerctlPlaybackStatus status;
+ 		int current = CurrentPlayerIndex(players);
+ 
+-		ticks = 0;
+ 		g_object_get(player, "playback-status", &status, NULL);
+ 		if (status != PLAYERCTL_PLAYBACK_STATUS_PLAYING) {
+ 			best = BestPlayer(players);
+@@ -673,6 +700,10 @@ int PlayerConnect(void)
+ 				     &player_name, NULL);
+ 			if (player_name)
+ 				DAWarning("Connected to %s", player_name);
++			g_signal_connect(player, "exit",
++					 G_CALLBACK(PlayerExited), NULL);
++			position_when = 0;
++			static_drawn = 0;	/* its volume, track... */
+ 			g_free(player_name);
+ 			ever_connected = 1;
+ 			}
+@@ -697,6 +728,15 @@ void DisplayRoutine()
+ 	GError *error = NULL;
+ 
+ 	PlayerConnect();
++	if (player_exited)
++		PlayerConnect();	/* it quit while the main loop ran */
++
++	if (!player && run_excusive && ever_connected)
++		exit(0);
++	/* Nothing moves without a playing or paused player: draw the "--"
++	 * display once (the window keeps it as its background). */
++	if (!animating && static_drawn && !PlayerAnimates())
++		return;
+ 
+ 	if (mouse_leave_ticks > 0) {
+ 		mouse_leave_ticks++;
+@@ -721,8 +761,6 @@ void DisplayRoutine()
+ 	/* Compute display */
+ 	if (!player)
+ 	{
+-		if (run_excusive && ever_connected)
+-			exit(0);
+ 		title = strdup("--");
+ 		title_pos = 0;
+ 		arrow_pos = 5;
+@@ -740,11 +778,26 @@ void DisplayRoutine()
+ 			    pause_norotate)
+ 				arrow_pos = 5;
+ 
+-			position = playerctl_player_get_position(player,
+-								 &error);
+-			if (error != NULL)
+-				DAWarning("%s", error->message);
+-			g_clear_error(&error);
++			/* The position is not signalled by MPRIS: ask the
++			 * player once a second (each ask wakes it up) and
++			 * count the time in between while it plays. */
++			{
++				gint64 now = g_get_monotonic_time();
++
++				if (!position_when ||
++				    now - position_when >= G_USEC_PER_SEC) {
++					position_cached =
++						playerctl_player_get_position(
++							player, &error);
++					if (error != NULL)
++						DAWarning("%s", error->message);
++					g_clear_error(&error);
++					position_when = now;
++				}
++				position = position_cached;
++				if (status == PLAYERCTL_PLAYBACK_STATUS_PLAYING)
++					position += now - position_when;
++			}
+ 
+ 			title = playerctl_player_get_title(player,
+ 							   &error);
+@@ -817,11 +870,25 @@ void DisplayRoutine()
+ 	}
+ 
+ 	DASetPixmap(pixmap);
++	animating = PlayerAnimates();
++	static_drawn = !animating;
+ 
+ 	if (title != NULL)
+ 		free(title);
+ }
+ 
++/* A playing or paused player: the display moves (arrow, title, time). */
++Bool PlayerAnimates(void)
++{
++	PlayerctlPlaybackStatus status;
++
++	if (!player)
++		return False;
++	g_object_get(player, "playback-status", &status, NULL);
++	return status == PLAYERCTL_PLAYBACK_STATUS_PLAYING ||
++	       status == PLAYERCTL_PLAYBACK_STATUS_PAUSED;
++}
++
+ void DrawTrackNum (int track_num)
+ {
+ 	char track_num_str[16];
+@@ -1227,7 +1294,8 @@ int main(int argc, char **argv)
+ 	DisplayRoutine();
+ 
+ 	while (1) {
+-		if (DANextEventOrTimeout(&ev, 100)) {
++		/* 10 frames a second only while something moves. */
++		if (DANextEventOrTimeout(&ev, animating ? 100 : 1000)) {
+ 			if (ev.type == EnterNotify) {
+ 				mouse_over = True;
+ 				mouse_leave_ticks = 0;
