@@ -1,0 +1,62 @@
+From 9a5ad4b25bfe69ddc63ba74cd637f1bb06d95a90 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 10 Nov 2026 06:39:59 -0300
+Subject: [PATCH] dock: the Clip never lands on the Dock's first icon
+
+When a monitor goes away, the Clip's saved position (the left of the third
+monitor, x=6880) is outside the screen and wScreenKeepInside() pushes it
+to the nearest edge, which is where the Dock is: the Clip covered the
+Dock's first icon (its menu, dragging the column), and the next restart
+saved it there, inside the screen. A Clip restored on the Dock's first
+icon now goes to the top of the other side of the Dock's monitor, where it
+is by default. Workspace Clips follow, as they take the Clip icon's
+position.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/dock.c | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/src/dock.c b/src/dock.c
+index ef00a329..392301d9 100644
+--- a/src/dock.c
++++ b/src/dock.c
+@@ -1965,6 +1965,27 @@ static WAppIcon *restore_icon_state(WScreen *scr, WMPropList *info, int type, in
+ 
+ #define COMPLAIN(key) wwarning(_("bad value in dock state info:%s"), key)
+ 
++/*
++ * A Clip saved where there is no screen any more (a monitor gone: it was at
++ * the left of the third monitor, x=6880, and the screen is now one 1920
++ * wide) is pushed to the nearest edge, which is where the Dock is: it sat
++ * on the Dock's first icon and hid it (its menu, dragging the column), and
++ * the next restart saved it there. A Clip on the Dock's first icon goes to
++ * the top of the other side of the Dock's monitor, where it is by default.
++ */
++static void clipAwayFromDock(WScreen *scr, WAppIcon *clip)
++{
++	WDock *dock = scr->dock;
++	WMRect r;
++
++	if (!dock || clip->x_pos + ICON_SIZE <= dock->x_pos || clip->x_pos >= dock->x_pos + ICON_SIZE ||
++	    clip->y_pos + ICON_SIZE <= dock->y_pos || clip->y_pos >= dock->y_pos + ICON_SIZE)
++		return;
++	r = dockAreaRect(scr);
++	clip->x_pos = dock->on_right_side ? r.pos.x : r.pos.x + (int) r.size.width - ICON_SIZE;
++	clip->y_pos = r.pos.y;
++}
++
+ WAppIcon *wClipRestoreState(WScreen *scr, WMPropList *clip_state)
+ {
+ 	WAppIcon *icon;
+@@ -1991,6 +2012,7 @@ WAppIcon *wClipRestoreState(WScreen *scr, WMPropList *clip_state)
+ 			/* check position sanity */
+ 			if (!onScreen(scr, icon->x_pos, icon->y_pos))
+ 				wScreenKeepInside(scr, &icon->x_pos, &icon->y_pos, ICON_SIZE, ICON_SIZE);
++			clipAwayFromDock(scr, icon);
+ 		}
+ 	}
+ #ifdef USE_DOCK_XDND
+-- 
+2.56.0
+

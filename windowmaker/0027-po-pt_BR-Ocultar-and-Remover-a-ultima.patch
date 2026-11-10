@@ -1,0 +1,99 @@
+diff --git a/WPrefs.app/po/pt_BR.po b/WPrefs.app/po/pt_BR.po
+index dc1663bb..496817a5 100644
+--- a/WPrefs.app/po/pt_BR.po
++++ b/WPrefs.app/po/pt_BR.po
+@@ -1003,11 +1003,11 @@ msgstr "Abrir o menu de comandos da janela"
+ 
+ #: ../../WPrefs.app/KeyboardShortcuts.c:76
+ msgid "Hide active application"
+-msgstr "Esconder o aplicativo ativo"
++msgstr "Ocultar o aplicativo ativo"
+ 
+ #: ../../WPrefs.app/KeyboardShortcuts.c:77
+ msgid "Hide other applications"
+-msgstr "Esconder os outros aplicativos"
++msgstr "Ocultar os outros aplicativos"
+ 
+ #: ../../WPrefs.app/KeyboardShortcuts.c:78
+ msgid "Miniaturize active window"
+@@ -1703,7 +1703,7 @@ msgstr "Organizar ícones"
+ 
+ #: ../../WPrefs.app/Menu.c:763
+ msgid "Hide All Windows Except For The Focused One"
+-msgstr "Esconder todas as janelas exceto a ativa"
++msgstr "Ocultar todas as janelas exceto a ativa"
+ 
+ #: ../../WPrefs.app/Menu.c:764
+ msgid "Show All Windows"
+diff --git a/po/pt_BR.po b/po/pt_BR.po
+index bb05ef52..9d87c4e4 100644
+--- a/po/pt_BR.po
++++ b/po/pt_BR.po
+@@ -80,7 +80,7 @@ msgstr "Mostrar aqui"
+ #: ../src/appicon.c:612 ../src/appicon.c:636 ../src/dock.c:1497
+ #: ../src/dock.c:1499 ../src/dock.c:4059 ../src/winmenu.c:87
+ msgid "Hide"
+-msgstr "Esconder"
++msgstr "Ocultar"
+ 
+ #: ../src/appicon.c:613 ../src/dock.c:1493 ../src/winmenu.c:93
+ msgid "Launch"
+@@ -1931,15 +1931,15 @@ msgstr ""
+ 
+ #: ../src/winspector.c:141
+ msgid "Ignore 'Hide Others'"
+-msgstr "Ignorar 'Esconder os outros'"
++msgstr "Ignorar 'Ocultar os outros'"
+ 
+ #: ../src/winspector.c:142
+ msgid ""
+ "Do not hide the window when issuing the\n"
+ "`HideOthers' command."
+ msgstr ""
+-"Não esconde esta janela quando o comando\n"
+-"`Esconder os outros' for usado."
++"Não oculta esta janela quando o comando\n"
++"`Ocultar os outros' for usado."
+ 
+ #: ../src/winspector.c:145
+ msgid "Ignore 'Save Session'"
+@@ -2005,7 +2005,7 @@ msgid ""
+ "window decorations (like hiding the titlebar).\n"
+ msgstr ""
+ "Ignora qualquer pedido do aplicativo para mudar\n"
+-"as decorações da janela (como esconder a barra de título).\n"
++"as decorações da janela (como ocultar a barra de título).\n"
+ 
+ #: ../src/winspector.c:169
+ msgid "Disable language button"
+@@ -2021,7 +2021,7 @@ msgstr "Iniciar escondido"
+ 
+ #: ../src/winspector.c:175
+ msgid "Automatically hide application when it's started."
+-msgstr "Esconde o aplicativo automaticamente ao iniciar."
++msgstr "Oculta o aplicativo automaticamente ao iniciar."
+ 
+ #: ../src/winspector.c:177
+ msgid "No application icon"
+@@ -2193,7 +2193,7 @@ msgstr "Nova"
+ 
+ #: ../src/workspace.c:775
+ msgid "Destroy Last"
+-msgstr "Destruir a última"
++msgstr "Remover a última"
+ 
+ #: ../src/workspace.c:777
+ msgid "Last Used"
+diff --git a/util/po/pt_BR.po b/util/po/pt_BR.po
+index f966a34e..e6782bfb 100644
+--- a/util/po/pt_BR.po
++++ b/util/po/pt_BR.po
+@@ -233,7 +233,7 @@ msgstr "Área de trabalho"
+ 
+ #: ../../util/wmgenmenu.c:286
+ msgid "Hide Others"
+-msgstr "Esconder os outros"
++msgstr "Ocultar os outros"
+ 
+ #: ../../util/wmgenmenu.c:294
+ msgid "Show All"

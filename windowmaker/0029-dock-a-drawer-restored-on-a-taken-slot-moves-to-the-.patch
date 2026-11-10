@@ -1,0 +1,83 @@
+From 8e76210648b698eac57f2eb2dcdf5a1be07bcef0 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 10 Nov 2026 06:46:28 -0300
+Subject: [PATCH] dock: a drawer restored on a taken slot moves to the nearest
+ free one
+
+The Dock keeps one list of icons per screen height (Applications,
+Applications1440...), but drawers have one position for all heights: on
+another screen the drawer was put back on the slot of a dock-app
+(wmake-zones) and covered it. The upstream comment already asked for
+something more intelligent here. A drawer whose saved slot is taken by a
+Dock icon or another drawer now goes to the nearest free slot, below
+first; with no free slot it keeps the saved one.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/dock.c | 43 +++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 43 insertions(+)
+
+diff --git a/src/dock.c b/src/dock.c
+index 392301d9..f0abe7af 100644
+--- a/src/dock.c
++++ b/src/dock.c
+@@ -5354,6 +5354,46 @@ static void drawerConsolidateIcons(WDock *drawer)
+ 
+ 
+ /* similar to wDockRestoreState, but a lot a specific stuff too... */
++/* Is the Dock's slot y_index taken by one of its icons or another drawer? */
++static Bool dockSlotTaken(WScreen *scr, WDock *self, int y_index)
++{
++	WDock *dock = scr->dock;
++	WDrawerChain *dc;
++	int i;
++
++	for (i = 0; i < dock->max_icons; i++) {
++		WAppIcon *aicon = dock->icon_array[i];
++
++		if (aicon && aicon->yindex == y_index)
++			return True;
++	}
++	for (dc = scr->drawers; dc; dc = dc->next) {
++		if (dc->adrawer != self && dc->adrawer->y_pos == dock->y_pos + y_index * ICON_SIZE)
++			return True;
++	}
++	return False;
++}
++
++/*
++ * The slot for a drawer whose saved slot is taken: the Dock keeps one list
++ * of icons per screen height (Applications, Applications1440...) but the
++ * drawers have one position for all, so with another screen height the
++ * drawer landed on a dock-app (wmake-zones, 2026-11-10) and covered it. The
++ * nearest free slot, below first; the saved one if there is none.
++ */
++static int drawerFreeSlot(WScreen *scr, WDock *self, int y_index)
++{
++	int max = scr->dock->max_icons, d;
++
++	for (d = 0; d < max; d++) {
++		if (y_index + d < max && !dockSlotTaken(scr, self, y_index + d))
++			return y_index + d;
++		if (d > 0 && y_index - d >= 1 && !dockSlotTaken(scr, self, y_index - d))
++			return y_index - d;
++	}
++	return y_index;
++}
++
+ static WDock * drawerRestoreState(WScreen *scr, WMPropList *drawer_state)
+ {
+ 	WDock *drawer;
+@@ -5403,6 +5443,9 @@ static WDock * drawerRestoreState(WScreen *scr, WMPropList *drawer_state)
+ 			 * G/D/State file (but uses a lower resolution). */
+ 			y_index = scr->dock->max_icons - 1;
+ 		}
++		if (y_index < 1)
++			y_index = 1;
++		y_index = drawerFreeSlot(scr, drawer, y_index);
+ 		y = scr->dock->y_pos + y_index * ICON_SIZE;
+ 		moveDock(drawer, x, y);
+ 	}
+-- 
+2.56.0
+

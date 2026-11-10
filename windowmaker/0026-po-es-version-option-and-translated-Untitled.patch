@@ -1,0 +1,64 @@
+diff --git a/po/es.po b/po/es.po
+index b7a0a78d..4e2a498b 100644
+--- a/po/es.po
++++ b/po/es.po
+@@ -867,7 +867,7 @@ msgstr ""
+ 
+ #: ../src/main.c:447
+ msgid " --version\t\tprint version and exit"
+-msgstr " --versión\t\tmostrar versión y salir"
++msgstr " --version\t\tmostrar versión y salir"
+ 
+ #: ../src/main.c:448
+ msgid " --help\t\t\tshow this message"
+diff --git a/po/pt_BR.po b/po/pt_BR.po
+index c518fcbf..bb05ef52 100644
+--- a/po/pt_BR.po
++++ b/po/pt_BR.po
+@@ -1574,6 +1574,10 @@ msgstr "Direção impossível: %d"
+ msgid "Windows"
+ msgstr "Janelas"
+ 
++#: ../src/switchmenu.c:273 ../src/switchmenu.c:328
++msgid "Untitled"
++msgstr "Sem título"
++
+ #: ../src/texture.c:330
+ #, c-format
+ msgid "image file \"%s\" used as texture could not be found."
+diff --git a/src/switchmenu.c b/src/switchmenu.c
+index 0bfbcebf..f7e07216 100644
+--- a/src/switchmenu.c
++++ b/src/switchmenu.c
+@@ -269,7 +269,8 @@ void UpdateSwitchMenu(WScreen * scr, WWindow * wwin, int action)
+ 		if (wwin->frame->title)
+ 			snprintf(title, len, "%s", wwin->frame->title);
+ 		else
+-			snprintf(title, len, "%s", DEF_WINDOW_TITLE);
++			/* DEF_WINDOW_TITLE, as text that xgettext can see. */
++			snprintf(title, len, "%s", _("Untitled"));
+ 		t = ShrinkString(scr->menu_entry_font, title, MAX_WINDOWLIST_WIDTH);
+ 
+ 		if (IS_OMNIPRESENT(wwin))
+@@ -323,7 +324,7 @@ void UpdateSwitchMenu(WScreen * scr, WWindow * wwin, int action)
+ 					if (wwin->frame->title)
+ 						snprintf(title, MAX_MENU_TEXT_LENGTH, "%s", wwin->frame->title);
+ 					else
+-						snprintf(title, MAX_MENU_TEXT_LENGTH, "%s", DEF_WINDOW_TITLE);
++						snprintf(title, MAX_MENU_TEXT_LENGTH, "%s", _("Untitled"));
+ 
+ 					t = ShrinkString(scr->menu_entry_font, title, MAX_WINDOWLIST_WIDTH);
+ 					entry->text = t;
+diff --git a/src/window.c b/src/window.c
+index a7bcb0ff..b59682ee 100644
+--- a/src/window.c
++++ b/src/window.c
+@@ -1952,7 +1952,7 @@ void wWindowUpdateName(WWindow *wwin, const char *newTitle)
+ 		return;
+ 
+ 	if (!newTitle)
+-		title = DEF_WINDOW_TITLE; /* the hint was removed */
++		title = _(DEF_WINDOW_TITLE); /* the hint was removed; msgid "Untitled" (switchmenu.c) */
+ 	else
+ 		title = newTitle;
+ 

@@ -12,7 +12,7 @@
 pkgname=windowmaker
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
-pkgrel=14
+pkgrel=24
 pkgdesc='X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)'
 arch=(x86_64)
 url='https://www.windowmaker.org/'
@@ -45,7 +45,7 @@ depends=(
   libjxl      # suporte a JPEG XL no wrlib
   libarchive  # wmiv: abrir imagens dentro de arquivos compactados
 )
-makedepends=(git)
+makedepends=(git gettext)
 conflicts=(windowmaker-git)
 source=(
   "git+https://github.com/window-maker/wmaker.git#commit=${_commit}"
@@ -68,6 +68,16 @@ source=(
   0017-motif-follow-MOTIF_WM_HINTS-changed-after-the-window-is-mapped.patch
   0018-dockapps-drag-and-menu-handed-over-as-a-synthetic-pr.patch
   0019-screen-_NET_WORKAREA-follows-the-struts.patch
+  0020-IgnoreDecorationChanges-only-on-decorated-window-typ.patch
+  0021-IgnoreDecorationChanges-not-on-games-in-borderless-f.patch
+  0022-dock-a-docked-application-s-command-launches-it-a-cl.patch
+  0023-dock-the-docked-command-finds-the-process-of-a-GTK-a.patch
+  0024-i18n-pt_BR-catalogs-for-all-domains-and-RESET_DOCK.patch
+  0025-wmaker-bind-the-message-catalogs-before-parsing-the-.patch
+  0026-po-es-version-option-and-translated-Untitled.patch
+  0027-po-pt_BR-Ocultar-and-Remover-a-ultima.patch
+  0028-dock-the-Clip-never-lands-on-the-Dock-s-first-icon.patch
+  0029-dock-a-drawer-restored-on-a-taken-slot-moves-to-the-.patch
 )
 sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337'
@@ -88,7 +98,17 @@ sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             'f4a5da451bd7497b532687904bef6f4859bae7761c37a659ed0712aa481118cb'
             '9f0cae967a7326c3b424a4db5564cf7c2f7b00d71f8a05a9708f44bb1f235318'
             '55906b8ff56cbef6cc064005c2404eeff20554d3e5655d0a6c76466b1eea182d'
-            'd354019bb30f1e6236d8c8536137a39d24ee1f99ddbfebf2d71d16c739a6ed36')
+            'd354019bb30f1e6236d8c8536137a39d24ee1f99ddbfebf2d71d16c739a6ed36'
+            '5a9051dc69f9ead57950efb85021682fbff635196e5d1ca06be06f244fbfd127'
+            'ff33d2472e04da3472bbab0ee4331d6660ed98421b3373b8538ffd2b6b689118'
+            '5fcf4a4244dde8aa250e7d0838d3268ff4da4a011792d032f8150be50fa9da9a'
+            '61649d2839fd933da73bf0a0acb9e5641eef7902932caff5eb4ea7a00f5144ae'
+            '9701365bd05d4ba3799d05573a20e09f07ae417fad1fffa655566e0ef20bdc9c'
+            '3c3979884afda296193e87472ee1e1ff897715e63a6bfec2c1e8d51b9422bc51'
+            'c4fbde79a624d843a8bb08d2d7cbd2bb4354ac65b3b656005aa31fe28122f937'
+            'fbe6997ecfd2942275b2ed19f05ca9dbdaff97466c517c04def48262b6fa7127'
+            '86b44ff26233cf240b64b150bbf0eb7a25043280ebb4a08eb7d87175d452ae57'
+            'b8c08762a2db2a9dcd6fcd3123eb5ff770190e28127b80b47dc4c48c51fe87fc')
 
 prepare() {
   cd wmaker
@@ -211,6 +231,35 @@ prepare() {
   # de trabalho (o instalador, diálogos Qt e GTK) ficavam embaixo dele. Pode
   # ir ao upstream.
   patch -Np1 -i "${srcdir}/0019-screen-_NET_WORKAREA-follows-the-struts.patch"
+
+  # Moldura em todos os programas (IgnoreDecorationChanges só nos tipos
+  # decorados, não em jogos sem bordas) e o Dock: comando do .desktop ao
+  # acoplar, e duplo clique num programa da bandeja traz a janela.
+  patch -Np1 -i "${srcdir}/0020-IgnoreDecorationChanges-only-on-decorated-window-typ.patch"
+  patch -Np1 -i "${srcdir}/0021-IgnoreDecorationChanges-not-on-games-in-borderless-f.patch"
+  patch -Np1 -i "${srcdir}/0022-dock-a-docked-application-s-command-launches-it-a-cl.patch"
+  patch -Np1 -i "${srcdir}/0023-dock-the-docked-command-finds-the-process-of-a-GTK-a.patch"
+
+  # Tradução pt_BR completa e revisada de todos os domínios (WindowMaker,
+  # WPrefs, WINGs, WRaster, wmgenmenu) e o comando RESET_DOCK no editor de
+  # menus do WPrefs.
+  patch -Np1 -i "${srcdir}/0024-i18n-pt_BR-catalogs-for-all-domains-and-RESET_DOCK.patch"
+
+  # --help e os erros de argumento traduzidos (o catálogo era carregado só
+  # depois da leitura da linha de comando). Pode ir ao upstream.
+  patch -Np1 -i "${srcdir}/0025-wmaker-bind-the-message-catalogs-before-parsing-the-.patch"
+
+  # Lista de janelas: "Sem título" traduzido; no espanhol, a opção --version
+  # não era mais traduzida como --versión. Podem ir ao upstream.
+  patch -Np1 -i "${srcdir}/0026-po-es-version-option-and-translated-Untitled.patch"
+  patch -Np1 -i "${srcdir}/0027-po-pt_BR-Ocultar-and-Remover-a-ultima.patch"
+
+  # 0028: o Clip nunca fica sobre o primeiro ícone do Dock (um monitor a
+  # menos o empurrava para lá): vai para o outro lado do monitor do Dock.
+  patch -Np1 -i "${srcdir}/0028-dock-the-Clip-never-lands-on-the-Dock-s-first-icon.patch"
+  # 0029: uma gaveta restaurada numa vaga ocupada do Dock (outra altura de
+  # tela, outra lista do Dock) vai para a vaga livre mais próxima.
+  patch -Np1 -i "${srcdir}/0029-dock-a-drawer-restored-on-a-taken-slot-moves-to-the-.patch"
 
   # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
   # sed que o Arch faz na 0.96.0 não é necessário aqui.
