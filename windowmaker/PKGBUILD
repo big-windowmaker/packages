@@ -12,7 +12,7 @@
 pkgname=windowmaker
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
-pkgrel=24
+pkgrel=25
 pkgdesc='X11 window manager with a NeXTSTEP look and feel (upstream master snapshot)'
 arch=(x86_64)
 url='https://www.windowmaker.org/'
@@ -78,6 +78,7 @@ source=(
   0027-po-pt_BR-Ocultar-and-Remover-a-ultima.patch
   0028-dock-the-Clip-never-lands-on-the-Dock-s-first-icon.patch
   0029-dock-a-drawer-restored-on-a-taken-slot-moves-to-the-.patch
+  0030-randr-draw-the-background-again-when-a-monitor-comes.patch
 )
 sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337'
@@ -108,7 +109,8 @@ sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             'c4fbde79a624d843a8bb08d2d7cbd2bb4354ac65b3b656005aa31fe28122f937'
             'fbe6997ecfd2942275b2ed19f05ca9dbdaff97466c517c04def48262b6fa7127'
             '86b44ff26233cf240b64b150bbf0eb7a25043280ebb4a08eb7d87175d452ae57'
-            'b8c08762a2db2a9dcd6fcd3123eb5ff770190e28127b80b47dc4c48c51fe87fc')
+            'b8c08762a2db2a9dcd6fcd3123eb5ff770190e28127b80b47dc4c48c51fe87fc'
+            'b864d18cac3e2b0622b0a04fecc5dec97a8c9c214b52c991b386a3d1a5bc3bac')
 
 prepare() {
   cd wmaker
@@ -260,6 +262,9 @@ prepare() {
   # 0029: uma gaveta restaurada numa vaga ocupada do Dock (outra altura de
   # tela, outra lista do Dock) vai para a vaga livre mais próxima.
   patch -Np1 -i "${srcdir}/0029-dock-a-drawer-restored-on-a-taken-slot-moves-to-the-.patch"
+  # 0030: o fundo é redesenhado quando um monitor chega, sai ou muda de
+  # lugar (antes o pixmap ficava do tamanho antigo: preto nos monitores novos).
+  patch -Np1 -i "${srcdir}/0030-randr-draw-the-background-again-when-a-monitor-comes.patch"
 
   # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
   # sed que o Arch faz na 0.96.0 não é necessário aqui.
