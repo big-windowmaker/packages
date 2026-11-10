@@ -257,9 +257,16 @@
 #         ícones, PNG ou SVG), título, Esc volta à janela de antes, Enter,
 #         setas, Home e End
 #   0141  revisão: nome do cliente com barra não abre arquivo nenhum
+#   0144  integração de novembro (branch fix/xwl-toplevel-geometry do fork):
+#         moldura em todas as janelas (ServerDecoration), menu raiz sem
+#         arrancar submenu fechado, conteúdo da janela X na moldura (Steam),
+#         jogos sem bordas, ícones de aplicativos com o menu do Window Maker
+#         e arrastar para o Dock/Clip, zoom (Ctrl+Alt+rolagem), monitores
+#         desligados religáveis, menu do wmcliphist, assento do XWayland
+#         (área de transferência) e pipes de subprocessos fechados
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=23
+pkgrel=31
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -286,13 +293,14 @@ depends=(
   xorg-xwayland  # suporte a XWayland (habilitado quando xwayland.pc existe)
 )
 makedepends=(
+  gettext  # catálogos .mo do domínio wlmaker (msgfmt)
   cmake
   git
   librsvg  # o wlmaker desenha os ícones SVG do Alt+Tab (0140)
   wayland-protocols
   'wmake-zones>=0.3.0'  # núcleo das zonas (estático sem LTO, 0104): histórico, foco espacial, modos (0113)
 )
-checkdepends=(desktop-file-utils)
+checkdepends=(desktop-file-utils gettext)
 optdepends=(
   'pavucontrol: mixer completo, aberto pelo clique do meio ou pelo menu do wlmmixer'
   'pipewire-pulse: servidor de som para o wlmmixer'
@@ -431,12 +439,14 @@ _patches=(
   0139-xdg-window-geometry-as-the-window-frame-crops-it-til.patch
   0140-Alt-Tab-Window-Maker-s-switch-panel-icons-title-Esc-.patch
   0141-app_icon-a-client-s-app-ID-or-WM_CLASS-with-a-path-s.patch
+  0144-Big-WindowMaker-integration-2026-11.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
   "git+https://github.com/phkaeser/libbase.git#commit=${_libbase_commit}"
   "git+https://github.com/benhoyt/inih.git#commit=${_inih_commit}"
   "${_patches[@]}"
+  libbase-0001-subprocess-close-pipes.patch
 )
 sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             '6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91'
@@ -573,7 +583,9 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             '90b915faaea43904e260b677e12e487d37f07dc3feda6fdc5442c7717b07c48a'
             'ef8b86f47a43266c641bbba9bf67ac5f8a302f2c1f664a0ccefd431b9f5c66a9'
             'be865ecdc727083f4e59fada19ad9ad899d4a76eb17de7c273e9a13f513ad887'
-            '8bac57762789d947178fa0e68fc4e7b7e9ce42ee69dd3be2ce9f27d6d0bfe2d8')
+            '8bac57762789d947178fa0e68fc4e7b7e9ce42ee69dd3be2ce9f27d6d0bfe2d8'
+            '1ee14d5f0a4d55c36de0a358386770bb8a6559892f3e793f6cd0c96829e836bc'
+            '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb')
 
 prepare() {
   cd wlmaker
@@ -592,6 +604,10 @@ prepare() {
   git config submodule.submodules/libbase.url "${srcdir}/libbase"
   git config submodule.submodules/inih.url "${srcdir}/inih"
   git -c protocol.file.allow=always submodule update submodules/libbase submodules/inih
+
+  # libbase: os pipes de um subprocesso terminado são fechados (e marcados
+  # close-on-exec): o wlmaker acumulava descritores abertos numa sessão longa.
+  git -C submodules/libbase apply "${srcdir}/libbase-0001-subprocess-close-pipes.patch"
 
   local _patch
   for _patch in "${_patches[@]}"; do

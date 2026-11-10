@@ -1,0 +1,137 @@
+From 348968be046925ef378b6d2b673509d74710a106 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sun, 8 Nov 2026 22:43:40 -0300
+Subject: [PATCH] subprocess: Closes the pipes of a terminated subprocess, and
+ marks them close-on-exec.
+
+bs_subprocess_destroy() closed the parent's ends of stdin, stdout and
+stderr only through bs_subprocess_stop(), i.e. only while the child was
+still running. Once bs_subprocess_terminated() had reaped the child, the
+three descriptors stayed open for good: a long-running caller leaked
+three descriptors per subprocess, until it hit RLIMIT_NOFILE.
+
+The pipes were also created without FD_CLOEXEC, so every later child
+(and anything else the caller forks, eg. Xwayland) inherited the parent's
+ends of all earlier children's pipes. The child's dup2() onto 0, 1 and 2
+clears the flag on its own descriptors.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/subprocess.c | 67 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 67 insertions(+)
+
+diff --git a/src/subprocess.c b/src/subprocess.c
+index b80c7be..cab45aa 100644
+--- a/src/subprocess.c
++++ b/src/subprocess.c
+@@ -22,6 +22,7 @@
+ #define _POSIX_C_SOURCE 200809L
+ 
+ #include <errno.h>
++#include <fcntl.h>
+ #include <inttypes.h>
+ #include <libbase/assert.h>
+ #include <libbase/dynbuf.h>
+@@ -241,6 +242,16 @@ void bs_subprocess_destroy(bs_subprocess_t *subprocess_ptr)
+     if (0 != subprocess_ptr->pid) {
+         bs_subprocess_stop(subprocess_ptr);
+     }
++    // A subprocess seen terminated has its pid cleared, but not its pipes.
++    if (-1 != subprocess_ptr->stdin_write) {
++        _close_fd(&subprocess_ptr->stdin_write);
++    }
++    if (-1 != subprocess_ptr->stdout_read) {
++        _close_fd(&subprocess_ptr->stdout_read);
++    }
++    if (-1 != subprocess_ptr->stderr_read) {
++        _close_fd(&subprocess_ptr->stderr_read);
++    }
+ 
+     if (NULL != subprocess_ptr->env_vars_ptr) {
+         _free_env_var_list(subprocess_ptr->env_vars_ptr);
+@@ -479,6 +490,19 @@ bool _create_pipe_fds(int *read_fd_ptr, int *write_fd_ptr) {
+         bs_log(BS_ERROR | BS_ERRNO, "Failed pipe(%p)", fds);
+         return false;
+     }
++    // Close-on-exec: Otherwise every later child (and every process the
++    // parent forks elsewhere) inherits these pipes, keeps them open and the
++    // parent never sees EOF on them. The child's dup2() onto 0, 1 and 2
++    // clears the flag for its own descriptors.
++    for (int i = 0; i < 2; ++i) {
++        if (0 != fcntl(fds[i], F_SETFD, FD_CLOEXEC)) {
++            bs_log(BS_ERROR | BS_ERRNO, "Failed fcntl(%d, F_SETFD, "
++                   "FD_CLOEXEC)", fds[i]);
++            close(fds[0]);
++            close(fds[1]);
++            return false;
++        }
++    }
+     *read_fd_ptr = fds[0];
+     *write_fd_ptr = fds[1];
+     return true;
+@@ -759,6 +783,8 @@ static void test_is_variable_assignment(bs_test_t *test_ptr);
+ static void test_split_command(bs_test_t *test_ptr);
+ static void test_hang(bs_test_t *test_ptr);
+ static void test_nonexisting(bs_test_t *test_ptr);
++static void test_cloexec(bs_test_t *test_ptr);
++static void test_destroy_terminated(bs_test_t *test_ptr);
+ 
+ /** Unit test cases. */
+ const bs_test_case_t          bs_subprocess_test_cases[] = {
+@@ -766,6 +792,8 @@ const bs_test_case_t          bs_subprocess_test_cases[] = {
+     { true, "split_command", test_split_command },
+     { true, "hang", test_hang },
+     { true, "nonexisting", test_nonexisting },
++    { true, "cloexec", test_cloexec },
++    { true, "destroy_terminated", test_destroy_terminated },
+     BS_TEST_CASE_SENTINEL()
+ };
+ 
+@@ -955,5 +983,44 @@ void test_nonexisting(bs_test_t *test_ptr)
+     bs_subprocess_destroy(sp_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** The parent's ends of the pipes do not leak into other children. */
++void test_cloexec(bs_test_t *test_ptr)
++{
++    test_args[0] = "./subprocess_test_hang";
++    bs_subprocess_t *sp_ptr = bs_subprocess_create(
++        "./subprocess_test_hang", test_args, NULL);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, sp_ptr);
++    BS_TEST_VERIFY_TRUE(test_ptr, bs_subprocess_start(sp_ptr));
++
++    int fds[3];
++    bs_subprocess_get_fds(sp_ptr, &fds[0], &fds[1], &fds[2]);
++    for (int i = 0; i < 3; ++i) {
++        BS_TEST_VERIFY_TRUE(
++            test_ptr, 0 != (fcntl(fds[i], F_GETFD) & FD_CLOEXEC));
++    }
++    bs_subprocess_destroy(sp_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Destroying a subprocess seen terminated closes the pipes. */
++void test_destroy_terminated(bs_test_t *test_ptr)
++{
++    test_args[0] = "./subprocess_test_does_not_exist";
++    bs_subprocess_t *sp_ptr = bs_subprocess_create(
++        "./subprocess_test_does_not_exist", test_args, NULL);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, sp_ptr);
++    BS_TEST_VERIFY_TRUE(test_ptr, bs_subprocess_start(sp_ptr));
++    while (!bs_subprocess_terminated(sp_ptr, NULL, NULL)) poll(NULL, 0, 10);
++
++    int fds[3];
++    bs_subprocess_get_fds(sp_ptr, &fds[0], &fds[1], &fds[2]);
++    bs_subprocess_destroy(sp_ptr);
++    for (int i = 0; i < 3; ++i) {
++        BS_TEST_VERIFY_EQ(test_ptr, -1, fcntl(fds[i], F_GETFD));
++        BS_TEST_VERIFY_EQ(test_ptr, EBADF, errno);
++    }
++}
++
+ /** @endcond */
+ /* == End of subprocess.c ================================================== */
+-- 
+2.56.0
+
