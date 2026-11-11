@@ -1,0 +1,133 @@
+From 9c40353f86e83b91dd4683c6db1069b34e3e7570 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 10 Nov 2026 22:19:36 -0300
+Subject: [PATCH] wlmdock: Keeps its name across a theme restart; the Clip
+ finds it by the executable too
+
+wlmdock starts over for a new theme with execv("/proc/self/exe"), which
+renames the process to "exe". The compositor finds its docks by the
+process name "wlmdock" to send them SIGHUP (new theme) and SIGUSR1 (new
+launchers, moved): after the first theme change, neither reached them,
+and the Dock's and Clip's launchers kept the old theme.
+
+- wlmdock sets its name with prctl(PR_SET_NAME) at start.
+- The Clip also accepts a client whose executable is wlmdock (an older
+  wlmdock already named "exe", or a binary replaced by an update), and
+  logs the signals it sends.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/clip.c    | 54 +++++++++++++++++++++++++++++++++++++++++----------
+ src/wlmdock.c |  6 ++++++
+ 2 files changed, 50 insertions(+), 10 deletions(-)
+
+diff --git a/src/clip.c b/src/clip.c
+index b50e3451..90d9897a 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -34,6 +34,8 @@
+ #include <string.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
++#include <limits.h>
++#include <unistd.h>
+ #include <wayland-server-core.h>
+ #include <wayland-util.h>
+ #define WLR_USE_UNSTABLE
+@@ -278,6 +280,7 @@ static void _wlmaker_clip_handle_theme_changed(
+ static void _wlmaker_clip_signal_wlmdock_with(
+     wlmaker_server_t *server_ptr,
+     int signal_number);
++static bool _wlmaker_clip_client_is_wlmdock(struct wl_client *wl_client_ptr);
+ 
+ /* == Data ================================================================= */
+ 
+@@ -685,20 +688,51 @@ static void _wlmaker_clip_signal_wlmdock_with(
+         server_ptr->wl_display_ptr);
+     struct wl_client *wl_client_ptr;
+     wl_client_for_each(wl_client_ptr, clients_ptr) {
+-        char *name_ptr = wlmaker_dockapps_client_name(wl_client_ptr);
+-        if (NULL == name_ptr) continue;
+-        if (0 == strcmp(name_ptr, "wlmdock")) {
+-            pid_t pid = 0;
+-            wl_client_get_credentials(wl_client_ptr, &pid, NULL, NULL);
+-            if (1 < pid && 0 != kill(pid, signal_number)) {
+-                bs_log(BS_WARNING | BS_ERRNO, "Failed kill(%"PRIdMAX
+-                       ", %d)", (intmax_t)pid, signal_number);
+-            }
++        if (!_wlmaker_clip_client_is_wlmdock(wl_client_ptr)) continue;
++        pid_t pid = 0;
++        wl_client_get_credentials(wl_client_ptr, &pid, NULL, NULL);
++        if (1 < pid && 0 != kill(pid, signal_number)) {
++            bs_log(BS_WARNING | BS_ERRNO, "Failed kill(%"PRIdMAX
++                   ", %d)", (intmax_t)pid, signal_number);
++        } else if (1 < pid) {
++            bs_log(BS_INFO, "Sent signal %d to wlmdock %"PRIdMAX,
++                   signal_number, (intmax_t)pid);
+         }
+-        free(name_ptr);
+     }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Whether the client is a `wlmdock`: By the process name, or by the
++ * executable. A wlmdock that started over for a new theme with
++ * execv("/proc/self/exe") is named "exe" (older wlmdock); one whose
++ * binary was replaced by an update has " (deleted)" after the path.
++ */
++static bool _wlmaker_clip_client_is_wlmdock(struct wl_client *wl_client_ptr)
++{
++    char *name_ptr = wlmaker_dockapps_client_name(wl_client_ptr);
++    bool is_wlmdock = (NULL != name_ptr && 0 == strcmp(name_ptr, "wlmdock"));
++    free(name_ptr);
++    if (is_wlmdock) return true;
++
++    pid_t pid = 0;
++    wl_client_get_credentials(wl_client_ptr, &pid, NULL, NULL);
++    if (1 >= pid) return false;
++    char path[64], exe[PATH_MAX];
++    snprintf(path, sizeof(path), "/proc/%"PRIdMAX"/exe", (intmax_t)pid);
++    ssize_t len = readlink(path, exe, sizeof(exe) - 1);
++    if (0 >= len) return false;
++    exe[len] = '\0';
++    static const char deleted[] = " (deleted)";
++    size_t dlen = sizeof(deleted) - 1;
++    if ((size_t)len > dlen && 0 == strcmp(exe + len - dlen, deleted)) {
++        exe[len - dlen] = '\0';
++    }
++    const char *base_ptr = strrchr(exe, '/');
++    base_ptr = (NULL != base_ptr) ? base_ptr + 1 : exe;
++    return 0 == strcmp(base_ptr, "wlmdock");
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmaker_clip_move_dock(
+     wlmaker_server_t *server_ptr,
+diff --git a/src/wlmdock.c b/src/wlmdock.c
+index 954fd920..6912847b 100644
+--- a/src/wlmdock.c
++++ b/src/wlmdock.c
+@@ -33,6 +33,7 @@
+ #include <string.h>
+ #include <strings.h>
+ #include <signal.h>
++#include <sys/prctl.h>
+ #include <sys/signalfd.h>
+ #include <sys/socket.h>
+ #include <sys/types.h>
+@@ -347,6 +348,11 @@ const bspl_desc_t _wlmdock_plist_desc[] = {
+ /** The dock's main program. */
+ int main(int argc, const char **argv)
+ {
++    // The compositor finds its docks by the process name (to send them
++    // SIGHUP for a new theme, SIGUSR1 for new launchers). Starting over with
++    // execv("/proc/self/exe") renames the process to "exe": Keep the name.
++    prctl(PR_SET_NAME, "wlmdock", 0, 0, 0);
++
+     // For starting over with a new theme (SIGHUP): The arguments as given.
+     _wlmdock_argv = calloc(argc + 1, sizeof(char *));
+     for (int i = 0; NULL != _wlmdock_argv && i < argc; ++i) {
+-- 
+2.56.0
+

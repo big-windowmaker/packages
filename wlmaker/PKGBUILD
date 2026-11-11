@@ -264,9 +264,13 @@
 #         e arrastar para o Dock/Clip, zoom (Ctrl+Alt+rolagem), monitores
 #         desligados religáveis, menu do wmcliphist, assento do XWayland
 #         (área de transferência) e pipes de subprocessos fechados
+#   0145  o wlmdock mantém o nome depois de recomeçar com o tema novo (o
+#         execv de /proc/self/exe o chamava de "exe" e o wlmaker não o
+#         achava mais: os lançadores do Dock e do Clip ficavam no tema
+#         antigo); o Clip também o reconhece pelo executável
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=31
+pkgrel=32
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -440,6 +444,7 @@ _patches=(
   0140-Alt-Tab-Window-Maker-s-switch-panel-icons-title-Esc-.patch
   0141-app_icon-a-client-s-app-ID-or-WM_CLASS-with-a-path-s.patch
   0144-Big-WindowMaker-integration-2026-11.patch
+  0145-wlmdock-Keeps-its-name-across-a-theme-restart.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -585,6 +590,7 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'be865ecdc727083f4e59fada19ad9ad899d4a76eb17de7c273e9a13f513ad887'
             '8bac57762789d947178fa0e68fc4e7b7e9ce42ee69dd3be2ce9f27d6d0bfe2d8'
             '1ee14d5f0a4d55c36de0a358386770bb8a6559892f3e793f6cd0c96829e836bc'
+            'fa0166c0876b2cb04c4987931243c0cd0f2f5cc9e2588d12c515f8982b9e9b75'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb')
 
 prepare() {
