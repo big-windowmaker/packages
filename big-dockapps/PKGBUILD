@@ -92,7 +92,7 @@ _wmeyes_ver=1.2
 # são código-fonte); o namcap avisa por causa dele.
 _zenwalk=https://download.zenwalk.org/x86_64/people/jp/dockapps
 pkgver=20260412
-pkgrel=10
+pkgrel=11
 pkgdesc='Curated Window Maker dockapps for Big WindowMaker'
 arch=(x86_64)
 url='https://www.dockapps.net/'
@@ -164,6 +164,7 @@ source=(
   wmcliphist-clipboard-utf8.patch
   wmcliphist-big-wm-history.patch
   wmcliphist-wayland-clipboard.patch
+  wmcliphist-keep-the-owner.patch
   # Sem HTTPS no cache do FreeBSD; a integridade vem do sha256.
   "wmeyes-${_wmeyes_ver}.tar.gz::http://distcache.FreeBSD.org/ports-distfiles/wmeyes-${_wmeyes_ver}.tar.gz"
   wmeyes-modern.patch
@@ -194,6 +195,7 @@ sha256sums=('cc9753fa925323b52110c595f4920da1aec6e1ae124a40be4062048991daed81'
             '48b9fb39fe495848b947aa97b6d25065e9008722a051ebc775fe48efac3c4bef'
             'ced8f978d6a59fe505ad9896b6e33c1fd9da3d76efdd6a2ff345c988ab33a25c'
             '9a166744a53138ad718a3dc2744ef4eba29662022c855617423c9b1db1cb9cb0'
+            'c5d9ec5f4cc42c6495a9926f1ea7e8941acbc1bb38ab2a787b342417cb871304'
             'c09c88d4915cb06ddf116f474d33ecd9c5d813103c350d1817c72e8cc33ae551'
             'dfbc12399ff18680dd493381add40fdde9ff667ef17d6cb80b566c26c4663aba'
             '1f66d3cbd0c6b6675deb57492d04935ccb6318652f0d2c570116d3b12dec5bdc')
@@ -229,6 +231,10 @@ prepare() {
   # transferência do Wayland (big-wm-clipboard --copy); a cópia de um cliente
   # Wayland não é mais trocada pelo último item do histórico.
   patch -Np1 -i ../wmcliphist-wayland-clipboard.patch
+  # wmcliphist: a cópia nova fica com o aplicativo que copiou (o
+  # auto_take_up tomava toda cópia do X11 e a trocava por texto puro, CRLF
+  # virando LF); o texto é lido como veio (UTF8_STRING).
+  patch -Np1 -i ../wmcliphist-keep-the-owner.patch
   local _d
   for _d in "${_autotools[@]}"; do
     (cd "${_d}" && autoreconf -fi)
