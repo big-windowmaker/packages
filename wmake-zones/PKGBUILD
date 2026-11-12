@@ -1,4 +1,6 @@
-# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+# Maintainer: Rafael Ruscher <rruscher@gmail.com>
+# Maintainer: Barnabé Di Kartola <barnabedikartola@gmail.com>
+# Big WindowMaker: https://github.com/big-windowmaker
 #
 # wmake-zones: zonas de encaixe e mosaico automático de janelas para o
 # Big WindowMaker, com o visual NeXTSTEP do tema do Window Maker.
@@ -22,8 +24,8 @@
 # WMAKE_ZONES_SOURCE troca a fonte (ex.: git+file:///caminho/wmake-zones
 # para compilar um clone local antes do push).
 pkgname=wmake-zones
-pkgver=0.3.1
-pkgrel=5
+pkgver=0.4.0
+pkgrel=1
 pkgdesc='Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look'
 arch=(x86_64)
 url='https://github.com/big-windowmaker/wmake-zones'
@@ -39,6 +41,7 @@ depends=(
   libxext     # XShape: overlay que não pega o ponteiro
   libxft      # textos do overlay e do dockapp com as fontes do tema
   libxi       # XInput 2.1: eventos brutos do botão durante o arrasto
+  libxinerama # monitores pelos heads do Xinerama quando o RandR não descreve a tela (0.3.1)
   libxrandr   # monitores (XRandR 1.5)
   libxrender  # overlay translúcido com um compositor
   wayland     # dockapp nativo do wlmaker
@@ -73,28 +76,10 @@ optdepends=(
 # com lto (padrão do makepkg.conf do Manjaro) os objetos são "slim", só
 # bytecode do GCC, e o strip os deixa vazios: o wlmaker não ligava no CI.
 options=(staticlibs !lto)
-source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}"
-        # Só teste, depois da tag (já no main): o teste do dockapp espera o
-        # ladrilho aparecer em vez de 1 s fixo e pula sem o xwininfo.
-        0001-tests-dockapp-waits-for-the-tile.patch
-        # Mosaico com aplicativos GTK4 (mínimos grandes): troca de lugar ou
-        # flutua, "windows -d" com o motivo, compatibilidade nas preferências.
-        0002-tiling-gtk4-minimum-size.patch
-        # Dockapp: arrastar para o Dock e o Clip e o menu do Window Maker
-        # (clique direito na borda e "Opções do Window Maker...").
-        0003-dockapp-drag-and-window-maker-menu.patch
-        # Revisão: menu do Window Maker na posição atual do ladrilho, uma
-        # troca de lugar por vez no mosaico, tradução, teste com python3 -I.
-        0004-review-wm-menu-swap-translation.patch
-        # Dockapp do Wayland: o ladrilho inteiro (o wlmaker sugere aos
-        # nativos o ladrilho menos 6 px), com o relevo próprio, como no X11.
-        0005-wayland-dockapp-whole-64-px-tile.patch)
-sha256sums=('SKIP'
-            '753de49341466478952bffc37c44286f3208f6fc5f7df1091ba7dcab065c86ea'
-            '2a7c02e91f37841da09f19d67ce45e2d1a0b52fdf8265f91503c86c502c31a2b'
-            '45e420229132aca70b5d38cf351eeeb008b800f234acf04f1950dd415ef6530e'
-            '7fc8ed37ee0563e8f382f3c4ba578d97d50c6944752d094d7612bed3c24d4568'
-            '8ed6405823d35d5c9fe48a12c3cf11955a851034de66c227a35a4f44e14cda54')
+# 0.4.0 traz no próprio código o que eram os patches 0001-0005 da 0.3.1
+# (PRs #3 a #8) e o dockapp LCD (#9).
+source=("wmake-zones::${WMAKE_ZONES_SOURCE:-git+$url.git#tag=v$pkgver}")
+sha256sums=('SKIP')
 
 prepare() {
   # A versão do PKGBUILD precisa ser a do projeto (meson.build).
@@ -103,24 +88,6 @@ prepare() {
   if [[ ${v} != "${pkgver}" ]]; then
     echo "meson.build diz ${v}, mas pkgver=${pkgver}" >&2
     return 1
-  fi
-  # Sem o WMAKE_ZONES_SOURCE (fonte local do main), o patch de teste da tag.
-  if ! grep -q 'Numa máquina lenta (CI)' wmake-zones/tests/x11-dockapp.sh; then
-    patch -d wmake-zones -Np1 -i "${srcdir}/0001-tests-dockapp-waits-for-the-tile.patch"
-  fi
-  if ! grep -q 'wzx_tile_reason' wmake-zones/src/x11/wzx-tile.c; then
-    patch -d wmake-zones -Np1 -i "${srcdir}/0002-tiling-gtk4-minimum-size.patch"
-  fi
-  if ! grep -q 'wm_forward' wmake-zones/src/x11/wzx-dockapp.c; then
-    patch -d wmake-zones -Np1 -i "${srcdir}/0003-dockapp-drag-and-window-maker-menu.patch"
-  fi
-  if ! grep -q 'Manter este aplicativo sempre _flutuante' wmake-zones/po/pt_BR.po; then
-    patch -d wmake-zones -Np1 -i "${srcdir}/0004-review-wm-menu-swap-translation.patch"
-  fi
-  # Uma fonte local (WMAKE_ZONES_SOURCE) que já tem o tamanho novo, de
-  # qualquer revisão (#7, #8), não recebe o patch da tag.
-  if ! grep -qE 'w \+ 6|w > 64 \? w : 64' wmake-zones/src/wayland/wzw-dockapp.c; then
-    patch -d wmake-zones -Np1 -i "${srcdir}/0005-wayland-dockapp-whole-64-px-tile.patch"
   fi
 }
 
