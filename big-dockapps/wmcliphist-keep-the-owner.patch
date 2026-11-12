@@ -1,0 +1,130 @@
+wmcliphist: the application that copied keeps the selection; exact bytes
+
+auto_take_up took over every new copy (gtk_selection_owner_set in
+process_item): within milliseconds the CLIPBOARD of an X11 application
+was wmcliphist's plain-text copy, read with gtk_clipboard_request_text
+(CRLF made LF), without the rich targets (files, HTML, images) of the
+application. On Wayland, the bridge then carried that copy to the
+Wayland clients too. Measured: 16 of 16 X11 copies altered.
+
+- A new copy is never taken over; the last item is published again only
+  when the owner goes away (owner-change, already in clipboard.c), and,
+  on X11, at start when nobody owns the selection.
+- The text is read from UTF8_STRING as the application gave it (no line
+  end normalization); without valid UTF-8, the usual conversion.
+
+Somente em b/wmcliphist: bigwm.o
+diff -ru a/wmcliphist/clipboard.c b/wmcliphist/clipboard.c
+--- a/wmcliphist/clipboard.c	2026-11-11 11:30:50.514330484 -0300
++++ b/wmcliphist/clipboard.c	2026-11-11 11:33:45.148027285 -0300
+@@ -202,6 +202,30 @@
+ }
+ 
+ 
++/*
++ * The text exactly as the application gave it (UTF8_STRING): no line end
++ * normalization (gtk_clipboard_request_text makes CRLF into LF). Without
++ * valid UTF-8, the usual conversion.
++ */
++static void
++utf8_received(GtkClipboard *cb, GtkSelectionData *data, gpointer user)
++{
++	const guchar	*raw = gtk_selection_data_get_data(data);
++	gint		len = gtk_selection_data_get_length(data);
++	gchar		*text;
++
++	(void) user;
++	if (raw == NULL || len <= 0 || !g_utf8_validate((const gchar *) raw, len, NULL) ||
++	    memchr(raw, '\0', (size_t) len) != NULL) {
++		gtk_clipboard_request_text(cb, my_get_selection_text, NULL);
++		return;
++	}
++	text = g_strndup((const gchar *) raw, (gsize) len);
++	my_get_selection_text(cb, text, NULL);
++	g_free(text);
++}
++
++
+ /* password managers (KeePassXC) mark secrets with this target */
+ static void
+ targets_received(GtkClipboard *cb, GdkAtom *atoms, gint n_atoms, gpointer data)
+@@ -209,6 +233,7 @@
+ 	gint	i;
+ 
+ 	gint	content = 0;
++	gboolean utf8 = FALSE;
+ 
+ 	(void) data;
+ 	for (i = 0; i < n_atoms; i++) {
+@@ -216,6 +241,8 @@
+ 		gboolean secret = name != NULL &&
+ 			strcmp(name, "x-kde-passwordManagerHint") == 0;
+ 
++		if (name != NULL && strcmp(name, "UTF8_STRING") == 0)
++			utf8 = TRUE;
+ 		if (name != NULL && strcmp(name, "TARGETS") != 0 &&
+ 		    strcmp(name, "TIMESTAMP") != 0 && strcmp(name, "MULTIPLE") != 0 &&
+ 		    strcmp(name, "SAVE_TARGETS") != 0 && strcmp(name, "DELETE") != 0)
+@@ -242,7 +269,11 @@
+ 				g_list_first(history_items)->data)->content);
+ 		return;
+ 	}
+-	gtk_clipboard_request_text(cb, my_get_selection_text, NULL);
++	if (utf8)
++		gtk_clipboard_request_contents(cb, gdk_atom_intern_static_string("UTF8_STRING"),
++				utf8_received, NULL);
++	else
++		gtk_clipboard_request_text(cb, my_get_selection_text, NULL);
+ }
+ 
+ 
+@@ -283,8 +314,10 @@
+ 
+ 	if (gdk_display_supports_selection_notification(gdk_display_get_default())) {
+ 		g_signal_connect(cb, "owner-change", G_CALLBACK(owner_changed), NULL);
+-		/* what was already there when wmcliphist started */
+-		gtk_clipboard_request_text(cb, my_get_selection_text, NULL);
++		/* what was already there when wmcliphist started; with no
++		 * owner (an X11 session just started), auto_take_up publishes
++		 * the last saved item (targets_received) */
++		gtk_clipboard_request_targets(cb, targets_received, NULL);
+ 	} else {
+ 		/* no XFixes: read it a few times a second, as before */
+ 		g_timeout_add(250, poll_selection, NULL);
+Somente em b/wmcliphist: clipboard.o
+Somente em b/wmcliphist: gui.o
+diff -ru a/wmcliphist/history.c b/wmcliphist/history.c
+--- a/wmcliphist/history.c	2026-11-11 11:30:50.514362494 -0300
++++ b/wmcliphist/history.c	2026-11-11 11:30:50.528965338 -0300
+@@ -68,18 +68,13 @@
+ 	if (processed == FALSE) {
+ 		hist_item = menu_item_add(content, locked, menu_hist);
+ 
+-		/* when auto_take_up is true, set selection owner to myself;
+-		 * on XWayland not for the saved history being (re)loaded: the
+-		 * clipboard holds a copy of a Wayland client that wmcliphist
+-		 * cannot see, and taking it up would replace that copy */
+-		if (auto_take_up == 1 && (exec == TRUE || !bigwm_wayland())) {
+-			selected = hist_item;
+-			if (gtk_selection_owner_set(dock_app,
+-						clipboard,
+-						GDK_CURRENT_TIME) == 0) {
+-				selected = NULL;
+-			}
+-		}
++		/* auto_take_up: a new copy is never taken over. The
++		 * application that copied keeps the selection, with all it
++		 * offers (rich text, files, images, its own line ends);
++		 * wmcliphist publishes the last item again only when the
++		 * owner goes away (clipboard.c). Taking it over replaced every
++		 * copy of an X11 application by a plain-text copy (CRLF made
++		 * LF) within milliseconds. */
+ 	}
+ 
+ 	return_void();
+Somente em b/wmcliphist: history.o
+Somente em b/wmcliphist: hotkeys.o
+Somente em b/wmcliphist: rcconfig.o
+Somente em b/wmcliphist: utils.o
+Somente em b/wmcliphist: wmcliphist
+Somente em b/wmcliphist: wmcliphist.o
