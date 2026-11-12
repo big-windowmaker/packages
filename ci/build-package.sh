@@ -43,7 +43,10 @@ mkdir -p "${out_dir}"
 cd "${work}/${pkgdir_arg}"
 # PATH explícito: o secure_path do sudo da imagem põe /usr/sbin (link para
 # /usr/bin) primeiro, o que confunde a regra de shebang do namcap.
-as_builder() { sudo -u builder -H env PATH=/usr/local/bin:/usr/bin "$@"; }
+# PACKAGER: quem assina o campo "Packager" dos pacotes do CI (sem ele, o
+# makepkg grava "Unknown Packager").
+PACKAGER=${PACKAGER:-Big WindowMaker <rruscher@gmail.com>}
+as_builder() { sudo -u builder -H env PATH=/usr/local/bin:/usr/bin "PACKAGER=$PACKAGER" "$@"; }
 
 echo "::group::namcap PKGBUILD"
 as_builder namcap PKGBUILD | tee "${work}/namcap-PKGBUILD.txt"

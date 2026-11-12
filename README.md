@@ -9,6 +9,16 @@
   <img src="https://img.shields.io/badge/PKGBUILDs-0BSD-blue" alt="Licença 0BSD">
 </p>
 
+<p align="center">
+  <a href="#instalar-os-pacotes">Instalar</a> ·
+  <a href="#como-os-pacotes-são-feitos">Como são feitos</a> ·
+  <a href="#compilar-localmente-com-podman">Compilar</a> ·
+  <a href="#atualizar-um-pacote">Atualizar</a> ·
+  <a href="#contribuir">Contribuir</a> ·
+  <a href="#créditos">Créditos</a> ·
+  <a href="#in-english">English</a>
+</p>
+
 PKGBUILDs dos pacotes próprios da distribuição **Big WindowMaker** (baseada em
 BigLinux/BigCommunity/Manjaro). Cada diretório da raiz é um `pkgbase`, com o
 `PKGBUILD`, a `.SRCINFO` gerada por `makepkg --printsrcinfo` e, quando houver,
@@ -31,6 +41,42 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
 | [`qtstep-kvantum/`](qtstep-kvantum/PKGBUILD) | `qtstep-kvantum` | `0.r23.36dc0d3-2` | [andbgr/QTStep](https://github.com/andbgr/QTStep): tema NeXTSTEP do Kvantum para os aplicativos Qt. |
 | [`retrothemes-firefox/`](retrothemes-firefox/PKGBUILD) | `retrothemes-firefox` | `0.r68.dfc4eea-2` | [matthewmx86/RetroThemesFirefox](https://github.com/matthewmx86/RetroThemesFirefox): temas retrô do Firefox, com um patch. |
 | [`wdm/`](wdm/PKGBUILD) | `wdm` | `1.28-14` | [raorn/wdm](https://github.com/raorn/wdm) (WINGs Display Manager), com 5 patches. |
+
+## Instalar os pacotes
+
+- **Pela ISO** (recomendado): o Big WindowMaker já vem completo na
+  [ISO de teste](https://github.com/big-windowmaker/build-iso/releases).
+- **Num BigLinux/BigCommunity já instalado**: os pacotes ainda não estão num
+  repositório público assinado. Compile e instale cada um pelo PKGBUILD
+  (como usuário comum, nunca como root):
+
+  ```sh
+  git clone https://github.com/big-windowmaker/packages
+  cd packages/wmake-zones        # ou windowmaker, wlmaker, big-dockapps...
+  makepkg -si                    # baixa as dependências, compila, roda o check() e instala
+  ```
+
+  Ordem quando for compilar vários: `wmake-zones` antes do `wlmaker` (que
+  liga no núcleo dele). O desktop em si (sessões, temas, ferramentas) vem do
+  [big-wm](https://github.com/big-windowmaker/big-wm).
+- **Pacotes já compilados**: cada execução do CI em `main` deixa os pacotes
+  como artefatos por 30 dias (*Actions* → *build* → *Artifacts*);
+  instale com `sudo pacman -U arquivo.pkg.tar.zst`.
+- **Voltar atrás**: `sudo pacman -U` com o pacote anterior (o makepkg o deixa
+  no diretório do PKGBUILD) ou `sudo pacman -S windowmaker` para o pacote da
+  distribuição, quando existir.
+
+## Como os pacotes são feitos
+
+```mermaid
+flowchart LR
+  U[upstream fixado por commit<br/>window-maker/wmaker, phkaeser/wlmaker, dockapps...] --> P
+  PT[patches do Big WindowMaker<br/>um por mudança, com descrição] --> P
+  P[PKGBUILD + .SRCINFO] --> CI[CI: contêiner Manjaro limpo<br/>makepkg, check, namcap, instalação]
+  CI --> A[(artefatos)]
+  A --> ISO[build-iso: ISO de teste]
+  A --> IT[big-wm: testes de integração]
+```
 
 ### Observações
 
@@ -232,6 +278,18 @@ problemas com `/tmp` montado como `noexec` no host.
 3. Compile como descrito acima e abra um PR. O CI compila só os diretórios
    alterados, ou todos quando `ci/` ou o workflow mudam.
 
+## Contribuir
+
+- Correção num pacote: um commit por mudança, com `pkgrel` novo, `.SRCINFO`
+  regenerada (`makepkg --printsrcinfo > .SRCINFO`) e checksums atualizados;
+  o CI compila o diretório alterado e roda o `namcap`.
+- Patch no Window Maker ou no wlmaker: o código vem dos ramos `big-wm/*` dos
+  forks ([wmaker](https://github.com/big-windowmaker/wmaker),
+  [wlmaker](https://github.com/big-windowmaker/wlmaker)), exportado com
+  `git format-patch`; o que servir a todos também segue para o upstream.
+- Problemas: [issues](https://github.com/big-windowmaker/packages/issues);
+  guia: [CONTRIBUTING](https://github.com/big-windowmaker/.github/blob/main/CONTRIBUTING.md).
+
 ## Créditos
 
 ### Mantenedores do Big WindowMaker
@@ -260,3 +318,14 @@ Os arquivos deste repositório (PKGBUILDs, scripts e configuração) seguem a
 convenção do Arch Linux e estão sob a licença [0BSD](LICENSE). O software
 empacotado mantém a licença do seu upstream, registrada no campo `license` de
 cada pacote.
+
+## In English
+
+PKGBUILDs of the Big WindowMaker packages: Window Maker and wlmaker from
+pinned upstream commits plus the Big WindowMaker patches, curated dockapps,
+wmake-zones, retro themes and the live-session/installer package. Every push
+builds the changed packages in a clean Manjaro container (makepkg with
+`check()`, install test, namcap) and keeps them as CI artifacts used by the
+ISO and the integration tests. Build any of them with `makepkg -si` as a
+regular user. Maintainers: Rafael Ruscher and Barnabé Di Kartola; upstream
+authors stay credited in each PKGBUILD. PKGBUILDs: 0BSD.
