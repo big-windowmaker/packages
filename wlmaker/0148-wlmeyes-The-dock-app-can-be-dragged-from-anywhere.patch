@@ -1,0 +1,49 @@
+From 69c141a5e0da7abf0563ad46918e6b6f492cda9c Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Thu, 12 Nov 2026 00:30:56 -0300
+Subject: [PATCH] wlmeyes: The dock-app can be dragged to the Dock and the Clip
+ from anywhere
+
+wlmeyes --dockapp draws the whole 64x64 tile, as wmeyes does, covering
+the 3 px border by which native dock-apps are dragged: The tile could only
+be moved with the window-move modifier. The eyes take no clicks: An empty
+input region leaves the pointer to the tile, as wmeyes' shape does on X11,
+where Window Maker drags it from anywhere.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ apps/wlmeyes.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/apps/wlmeyes.c b/apps/wlmeyes.c
+index d5d8b0a6..5802edd7 100644
+--- a/apps/wlmeyes.c
++++ b/apps/wlmeyes.c
+@@ -27,6 +27,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <wayland-client-core.h>
++#include <wayland-client-protocol.h>
+ #include <wayland-server-core.h>
+ #include <wayland-util.h>
+ #include <xkbcommon/xkbcommon-keysyms.h>
+@@ -382,6 +383,16 @@ static void _handle_icon_configure(void *ud_ptr, uint32_t width, uint32_t height
+         // the tile show around the eyes): The same size here.
+         width = BS_MAX(width, 64u);
+         height = BS_MAX(height, 64u);
++        // The eyes take no clicks: An empty input region leaves the pointer
++        // to the tile, which is then dragged on or off the Dock and the
++        // Clip from anywhere, as Window Maker drags wmeyes on X11.
++        struct wl_region *input_ptr = wl_compositor_create_region(
++            wlmcl_client_attributes(wlclient_ptr)->wl_compositor_ptr);
++        if (NULL != input_ptr) {
++            wl_surface_set_input_region(
++                wlmcl_icon_wl_surface(icon_ptr), input_ptr);
++            wl_region_destroy(input_ptr);
++        }
+     }
+     icon_dblbuf_ptr = wlmcl_dblbuf_create(
+         wlmcl_client_attributes(wlclient_ptr)->app_id_ptr,
+-- 
+2.56.0
+
