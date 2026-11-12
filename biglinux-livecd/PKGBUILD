@@ -10,7 +10,7 @@
 
 pkgname=biglinux-livecd
 pkgver=26.10.26
-pkgrel=8
+pkgrel=9
 pkgdesc="BigLinux live-session setup and Calamares installer integration"
 arch=('any')
 url="https://github.com/biglinux/biglinux-livecd"
@@ -45,9 +45,9 @@ optdepends=(
     'shadow: set the temporary password the sshenable boot argument uses'
 )
 makedepends=('git')
-_commit=f3541b523ae0d034f3dc0b27f81a3d51d4d4c06d
+_commit=8179ac966cdac9ce6b5114ae33017b443db86342
 source=("biglinux-livecd::git+https://github.com/big-windowmaker/biglinux-livecd.git#commit=${_commit}")
-sha256sums=('9e1743f016c24b131aa5d5b6cab707026ebbd8842d2f7b21cd045c42a1523240')
+sha256sums=('65ee35bac7be55b4626a3559d3a1deb8d284011d52a6998e9d7a889ddeecc38f')
 install="${pkgname}.install"
 
 package() {
