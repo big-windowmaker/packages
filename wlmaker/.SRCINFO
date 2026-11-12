@@ -15,6 +15,7 @@ pkgbase = wlmaker
 	makedepends = wayland-protocols
 	makedepends = wmake-zones>=0.3.0
 	depends = cairo
+	depends = glib2
 	depends = glibc
 	depends = hicolor-icon-theme
 	depends = libglvnd

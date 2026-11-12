@@ -289,6 +289,7 @@ url='https://github.com/phkaeser/wlmaker'
 license=('Apache-2.0 AND BSD-3-Clause')
 depends=(
   cairo
+  glib2  # libglib e libgobject (o gettext do 0144, as mensagens traduzidas)
   glibc
   hicolor-icon-theme
   libglvnd  # libEGL e libGLESv2: o teste do renderizador (0100)
