@@ -1,0 +1,79 @@
+From e299017caf31743b9e38ca6051066d2704704bc6 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 9 Nov 2026 06:47:08 -0300
+Subject: [PATCH] wmaker: bind the message catalogs before parsing the command
+ line
+
+--help and the argument errors were printed before bindtextdomain() and
+textdomain(), so they stayed in English in every language.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/main.c | 37 +++++++++++++++++++++----------------
+ 1 file changed, 21 insertions(+), 16 deletions(-)
+
+diff --git a/src/main.c b/src/main.c
+index 91d798cf..8ddd033f 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -612,6 +612,25 @@ int main(int argc, char **argv)
+ 		return real_main(argc, argv);
+ }
+ 
++/*
++ * Bind the message catalogs. Done right after setlocale(), before the command
++ * line is parsed, so that --help and the argument errors are translated too.
++ */
++static void init_textdomain(void)
++{
++#ifdef I18N
++	const char *dir = getenv("NLSPATH") ? getenv("NLSPATH") : LOCALEDIR;
++
++	bindtextdomain("WindowMaker", dir);
++	bind_textdomain_codeset("WindowMaker", "UTF-8");
++#if defined(MENU_TEXTDOMAIN)
++	bindtextdomain(MENU_TEXTDOMAIN, dir);
++	bind_textdomain_codeset(MENU_TEXTDOMAIN, "UTF-8");
++#endif
++	textdomain("WindowMaker");
++#endif
++}
++
+ static int real_main(int argc, char **argv)
+ {
+ 	int i;
+@@ -619,6 +638,7 @@ static int real_main(int argc, char **argv)
+ 	int d, s;
+ 
+ 	setlocale(LC_ALL, "");
++	init_textdomain();
+ 	wsetabort(wAbort);
+ 
+ 	/* for telling WPrefs what's the name of the wmaker binary being ran */
+@@ -733,22 +753,7 @@ static int real_main(int argc, char **argv)
+ 	if (!w_global.locale || strcmp(w_global.locale, "C") == 0 || strcmp(w_global.locale, "POSIX") == 0)
+ 		w_global.locale = NULL;
+ #ifdef I18N
+-	if (getenv("NLSPATH")) {
+-		bindtextdomain("WindowMaker", getenv("NLSPATH"));
+-#if defined(MENU_TEXTDOMAIN)
+-		bindtextdomain(MENU_TEXTDOMAIN, getenv("NLSPATH"));
+-#endif
+-	} else {
+-		bindtextdomain("WindowMaker", LOCALEDIR);
+-#if defined(MENU_TEXTDOMAIN)
+-		bindtextdomain(MENU_TEXTDOMAIN, LOCALEDIR);
+-#endif
+-	}
+-	bind_textdomain_codeset("WindowMaker", "UTF-8");
+-#if defined(MENU_TEXTDOMAIN)
+-	bind_textdomain_codeset(MENU_TEXTDOMAIN, "UTF-8");
+-#endif
+-	textdomain("WindowMaker");
++	init_textdomain();
+ 
+ 	if (!XSupportsLocale()) {
+ 		wwarning(_("X server does not support locale"));
+-- 
+2.56.0
+

@@ -1,0 +1,197 @@
+From bb778f6b81d5eb1f79eba697d9a3dbff34357990 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 10 Nov 2026 13:38:06 -0300
+Subject: [PATCH] randr: draw the background again when a monitor comes, goes
+ or moves
+
+The background is drawn once, for the screen size of that moment:
+WorkspaceBack runs a one-shot wmsetbg and the workspace helper
+(wmsetbg -helper) reads the geometry only when it starts. After a
+monitor is added the root pixmap keeps the old size; under a compositor
+the new area stays black (3440x1440 pixmap on a 9440x1440 screen).
+
+wRandR_Update compares the screen size and heads before and after the
+change and calls wDefaultsRefreshBackground(), which stops the helper
+(stop_bg_helper) and sets WorkspaceSpecificBack and WorkspaceBack again,
+as at startup. The death handler of a stopped helper ignores it once
+helper_pid names its replacement.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/defaults.c | 34 ++++++++++++++++++++++++++++++++++
+ src/defaults.h |  1 +
+ src/misc.c     | 25 ++++++++++++++++++++++++-
+ src/misc.h     |  1 +
+ src/randr.c    | 19 +++++++++++++++++++
+ 5 files changed, 79 insertions(+), 1 deletion(-)
+
+diff --git a/src/defaults.c b/src/defaults.c
+index 10efdf7e..3b5084ad 100644
+--- a/src/defaults.c
++++ b/src/defaults.c
+@@ -2177,6 +2177,40 @@ static int getTexture(WScreen * scr, WDefaultEntry * entry, WMPropList * value,
+ 	return True;
+ }
+ 
++/*
++ * The screen changed size or its heads moved (RandR): the background was
++ * drawn for the old geometry, and nothing draws the new area (it stays
++ * black). wmsetbg reads the geometry when it starts, so the helper is
++ * stopped and both background keys are set again, as at startup.
++ */
++void wDefaultsRefreshBackground(WScreen *scr)
++{
++	static const char *const keys[] = { "WorkspaceSpecificBack", "WorkspaceBack" };
++	WMPropList *dict = w_global.domain.wmaker ? w_global.domain.wmaker->dictionary : NULL;
++	unsigned int i, k;
++
++	stop_bg_helper(scr);
++
++	for (k = 0; k < wlengthof(keys); k++) {
++		for (i = 0; i < wlengthof(optionList); i++) {
++			WDefaultEntry *entry = &optionList[i];
++			WMPropList *plvalue = NULL;
++			void *tdata = NULL;
++
++			if (strcmp(entry->key, keys[k]) != 0)
++				continue;
++			if (dict)
++				plvalue = WMGetFromPLDictionary(dict, entry->plkey);
++			if (!plvalue)
++				plvalue = entry->plvalue;
++			if (plvalue && (*entry->convert) (scr, entry, plvalue, entry->addr, &tdata)
++			    && tdata && entry->update)
++				(*entry->update) (scr, entry, tdata, entry->extra_data);
++			break;
++		}
++	}
++}
++
+ static int getWSBackground(WScreen * scr, WDefaultEntry * entry, WMPropList * value, void *addr, void **ret)
+ {
+ 	WMPropList *elem;
+diff --git a/src/defaults.h b/src/defaults.h
+index 81d41f3b..9b8db021 100644
+--- a/src/defaults.h
++++ b/src/defaults.h
+@@ -34,6 +34,7 @@ void wDefaultsMergeGlobalMenus(WDDomain *menuDomain);
+ void wReadDefaults(WScreen *scr, WMPropList *new_dict);
+ void wReadKeybindings(WScreen *scr, WMPropList *dict);
+ void wDefaultUpdateIcons(WScreen *scr);
++void wDefaultsRefreshBackground(WScreen *scr);
+ void wReadStaticDefaults(WMPropList *dict);
+ void wDefaultsCheckDomains(void *arg);
+ void wSaveDefaults(WScreen *scr);
+diff --git a/src/misc.c b/src/misc.c
+index 430b2143..948a657d 100644
+--- a/src/misc.c
++++ b/src/misc.c
+@@ -33,6 +33,7 @@
+ #include <math.h>
+ #include <time.h>
+ #include <errno.h>
++#include <signal.h>
+ 
+ #include <X11/XKBlib.h>
+ 
+@@ -1058,9 +1059,13 @@ static void track_bg_helper_death(pid_t pid, unsigned int status, void *client_d
+ 	WScreen *scr = (WScreen *) client_data;
+ 
+ 	/* Parameter not used, but tell the compiler that it is ok */
+-	(void) pid;
+ 	(void) status;
+ 
++	/* A helper stopped by stop_bg_helper() dies after its replacement
++	 * starts: only the current one owns the pipe and the flags. */
++	if (pid != scr->helper_pid)
++		return;
++
+ 	close(scr->helper_fd);
+ 	scr->helper_fd = 0;
+ 	scr->helper_pid = 0;
+@@ -1129,6 +1134,24 @@ Bool start_bg_helper(WScreen *scr)
+ 	}
+ }
+ 
++/* Stop the background helper: it reads the screen geometry only when it
++ * starts. Closing the pipe makes it quit too; its death handler ignores it
++ * once helper_pid no longer names it. */
++void stop_bg_helper(WScreen *scr)
++{
++	pid_t pid = scr->helper_pid;
++
++	if (!scr->flags.backimage_helper_launched)
++		return;
++
++	close(scr->helper_fd);
++	scr->helper_fd = 0;
++	scr->helper_pid = 0;
++	scr->flags.backimage_helper_launched = 0;
++	if (pid > 0)
++		kill(pid, SIGTERM);
++}
++
+ void SendHelperMessage(WScreen *scr, char type, int workspace, const char *msg)
+ {
+ 	char *buffer;
+diff --git a/src/misc.h b/src/misc.h
+index 5aa545ad..4047f405 100644
+--- a/src/misc.h
++++ b/src/misc.h
+@@ -41,6 +41,7 @@ static inline void slide_window(Window win, int from_x, int from_y, int to_x, in
+ 
+ /* Helper is a 'wmsetbg' subprocess with sets the background for the current workspace */
+ Bool start_bg_helper(WScreen *scr);
++void stop_bg_helper(WScreen *scr);
+ void SendHelperMessage(WScreen *scr, char type, int workspace, const char *msg);
+ 
+ char *ShrinkString(WMFont *font, const char *string, int width);
+diff --git a/src/randr.c b/src/randr.c
+index aed09c7d..d06a3c90 100644
+--- a/src/randr.c
++++ b/src/randr.c
+@@ -33,6 +33,7 @@
+ #include "dock.h"
+ #include "workspace.h"
+ #include "actions.h"
++#include "defaults.h"
+ 
+ #define RANDR_MAX_OUTPUTS     32
+ #define RANDR_DEBOUNCE_DELAY  100   /* milliseconds */
+@@ -449,6 +450,8 @@ static void wRandR_Update(WScreen *scr)
+ {
+     WRandRState *state = (WRandRState *)scr->randr_state;
+     XRRScreenResources *sr;
++    WMRect old_screens[RANDR_MAX_OUTPUTS];
++    int old_w, old_h, old_heads;
+     int i, j;
+ 
+     /* Assume all outputs removed until server confirms */
+@@ -536,8 +539,24 @@ static void wRandR_Update(WScreen *scr)
+ 
+     /* Apply new geometry to the Xinerama head layer */
+     i = scr->xine_info.primary_head;
++    old_w = scr->scr_width;
++    old_h = scr->scr_height;
++    old_heads = scr->xine_info.count;
++    if (old_heads > RANDR_MAX_OUTPUTS)
++        old_heads = RANDR_MAX_OUTPUTS;
++    if (scr->xine_info.screens && old_heads > 0)
++        memcpy(old_screens, scr->xine_info.screens, sizeof(WMRect) * old_heads);
++    else
++        old_heads = 0;
+     wRandR_ApplyToXinerama(scr, state);
+ 
++    /* A monitor came, went or moved: draw the background again, for the
++     * new size and heads (wmsetbg fills or centers it on each head). */
++    if (old_w != scr->scr_width || old_h != scr->scr_height ||
++        old_heads != scr->xine_info.count ||
++        memcmp(old_screens, scr->xine_info.screens, sizeof(WMRect) * old_heads) != 0)
++        wDefaultsRefreshBackground(scr);
++
+     /* Put the dock back on its monitor: the one the user chose when it is
+      * connected (also after it comes back), else the primary one. The
+      * choice itself is kept (scr->dock_monitor). */
+-- 
+2.56.0
+

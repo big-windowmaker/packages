@@ -1,0 +1,458 @@
+From 1b44cd2fc3586b70dc3920e9c85ae521583c4afb Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Wed, 11 Nov 2026 14:42:49 -0300
+Subject: [PATCH] popups: XWayland menus and xdg_popups open where the app
+ asked
+
+XWayland: a window-less child (an override-redirect menu with a
+WM_TRANSIENT_FOR parent) sits in its parent's container, so its element
+position is its root position minus the parent's. The old code subtracted
+the child's own previous position as well, which was harmless while X
+believed every window was at 0,0, but sent menus far to the bottom-right
+(the GParted context menu) once X learned the real window positions. Also
+tells X the window's position after it is mapped, so a window placed by
+the workspace (zones, cascade) reports correct root coordinates.
+
+xdg_popup: the surface is offset by the popup's window geometry (the
+menu's shadow), and the popup is unconstrained to the output it opens on
+(wlr_xdg_popup_unconstrain_from_box, in toplevel coordinates), so a menu
+near an output edge flips instead of being cut.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/icon_manager.c |   3 +-
+ src/layer_panel.c  |   3 +-
+ src/xdg_popup.c    |  80 +++++++++++++++++++++++++-
+ src/xdg_popup.h    |   6 +-
+ src/xdg_toplevel.c |   3 +-
+ src/xwl_surface.c  | 138 +++++++++++++++++++++++++++++++++------------
+ 6 files changed, 191 insertions(+), 42 deletions(-)
+
+diff --git a/src/icon_manager.c b/src/icon_manager.c
+index 2904fe46..9ed9fec3 100644
+--- a/src/icon_manager.c
++++ b/src/icon_manager.c
+@@ -2065,7 +2065,8 @@ void _wlmaker_toplevel_icon_handle_layer_new_popup(
+         listener_ptr, wlmaker_toplevel_icon_t, layer_new_popup_listener);
+     struct wlr_xdg_popup *wlr_xdg_popup_ptr = data_ptr;
+     wlmaker_xdg_popup_t *popup_ptr = wlmaker_xdg_popup_create(
+-        wlr_xdg_popup_ptr, toplevel_icon_ptr->server_ptr->wlr_seat_ptr);
++        wlr_xdg_popup_ptr, toplevel_icon_ptr->server_ptr->wlr_seat_ptr,
++        toplevel_icon_ptr->server_ptr->wlr_output_layout_ptr);
+     if (NULL == popup_ptr) {
+         wl_resource_post_error(wlr_xdg_popup_ptr->resource,
+                                WL_DISPLAY_ERROR_NO_MEMORY,
+diff --git a/src/layer_panel.c b/src/layer_panel.c
+index 5ae72dae..fb60a8d5 100644
+--- a/src/layer_panel.c
++++ b/src/layer_panel.c
+@@ -1577,7 +1577,8 @@ void _wlmaker_layer_panel_handle_new_popup(
+ 
+     wlmaker_xdg_popup_t *popup_ptr = wlmaker_xdg_popup_create(
+         wlr_xdg_popup_ptr,
+-        layer_panel_ptr->server_ptr->wlr_seat_ptr);
++        layer_panel_ptr->server_ptr->wlr_seat_ptr,
++        layer_panel_ptr->server_ptr->wlr_output_layout_ptr);
+     if (NULL == popup_ptr) {
+         wl_resource_post_error(
+             wlr_xdg_popup_ptr->resource,
+diff --git a/src/xdg_popup.c b/src/xdg_popup.c
+index 0feff915..5b2daae9 100644
+--- a/src/xdg_popup.c
++++ b/src/xdg_popup.c
+@@ -28,6 +28,7 @@
+ #include <wayland-server-protocol.h>
+ #define WLR_USE_UNSTABLE
+ #include <wlr/types/wlr_compositor.h>
++#include <wlr/types/wlr_output_layout.h>
+ #include <wlr/types/wlr_scene.h>
+ #include <wlr/types/wlr_xdg_shell.h>
+ #include <wlr/util/box.h>
+@@ -53,8 +54,15 @@ struct _wlmaker_xdg_popup_t {
+     struct wlr_seat           *wlr_seat_ptr;
+     /** The WLR popup. */
+     struct wlr_xdg_popup      *wlr_xdg_popup_ptr;
++    /** The popup's surface: The content of @ref base. */
++    wlmtk_surface_t           *surface_ptr;
++    /** The outputs, to keep the popup on its output. May be NULL. */
++    struct wlr_output_layout  *wlr_output_layout_ptr;
+ };
+ 
++static void _wlmaker_xdg_popup_unconstrain(
++    wlmaker_xdg_popup_t *wlmaker_xdg_popup_ptr);
++
+ static void handle_reposition(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
+@@ -84,13 +92,15 @@ static void handle_surface_commit(
+ /* ------------------------------------------------------------------------- */
+ wlmaker_xdg_popup_t *wlmaker_xdg_popup_create(
+     struct wlr_xdg_popup *wlr_xdg_popup_ptr,
+-    struct wlr_seat *wlr_seat_ptr)
++    struct wlr_seat *wlr_seat_ptr,
++    struct wlr_output_layout *wlr_output_layout_ptr)
+ {
+     wlmaker_xdg_popup_t *wlmaker_xdg_popup_ptr = logged_calloc(
+         1, sizeof(wlmaker_xdg_popup_t));
+     if (NULL == wlmaker_xdg_popup_ptr) return NULL;
+     wlmaker_xdg_popup_ptr->wlr_seat_ptr = wlr_seat_ptr;
+     wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr = wlr_xdg_popup_ptr;
++    wlmaker_xdg_popup_ptr->wlr_output_layout_ptr = wlr_output_layout_ptr;
+ 
+     if (!wlmtk_base_init(&wlmaker_xdg_popup_ptr->base, NULL)) {
+         wlmaker_xdg_popup_destroy(wlmaker_xdg_popup_ptr);
+@@ -109,6 +119,7 @@ wlmaker_xdg_popup_t *wlmaker_xdg_popup_create(
+     wlmtk_base_set_content_element(
+         &wlmaker_xdg_popup_ptr->base,
+         wlmtk_surface_element(surface_ptr));
++    wlmaker_xdg_popup_ptr->surface_ptr = surface_ptr;
+     wlmtk_util_connect_listener_signal(
+         &wlr_xdg_popup_ptr->base->surface->events.commit,
+         &wlmaker_xdg_popup_ptr->surface_commit_listener,
+@@ -182,12 +193,58 @@ void handle_reposition(
+     wlmaker_xdg_popup_t *wlmaker_xdg_popup_ptr = BS_CONTAINER_OF(
+         listener_ptr, wlmaker_xdg_popup_t, reposition_listener);
+ 
++    // The new rules apply on the output, too (wlroots then configures).
++    _wlmaker_xdg_popup_unconstrain(wlmaker_xdg_popup_ptr);
+     wlmtk_element_set_position(
+         wlmtk_base_element(&wlmaker_xdg_popup_ptr->base),
+         wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr->scheduled.geometry.x,
+         wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr->scheduled.geometry.y);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Keeps the popup on the output of its anchor, by the positioner's rules
++ * (flip, slide, resize; as the client asked): Before, a menu near an
++ * output's edge went past it, cut. The constraint box is the output, in the
++ * coordinates of the popup's root toplevel surface.
++ *
++ * @param wlmaker_xdg_popup_ptr
++ */
++void _wlmaker_xdg_popup_unconstrain(wlmaker_xdg_popup_t *wlmaker_xdg_popup_ptr)
++{
++    struct wlr_output_layout *layout_ptr =
++        wlmaker_xdg_popup_ptr->wlr_output_layout_ptr;
++    wlmtk_element_t *e = wlmtk_base_element(&wlmaker_xdg_popup_ptr->base);
++    if (NULL == layout_ptr || NULL == e->parent_container_ptr) return;
++    struct wlr_xdg_popup *popup_ptr = wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr;
++
++    // The popup's coordinates are relative to its parent's window geometry:
++    // The origin of the container it is in (on screen: px, py).
++    int px, py;
++    wlmtk_element_get_absolute_position(
++        &e->parent_container_ptr->super_element, &px, &py);
++    // The same origin in the root toplevel's surface coordinates.
++    int tx, ty;
++    wlr_xdg_popup_get_toplevel_coords(popup_ptr, 0, 0, &tx, &ty);
++
++    // The output of the anchor (else the nearest one).
++    struct wlr_box anchor = popup_ptr->scheduled.rules.anchor_rect;
++    double ax = px + anchor.x + anchor.width / 2.0;
++    double ay = py + anchor.y + anchor.height / 2.0;
++    double cx, cy;
++    wlr_output_layout_closest_point(layout_ptr, NULL, ax, ay, &cx, &cy);
++    struct wlr_output *output_ptr = wlr_output_layout_output_at(
++        layout_ptr, cx, cy);
++    if (NULL == output_ptr) return;
++    struct wlr_box box;
++    wlr_output_layout_get_box(layout_ptr, output_ptr, &box);
++    if (wlr_box_empty(&box)) return;
++
++    box.x -= px - tx;
++    box.y -= py - ty;
++    wlr_xdg_popup_unconstrain_from_box(popup_ptr, &box);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Handles popup destruction: Removes from parent, and destroy. */
+ void handle_destroy(
+@@ -212,7 +269,8 @@ void handle_new_popup(
+ 
+     wlmaker_xdg_popup_t *new_popup_ptr = wlmaker_xdg_popup_create(
+         wlr_xdg_popup_ptr,
+-        wlmaker_xdg_popup_ptr->wlr_seat_ptr);
++        wlmaker_xdg_popup_ptr->wlr_seat_ptr,
++        wlmaker_xdg_popup_ptr->wlr_output_layout_ptr);
+     if (NULL == new_popup_ptr) {
+         wl_resource_post_error(
+             wlr_xdg_popup_ptr->resource,
+@@ -239,10 +297,26 @@ void handle_surface_commit(
+         listener_ptr, wlmaker_xdg_popup_t, surface_commit_listener);
+ 
+     if (wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr->base->initial_commit) {
+-        // Initial commit: Ensure a configure is responded with.
++        // Initial commit: Kept on its output, then a configure is responded
++        // with (the geometry it is configured to).
++        _wlmaker_xdg_popup_unconstrain(wlmaker_xdg_popup_ptr);
++        wlmtk_element_set_position(
++            wlmtk_base_element(&wlmaker_xdg_popup_ptr->base),
++            wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr->scheduled.geometry.x,
++            wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr->scheduled.geometry.y);
+         wlr_xdg_surface_schedule_configure(
+             wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr->base);
+     }
++
++    // The popup's position (scheduled.geometry, set on the base) is that of
++    // its window geometry, relative to the parent's window geometry. The
++    // surface is offset by its own geometry, so the base's origin is the
++    // geometry's: As for toplevels, and nested popups are relative to it.
++    // Without, a menu with a shadow (GTK) opened off by the shadow's width.
++    struct wlr_box geo = wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr->base->geometry;
++    wlmtk_element_set_position(
++        wlmtk_surface_element(wlmaker_xdg_popup_ptr->surface_ptr),
++        -geo.x, -geo.y);
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/xdg_popup.h b/src/xdg_popup.h
+index 830bf94d..0df90abf 100644
+--- a/src/xdg_popup.h
++++ b/src/xdg_popup.h
+@@ -42,12 +42,16 @@ extern "C" {
+  *
+  * @param wlr_xdg_popup_ptr
+  * @param wlr_seat_ptr
++ * @param wlr_output_layout_ptr  The outputs: The popup is kept on the
++ *                               output of its anchor (positioner rules).
++ *                               May be NULL (no constraint).
+  *
+  * @return Popup handle or NULL on error.
+  */
+ wlmaker_xdg_popup_t *wlmaker_xdg_popup_create(
+     struct wlr_xdg_popup *wlr_xdg_popup_ptr,
+-    struct wlr_seat *wlr_seat_ptr);
++    struct wlr_seat *wlr_seat_ptr,
++    struct wlr_output_layout *wlr_output_layout_ptr);
+ 
+ /**
+  * Destroys the popup.
+diff --git a/src/xdg_toplevel.c b/src/xdg_toplevel.c
+index b37d9524..abcfb57f 100644
+--- a/src/xdg_toplevel.c
++++ b/src/xdg_toplevel.c
+@@ -880,7 +880,8 @@ void _wlmaker_xdg_toplevel_handle_new_popup(
+ 
+     wlmaker_xdg_popup_t *xdg_popup_ptr = wlmaker_xdg_popup_create(
+         wlr_xdg_popup_ptr,
+-        wlmaker_xdg_toplevel_ptr->server_ptr->wlr_seat_ptr);
++        wlmaker_xdg_toplevel_ptr->server_ptr->wlr_seat_ptr,
++        wlmaker_xdg_toplevel_ptr->server_ptr->wlr_output_layout_ptr);
+     if (NULL == xdg_popup_ptr) {
+         wl_resource_post_error(
+             wlr_xdg_popup_ptr->resource,
+diff --git a/src/xwl_surface.c b/src/xwl_surface.c
+index e558384a..bf158731 100644
+--- a/src/xwl_surface.c
++++ b/src/xwl_surface.c
+@@ -293,6 +293,7 @@ static void _wlmaker_xwl_surface_handle_window_position_changed(
+     void *data_ptr);
+ static bool _xwl_surface_content_position(
+     wlmaker_xwl_surface_t *xs_ptr, int *x_ptr, int *y_ptr);
++static void _xwl_surface_sync_x_position(wlmaker_xwl_surface_t *xs_ptr);
+ static void _wlmaker_xwl_surface_handle_window_request_size(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
+@@ -307,10 +308,7 @@ static void _xwl_surface_apply_decorations(
+     wlmaker_xwl_surface_t *xwl_surface_ptr);
+ static bool _xwl_surface_covers_an_output(wlmaker_xwl_surface_t *xs_ptr,
+                                           struct wlr_box *output_box_ptr);
+-static void _xwl_surface_adjust_absolute_pos(
+-    wlmaker_xwl_surface_t *surface_ptr,
+-    int *x_ptr,
+-    int *y_ptr);
++static void _xwl_surface_place_child(wlmaker_xwl_surface_t *xwl_surface_ptr);
+ 
+ /* == Data ================================================================= */
+ 
+@@ -1411,6 +1409,11 @@ void _xwl_surface_handle_set_parent(
+         &parent_xwl_surface_ptr->base,
+         wlmtk_base_element(&xwl_surface_ptr->base));
+     xwl_surface_ptr->parent_surface_ptr = parent_xwl_surface_ptr;
++    // Its geometry may have come before the parent (X sets the transient
++    // after creating the window): The position is relative to the parent now.
++    if (NULL == xwl_surface_ptr->window_ptr && !xwl_surface_ptr->overlay) {
++        _xwl_surface_place_child(xwl_surface_ptr);
++    }
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -1477,16 +1480,7 @@ void _xwl_surface_handle_set_geometry(
+         return;
+     }
+ 
+-    // For XWayland, the surface's position is given relative to the "root"
+-    // of the specified surface. For @ref wlmtk_element_t, the position is
+-    // just relative to the parent @ref wlmtk_container_t. So we need to
+-    // subtract each parent surface's position.
+-    int x = xwl_surface_ptr->wlr_xwayland_surface_ptr->x;
+-    int y = xwl_surface_ptr->wlr_xwayland_surface_ptr->y;
+-    _xwl_surface_adjust_absolute_pos(xwl_surface_ptr, &x, &y);
+-
+-    wlmtk_element_set_position(
+-        wlmtk_base_element(&xwl_surface_ptr->base), x, y);
++    _xwl_surface_place_child(xwl_surface_ptr);
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -1571,6 +1565,10 @@ void _xwl_surface_map_window(wlmaker_xwl_surface_t *xwl_surface_ptr)
+     }
+     wlmtk_workspace_map_window_with_hint(
+         workspace_ptr, xwl_surface_ptr->window_ptr, &hint);
++    // X learns where the window was placed: Its position_changed came while
++    // it was placed, before it was on the workspace (no content position
++    // yet), and a new window stayed at 0, 0 for X until it was moved.
++    _xwl_surface_sync_x_position(xwl_surface_ptr);
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -1697,6 +1695,13 @@ void _wlmaker_xwl_surface_handle_window_position_changed(
+ {
+     wlmaker_xwl_surface_t *xs_ptr = BS_CONTAINER_OF(
+         listener_ptr, wlmaker_xwl_surface_t, window_position_changed_listener);
++    _xwl_surface_sync_x_position(xs_ptr);
++}
++
++/* ------------------------------------------------------------------------- */
++/** Tells X where the window's content is on screen, if X does not know. */
++void _xwl_surface_sync_x_position(wlmaker_xwl_surface_t *xs_ptr)
++{
+     struct wlr_xwayland_surface *s = xs_ptr->wlr_xwayland_surface_ptr;
+     int x, y;
+     if (!_xwl_surface_content_position(xs_ptr, &x, &y)) return;
+@@ -2249,25 +2254,31 @@ void _xwl_surface_apply_decorations(wlmaker_xwl_surface_t *xwl_surface_ptr)
+ 
+ /* ------------------------------------------------------------------------- */
+ /**
+- * Adjusts the absolute position by subtracting each parent's position.
++ * Places a window-less surface (a menu, a tooltip) in its parent's
++ * container: Its root position relative to the parent's.
+  *
+- * @param surface_ptr
+- * @param x_ptr
+- * @param y_ptr
++ * @param xwl_surface_ptr
+  */
+-void _xwl_surface_adjust_absolute_pos(
+-    wlmaker_xwl_surface_t *surface_ptr,
+-    int *x_ptr,
+-    int *y_ptr)
++void _xwl_surface_place_child(wlmaker_xwl_surface_t *xwl_surface_ptr)
+ {
+-    if (NULL == surface_ptr ||
+-        NULL == surface_ptr->parent_surface_ptr) return;
+-
+-    wlmtk_element_t *element_ptr = wlmtk_base_element(&surface_ptr->base);
+-    *x_ptr = *x_ptr - element_ptr->x;
+-    *y_ptr = *y_ptr - element_ptr->y;
+-    _xwl_surface_adjust_absolute_pos(
+-        surface_ptr->parent_surface_ptr, x_ptr, y_ptr);
++    struct wlr_xwayland_surface *s = xwl_surface_ptr->wlr_xwayland_surface_ptr;
++    int x = s->x, y = s->y;
++    // X positions are in root coordinates. The element sits in its parent's
++    // container: The position relative to the parent X window, as the client
++    // computed it (the root position of a menu comes from the parent's
++    // position as X knows it, and the pointer's). Before, the element's own
++    // previous position was subtracted instead of the parent's: Harmless
++    // while X kept every window at 0, 0 (upstream), but once X knows where a
++    // window is, a menu opened at the window's position plus its own (the
++    // GParted context menu far to the bottom right), and elsewhere each time.
++    if (NULL != xwl_surface_ptr->parent_surface_ptr) {
++        struct wlr_xwayland_surface *p =
++            xwl_surface_ptr->parent_surface_ptr->wlr_xwayland_surface_ptr;
++        x -= p->x;
++        y -= p->y;
++    }
++    wlmtk_element_set_position(
++        wlmtk_base_element(&xwl_surface_ptr->base), x, y);
+ }
+ /* == Unit Tests =========================================================== */
+ 
+@@ -2308,7 +2319,7 @@ void test_nested(bs_test_t *test_ptr)
+ {
+     wlmaker_server_t server = {};
+ 
+-    // FIXME: Make this test something.
++    // Positions of window-less surfaces (menus) relative to their parents.
+     struct wlr_xwayland_surface surface0;
+     fake_init_wlr_xwayland_surface(&surface0);
+     wlmaker_xwl_surface_t *surface0_ptr = wlmaker_xwl_surface_create(
+@@ -2327,13 +2338,70 @@ void test_nested(bs_test_t *test_ptr)
+         &surface2, NULL, &server);
+     BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, surface2_ptr);
+ 
++    // The parent (window-less here) at root 100, 50.
++    surface1.x = 100;
++    surface1.y = 50;
++    wl_signal_emit_mutable(&surface1.events.set_geometry, NULL);
++    wlmtk_element_t *e1 = wlmtk_base_element(&surface1_ptr->base);
++    BS_TEST_VERIFY_EQ(test_ptr, 100, e1->x);
++    BS_TEST_VERIFY_EQ(test_ptr, 50, e1->y);
++
++    // A child at root 130, 80: 30, 30 from its parent. Again: The same
++    // (the old code subtracted the child's previous position: alternated).
+     surface2.parent = &surface1;
+     wl_signal_emit_mutable(&surface2.events.set_parent, NULL);
+-
+-    surface2.x = 120;
+-    surface2.y = 12;
++    surface2.x = 130;
++    surface2.y = 80;
+     wl_signal_emit_mutable(&surface2.events.set_geometry, NULL);
+-
++    wlmtk_element_t *e2 = wlmtk_base_element(&surface2_ptr->base);
++    BS_TEST_VERIFY_EQ(test_ptr, 30, e2->x);
++    BS_TEST_VERIFY_EQ(test_ptr, 30, e2->y);
++    wl_signal_emit_mutable(&surface2.events.set_geometry, NULL);
++    BS_TEST_VERIFY_EQ(test_ptr, 30, e2->x);
++    BS_TEST_VERIFY_EQ(test_ptr, 30, e2->y);
++
++    // The geometry before the parent (X sets the transient later): Relative
++    // to the parent once it has one.
++    struct wlr_xwayland_surface surface3;
++    fake_init_wlr_xwayland_surface(&surface3);
++    wlmaker_xwl_surface_t *surface3_ptr = wlmaker_xwl_surface_create(
++        &surface3, NULL, &server);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, surface3_ptr);
++    surface3.x = 150;
++    surface3.y = 90;
++    wl_signal_emit_mutable(&surface3.events.set_geometry, NULL);
++    surface3.parent = &surface1;
++    wl_signal_emit_mutable(&surface3.events.set_parent, NULL);
++    wlmtk_element_t *e3 = wlmtk_base_element(&surface3_ptr->base);
++    BS_TEST_VERIFY_EQ(test_ptr, 50, e3->x);
++    BS_TEST_VERIFY_EQ(test_ptr, 40, e3->y);
++
++    // Nested (a submenu of the menu): Relative to its own parent, also with
++    // negative coordinates (a parent on an output left of the origin).
++    surface1.x = -400;
++    surface1.y = -20;
++    wl_signal_emit_mutable(&surface1.events.set_geometry, NULL);
++    surface2.x = -380;
++    surface2.y = 10;
++    wl_signal_emit_mutable(&surface2.events.set_geometry, NULL);
++    BS_TEST_VERIFY_EQ(test_ptr, 20, e2->x);
++    BS_TEST_VERIFY_EQ(test_ptr, 30, e2->y);
++    struct wlr_xwayland_surface surface4;
++    fake_init_wlr_xwayland_surface(&surface4);
++    wlmaker_xwl_surface_t *surface4_ptr = wlmaker_xwl_surface_create(
++        &surface4, NULL, &server);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, surface4_ptr);
++    surface4.parent = &surface2;
++    wl_signal_emit_mutable(&surface4.events.set_parent, NULL);
++    surface4.x = -370;
++    surface4.y = 15;
++    wl_signal_emit_mutable(&surface4.events.set_geometry, NULL);
++    wlmtk_element_t *e4 = wlmtk_base_element(&surface4_ptr->base);
++    BS_TEST_VERIFY_EQ(test_ptr, 10, e4->x);
++    BS_TEST_VERIFY_EQ(test_ptr, 5, e4->y);
++
++    wlmaker_xwl_surface_destroy(surface4_ptr);
++    wlmaker_xwl_surface_destroy(surface3_ptr);
+     wlmaker_xwl_surface_destroy(surface2_ptr);
+     wlmaker_xwl_surface_destroy(surface1_ptr);
+     wlmaker_xwl_surface_destroy(surface0_ptr);
+-- 
+2.56.0
+

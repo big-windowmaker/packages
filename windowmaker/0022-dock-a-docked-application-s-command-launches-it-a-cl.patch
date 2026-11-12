@@ -1,0 +1,895 @@
+From 823e768ac9ef7233a6ba9a060582ee43c3221035 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 9 Nov 2026 02:26:15 -0300
+Subject: [PATCH 22/23] dock: a docked application's command launches it; a
+ click brings back a tray app
+
+When the icon of a running application is docked, Window Maker kept its
+command line (WM_COMMAND, from /proc/<pid>/cmdline) as the icon's command.
+That often launches nothing: a script that renamed itself ("biglinux-tts
+main.py"), a program or a file relative to the working directory. The
+command is now gtk-launch of the application's .desktop file (StartupWMClass,
+the desktop id or the program of Exec matching WM_CLASS or the executable;
+an id ending in ".desktop" keeps the suffix, as gtk-launch needs), else the
+command line with the program and the relative files made absolute, quoted
+for ExpandOptions and wtokensplit. Dockapps keep theirs.
+
+A double-click on the docked icon of an application that runs without any
+window (Telegram or Steam closed to the tray) only unhid nothing: it now
+runs the command, which brings the window back for single-instance
+applications.
+
+make check: test/appcommand_test.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/Makefile.am        |   2 +
+ src/appcommand.c       | 490 +++++++++++++++++++++++++++++++++++++++++
+ src/appcommand.h       |  60 +++++
+ src/dock.c             |  75 ++++++-
+ test/Makefile.am       |   7 +-
+ test/appcommand_test.c | 141 ++++++++++++
+ 6 files changed, 773 insertions(+), 2 deletions(-)
+ create mode 100644 src/appcommand.c
+ create mode 100644 src/appcommand.h
+ create mode 100644 test/appcommand_test.c
+
+diff --git a/src/Makefile.am b/src/Makefile.am
+index d215253a..87adfc56 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -11,6 +11,8 @@ wmaker_SOURCES = 	\
+ 	WindowMaker.h \
+ 	actions.c \
+ 	actions.h \
++	appcommand.c \
++	appcommand.h \
+ 	appicon.c \
+ 	appicon.h \
+ 	application.c \
+diff --git a/src/appcommand.c b/src/appcommand.c
+new file mode 100644
+index 00000000..1a4a44ab
+--- /dev/null
++++ b/src/appcommand.c
+@@ -0,0 +1,490 @@
++/* appcommand.c - the command that launches a docked application
++ *
++ *  Window Maker window manager
++ *
++ *  Copyright (c) 2026 Big WindowMaker contributors
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License as published by
++ *  the Free Software Foundation; either version 2 of the License, or
++ *  (at your option) any later version.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ *  You should have received a copy of the GNU General Public License along
++ *  with this program; if not, see <https://www.gnu.org/licenses/>.
++ */
++
++#include "appcommand.h"
++
++#include <dirent.h>
++#include <fcntl.h>
++#include <limits.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <strings.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++/* A growing string. */
++typedef struct {
++	char *s;
++	size_t len, size;
++	int failed;
++} Buf;
++
++static void buf_add(Buf *b, const char *s, size_t len)
++{
++	if (b->failed)
++		return;
++	if (b->len + len + 1 > b->size) {
++		size_t size = 2 * b->size > b->len + len + 64 ? 2 * b->size : b->len + len + 64;
++		char *n = realloc(b->s, size);
++
++		if (!n) {
++			b->failed = 1;
++			return;
++		}
++		b->s = n;
++		b->size = size;
++	}
++	memcpy(b->s + b->len, s, len);
++	b->len += len;
++	b->s[b->len] = 0;
++}
++
++/* An argument, for Window Maker's docked commands: ExpandOptions() reads
++ * them first (\ escapes the next character, % starts an option), then
++ * wtokensplit() splits them (double quotes, \" and \\ in them). Plain
++ * arguments go as they are. */
++static void buf_add_arg(Buf *b, const char *arg)
++{
++	static const char plain[] =
++		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-./:,+@=";
++	size_t len = strlen(arg);
++	const char *c;
++
++	if (len > 0 && strspn(arg, plain) == len) {
++		buf_add(b, arg, len);
++		return;
++	}
++	buf_add(b, "\"", 1);
++	for (c = arg; *c; c++) {
++		/* wtokensplit: \" and \\, which ExpandOptions must leave. */
++		if (*c == '"' || *c == '\\')
++			buf_add(b, "\\\\", 2);
++		/* ExpandOptions: a literal \ or %. */
++		if (*c == '\\' || *c == '%')
++			buf_add(b, "\\", 1);
++		buf_add(b, c, 1);
++	}
++	buf_add(b, "\"", 1);
++}
++
++static char *strdup_printf2(const char *a, const char *sep, const char *b)
++{
++	size_t la = strlen(a), ls = strlen(sep), lb = strlen(b);
++	char *r = malloc(la + ls + lb + 1);
++
++	if (!r)
++		return NULL;
++	memcpy(r, a, la);
++	memcpy(r + la, sep, ls);
++	memcpy(r + la + ls, b, lb + 1);
++	return r;
++}
++
++/* The path of program `name` in `path`, or NULL. */
++static char *in_path(const char *name, const char *path)
++{
++	const char *p = path;
++
++	if (!path || !*name)
++		return NULL;
++	while (1) {
++		const char *e = strchr(p, ':');
++		size_t l = e ? (size_t)(e - p) : strlen(p);
++
++		if (l > 0 && l < PATH_MAX) {
++			char dir[PATH_MAX];
++			char *c;
++			struct stat st;
++
++			memcpy(dir, p, l);
++			dir[l] = 0;
++			c = strdup_printf2(dir, "/", name);
++			if (c && stat(c, &st) == 0 && S_ISREG(st.st_mode) && access(c, X_OK) == 0)
++				return c;
++			free(c);
++		}
++		if (!e)
++			return NULL;
++		p = e + 1;
++	}
++}
++
++char *wAppCommandFromProcess(const char *cmdline, size_t len, const char *cwd,
++                             const char *exe, const char *path)
++{
++	Buf b = { NULL, 0, 0, 0 };
++	size_t pos = 0, argc = 0;
++
++	while (cmdline && pos < len) {
++		const char *arg = cmdline + pos;
++		size_t l = strnlen(arg, len - pos);
++		char *made = NULL;
++
++		pos += l + 1;
++		if (argc == 0) {
++			if (arg[0] == '/') {
++				if (access(arg, X_OK) != 0 && exe)
++					made = strdup(exe);
++			} else if (strchr(arg, '/')) {
++				/* Relative to its working directory. */
++				if (cwd) {
++					made = strdup_printf2(cwd, "/", arg);
++					if (made && access(made, X_OK) != 0 && exe) {
++						free(made);
++						made = strdup(exe);
++					}
++				} else if (exe) {
++					made = strdup(exe);
++				}
++			} else {
++				/* A name: in the PATH, or its executable (a script
++				 * that renamed itself). */
++				char *found = in_path(arg, path);
++
++				if (found)
++					free(found);
++				else if (exe)
++					made = strdup(exe);
++			}
++		} else if (cwd && arg[0] != '-' && arg[0] != '/' && arg[0] && !strstr(arg, "://")) {
++			/* A file relative to its working directory ("main.py"). */
++			char *p = strdup_printf2(cwd, "/", arg);
++			struct stat st;
++
++			if (p && stat(p, &st) == 0 && S_ISREG(st.st_mode))
++				made = p;
++			else
++				free(p);
++		}
++		if (argc > 0)
++			buf_add(&b, " ", 1);
++		buf_add_arg(&b, made ? made : arg);
++		free(made);
++		argc++;
++	}
++	if (argc == 0 && exe) {
++		buf_add_arg(&b, exe);
++		argc++;
++	}
++	if (b.failed || argc == 0) {
++		free(b.s);
++		return NULL;
++	}
++	return b.s;
++}
++
++char *wAppGtkLaunchCommand(const char *desktop_id)
++{
++	Buf b = { NULL, 0, 0, 0 };
++
++	if (!desktop_id || !*desktop_id)
++		return NULL;
++	buf_add(&b, "gtk-launch ", 11);
++	/* The file name: an id ending in ".desktop" (org.telegram.desktop)
++	 * is not found by gtk-launch without the suffix. */
++	buf_add_arg(&b, desktop_id);
++	if (b.failed) {
++		free(b.s);
++		return NULL;
++	}
++	return b.s;
++}
++
++/* ---- .desktop files ---------------------------------------------------- */
++
++typedef struct {
++	char *id;
++	int score;
++} Match;
++
++static int same(const char *a, const char *b)
++{
++	return a && b && *a && strcasecmp(a, b) == 0;
++}
++
++/* The program of an Exec line: the first word that is not "env" nor an
++ * assignment, without its directory. */
++static char *exec_program(const char *exec)
++{
++	const char *p = exec;
++
++	while (*p) {
++		const char *s, *e;
++		size_t l;
++
++		while (*p == ' ' || *p == '\t')
++			p++;
++		s = p;
++		if (*s == '"') {
++			s++;
++			e = strchr(s, '"');
++			if (!e)
++				return NULL;
++			p = e + 1;
++		} else {
++			e = s;
++			while (*e && *e != ' ' && *e != '\t')
++				e++;
++			p = e;
++		}
++		l = e - s;
++		if (l == 0)
++			return NULL;
++		if ((l == 3 && strncmp(s, "env", 3) == 0) || memchr(s, '=', l))
++			continue;
++		{
++			const char *slash = s;
++			const char *c;
++			char *r;
++
++			for (c = s; c < e; c++)
++				if (*c == '/')
++					slash = c + 1;
++			r = malloc(e - slash + 1);
++			if (!r)
++				return NULL;
++			memcpy(r, slash, e - slash);
++			r[e - slash] = 0;
++			return r;
++		}
++	}
++	return NULL;
++}
++
++/* Scores the desktop file `path` (id `id`) for the window. */
++static int score_file(const char *path, const char *id, const char *wm_instance,
++                      const char *wm_class, const char *exe)
++{
++	FILE *f = fopen(path, "r");
++	char line[4096];
++	int in_entry = 0, app = 0, hidden = 0, nodisplay = 0, score = 0;
++	char base[NAME_MAX * 2 + 2], *dot;
++	const char *last;
++
++	if (!f)
++		return 0;
++	while (fgets(line, sizeof(line), f)) {
++		char *v;
++
++		line[strcspn(line, "\r\n")] = 0;
++		if (line[0] == '[') {
++			in_entry = strcmp(line, "[Desktop Entry]") == 0;
++			continue;
++		}
++		if (!in_entry || !(v = strchr(line, '=')))
++			continue;
++		*v++ = 0;
++		while (*v == ' ')
++			v++;
++		{
++			char *k = line + strlen(line);
++
++			while (k > line && k[-1] == ' ')
++				*--k = 0;
++		}
++		if (strcmp(line, "Type") == 0)
++			app = strcmp(v, "Application") == 0;
++		else if (strcmp(line, "Hidden") == 0)
++			hidden = strcmp(v, "true") == 0;
++		else if (strcmp(line, "NoDisplay") == 0)
++			nodisplay = strcmp(v, "true") == 0;
++		else if (strcmp(line, "StartupWMClass") == 0) {
++			if (same(v, wm_class) || same(v, wm_instance))
++				score = score > 6 ? score : 6;
++		} else if (strcmp(line, "Exec") == 0 && exe) {
++			char *prog = exec_program(v);
++
++			if (prog && (same(prog, exe) || same(prog, wm_instance)))
++				score = score > 2 ? score : 2;
++			free(prog);
++		}
++	}
++	fclose(f);
++	if (!app || hidden)
++		return 0;
++
++	/* The desktop id itself ("firefox" for the class "Firefox"), or the
++	 * last part of a reverse domain name ("org.gnome.Calculator" for the
++	 * instance "calculator"). */
++	snprintf(base, sizeof(base), "%s", id);
++	dot = strstr(base, ".desktop");
++	if (dot && dot[8] == 0)
++		*dot = 0;
++	last = strrchr(base, '.');
++	last = last ? last + 1 : base;
++	if (same(base, wm_class) || same(base, wm_instance))
++		score = score > 4 ? score : 4;
++	else if (same(last, wm_class) || same(last, wm_instance))
++		score = score > 3 ? score : 3;
++	if (score && !nodisplay)
++		score++;
++	return score;
++}
++
++/* Scans <dir> for desktop files (ids of subdirectories joined with '-'). */
++static void scan_dir(const char *dir, const char *prefix, int depth, const char *wm_instance,
++                     const char *wm_class, const char *exe, Match *best)
++{
++	DIR *d = opendir(dir);
++	struct dirent *e;
++
++	if (!d)
++		return;
++	while ((e = readdir(d))) {
++		char path[PATH_MAX], id[NAME_MAX * 2 + 2];
++		struct stat st;
++		size_t l = strlen(e->d_name);
++		int s;
++
++		if (e->d_name[0] == '.')
++			continue;
++		if ((size_t)snprintf(path, sizeof(path), "%s/%s", dir, e->d_name) >= sizeof(path))
++			continue;
++		snprintf(id, sizeof(id), "%s%s", prefix, e->d_name);
++		if (stat(path, &st) != 0)
++			continue;
++		if (S_ISDIR(st.st_mode)) {
++			if (depth < 2) {
++				char sub[NAME_MAX * 2 + 3];
++
++				snprintf(sub, sizeof(sub), "%s-", id);
++				scan_dir(path, sub, depth + 1, wm_instance, wm_class, exe, best);
++			}
++			continue;
++		}
++		if (l < 9 || strcmp(e->d_name + l - 8, ".desktop") != 0)
++			continue;
++		s = score_file(path, id, wm_instance, wm_class, exe);
++		/* Equal scores: the first data directory wins (XDG order). */
++		if (s > best->score) {
++			free(best->id);
++			best->id = strdup(id);
++			best->score = s;
++		}
++	}
++	closedir(d);
++}
++
++char *wAppDesktopIdFor(const char *wm_instance, const char *wm_class, const char *exe)
++{
++	Match best = { NULL, 0 };
++	const char *home = getenv("HOME");
++	const char *data_home = getenv("XDG_DATA_HOME");
++	const char *data_dirs = getenv("XDG_DATA_DIRS");
++	char *dirs, *p, *save = NULL;
++	char buf[PATH_MAX];
++	size_t total;
++
++	if (!data_dirs || !*data_dirs)
++		data_dirs = "/usr/local/share:/usr/share";
++	total = strlen(data_dirs) + 4 * PATH_MAX;
++	dirs = malloc(total);
++	if (!dirs)
++		return NULL;
++	dirs[0] = 0;
++	if (data_home && *data_home)
++		snprintf(buf, sizeof(buf), "%s:", data_home);
++	else if (home)
++		snprintf(buf, sizeof(buf), "%s/.local/share:", home);
++	else
++		buf[0] = 0;
++	strcat(dirs, buf);
++	strcat(dirs, data_dirs);
++	if (home) {
++		snprintf(buf, sizeof(buf), ":%s/.local/share/flatpak/exports/share", home);
++		strcat(dirs, buf);
++	}
++	strcat(dirs, ":/var/lib/flatpak/exports/share");
++
++	for (p = strtok_r(dirs, ":", &save); p; p = strtok_r(NULL, ":", &save)) {
++		char apps[PATH_MAX];
++
++		if ((size_t)snprintf(apps, sizeof(apps), "%s/applications", p) >= sizeof(apps))
++			continue;
++		scan_dir(apps, "", 0, wm_instance, wm_class, exe, &best);
++	}
++	free(dirs);
++	return best.id;
++}
++
++static char *read_link(const char *path)
++{
++	char buf[PATH_MAX];
++	ssize_t l = readlink(path, buf, sizeof(buf) - 1);
++
++	if (l <= 0)
++		return NULL;
++	buf[l] = 0;
++	if (strstr(buf, " (deleted)"))
++		return NULL;
++	return strdup(buf);
++}
++
++char *wAppLaunchCommand(const char *wm_instance, const char *wm_class, pid_t pid)
++{
++	char path[64], *exe = NULL, *cwd = NULL, *result = NULL;
++	const char *exe_base = NULL;
++
++	if (pid > 1) {
++		snprintf(path, sizeof(path), "/proc/%d/exe", (int)pid);
++		exe = read_link(path);
++		snprintf(path, sizeof(path), "/proc/%d/cwd", (int)pid);
++		cwd = read_link(path);
++	}
++	if (exe) {
++		exe_base = strrchr(exe, '/');
++		exe_base = exe_base ? exe_base + 1 : exe;
++	}
++
++	{
++		char *gtk_launch = in_path("gtk-launch", getenv("PATH"));
++
++		if (gtk_launch) {
++			char *id = wAppDesktopIdFor(wm_instance, wm_class, exe_base);
++
++			free(gtk_launch);
++			if (id) {
++				result = wAppGtkLaunchCommand(id);
++				free(id);
++			}
++		}
++	}
++
++	if (!result && pid > 1) {
++		char buf[8192];
++		ssize_t l = 0;
++		int fd;
++
++		snprintf(path, sizeof(path), "/proc/%d/cmdline", (int)pid);
++		fd = open(path, O_RDONLY | O_CLOEXEC);
++		if (fd >= 0) {
++			l = read(fd, buf, sizeof(buf) - 1);
++			close(fd);
++		}
++		if (l > 0) {
++			buf[l] = 0;
++			result = wAppCommandFromProcess(buf, l, cwd, exe, getenv("PATH"));
++		}
++	}
++	free(exe);
++	free(cwd);
++	return result;
++}
+diff --git a/src/appcommand.h b/src/appcommand.h
+new file mode 100644
+index 00000000..c0c5596f
+--- /dev/null
++++ b/src/appcommand.h
+@@ -0,0 +1,60 @@
++/* appcommand.h - the command that launches a docked application
++ *
++ *  Window Maker window manager
++ *
++ *  Copyright (c) 2026 Big WindowMaker contributors
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License as published by
++ *  the Free Software Foundation; either version 2 of the License, or
++ *  (at your option) any later version.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ *  You should have received a copy of the GNU General Public License along
++ *  with this program; if not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifndef WMAPPCOMMAND_H_
++#define WMAPPCOMMAND_H_
++
++#include <stddef.h>
++#include <sys/types.h>
++
++/*
++ * When the icon of a running application is docked, Window Maker keeps
++ * the application's command line (WM_COMMAND, or /proc/<pid>/cmdline) as
++ * the command of the docked icon. That is often not launchable: a script
++ * that renamed itself ("biglinux-tts main.py"), a program or a file given
++ * relative to the working directory, an Electron or Flatpak helper.
++ *
++ * The command is, in this order:
++ *   - "gtk-launch <id>.desktop" for the application's .desktop file
++ *     (StartupWMClass, the desktop id or the program of Exec matching the
++ *     window's class, instance or executable), when gtk-launch is found;
++ *   - the process's command line, with the program and the arguments that
++ *     name files made absolute (relative to its working directory, or its
++ *     executable when the program is not in the PATH).
++ *
++ * Results are malloc()ed; free() them.
++ */
++
++/* The desktop id (file name, "x.desktop") for the window, or NULL. */
++char *wAppDesktopIdFor(const char *wm_instance, const char *wm_class, const char *exe);
++
++/* The command for the application of the window, or NULL. */
++char *wAppLaunchCommand(const char *wm_instance, const char *wm_class, pid_t pid);
++
++/* The command line of a process, made launchable (see above). `cmdline` is
++ * /proc/<pid>/cmdline (NUL-separated, `len` bytes), `cwd` its working
++ * directory, `exe` its executable, `path` the PATH. Any may be NULL. */
++char *wAppCommandFromProcess(const char *cmdline, size_t len, const char *cwd,
++                             const char *exe, const char *path);
++
++/* "gtk-launch <id>", the id quoted when needed. */
++char *wAppGtkLaunchCommand(const char *desktop_id);
++
++#endif
+diff --git a/src/dock.c b/src/dock.c
+index 167fc5c7..fc9acc5a 100644
+--- a/src/dock.c
++++ b/src/dock.c
+@@ -62,6 +62,8 @@
+ #include "xinerama.h"
+ #include "placement.h"
+ #include "misc.h"
++#include "appcommand.h"
++#include "wmspec.h"
+ #include "event.h"
+ 
+ /**** Local variables ****/
+@@ -2372,6 +2374,53 @@ int wDockReceiveDNDDrop(WScreen *scr, XEvent *event)
+ }
+ #endif	/* USE_DOCK_XDND */
+ 
++/*
++ * Big WindowMaker: the command of a running application's icon, as it gets
++ * docked. The application's own command line (WM_COMMAND, which Window
++ * Maker takes from /proc/<pid>/cmdline) often does not launch it again (a
++ * script that renamed itself, relative paths): its .desktop file with
++ * gtk-launch instead, else that command line made launchable. Dockapps keep
++ * theirs. Returns a new string (wfree), or NULL.
++ */
++static char *dockedCommandFor(WAppIcon *icon)
++{
++	WWindow *wwin = icon->icon->owner;
++	char *made, *command = NULL;
++
++	if (!wwin || wwin->flags.is_dockapp)
++		return NULL;
++	made = wAppLaunchCommand(icon->wm_instance ? icon->wm_instance : wwin->wm_instance,
++	                         icon->wm_class ? icon->wm_class : wwin->wm_class,
++	                         wNETWMGetPidForWindow(wwin->client_win));
++	if (made) {
++		command = wstrdup(made);
++		free(made);
++	}
++	return command;
++}
++
++/*
++ * Big WindowMaker: whether the application shows a window (mapped,
++ * miniaturized, shaded or hidden: something unhiding brings back). Telegram
++ * or Steam closed to the tray keep running with no window at all: unhiding
++ * them shows nothing.
++ */
++static Bool appHasWindows(WApplication *wapp)
++{
++	WWindow *wwin;
++
++	if (!wapp || !wapp->main_window_desc)
++		return False;
++	for (wwin = wapp->main_window_desc->screen_ptr->focused_window; wwin; wwin = wwin->prev) {
++		if (wwin->main_window != wapp->main_window || wwin->flags.is_dockapp)
++			continue;
++		if (wwin->flags.mapped || wwin->flags.miniaturized || wwin->flags.shaded ||
++		    wwin->flags.hidden)
++			return True;
++	}
++	return False;
++}
++
+ Bool wDockAttachIcon(WDock *dock, WAppIcon *icon, int x, int y, Bool update_icon)
+ {
+ 	WWindow *wwin;
+@@ -2384,6 +2433,17 @@ Bool wDockAttachIcon(WDock *dock, WAppIcon *icon, int x, int y, Bool update_icon
+ 	if (update_icon)
+ 		lupdate_icon = True;
+ 
++	/* A running application's icon, docked: a command that launches it. */
++	if (!icon->docked && icon->icon->owner) {
++		char *made = dockedCommandFor(icon);
++
++		if (made) {
++			if (icon->command)
++				wfree(icon->command);
++			icon->command = made;
++		}
++	}
++
+ 	if (icon->command == NULL) {
+ 		/* If icon->owner exists, it means the application is running */
+ 		if (icon->icon->owner) {
+@@ -2539,7 +2599,9 @@ Bool wDockMoveIconBetweenDocks(WDock *src, WDock *dest, WAppIcon *icon, int x, i
+ 		/* If icon->owner exists, it means the application is running */
+ 		if (icon->icon->owner) {
+ 			wwin = icon->icon->owner;
+-			command = GetCommandForWindow(wwin->client_win);
++			command = dockedCommandFor(icon);
++			if (!command)
++				command = GetCommandForWindow(wwin->client_win);
+ 		}
+ 
+ 		if (command) {
+@@ -4048,6 +4110,17 @@ static void iconDblClick(WObjDescriptor *desc, XEvent *event)
+ 
+ 		assert(wapp != NULL);
+ 
++		/*
++		 * Big WindowMaker: running with no window (closed to the tray):
++		 * unhiding shows nothing. Its command brings the window back, as
++		 * single-instance applications do when launched again. The icon's
++		 * state stays as it is (the application runs).
++		 */
++		if (btn->command && !btn->launching && !appHasWindows(wapp)) {
++			execCommand(btn, btn->command, NULL);
++			return;
++		}
++
+ 		unhideHere = (event->xbutton.state & ShiftMask);
+ 
+ 		/* go to the last workspace that the user worked on the app */
+diff --git a/test/Makefile.am b/test/Makefile.am
+index 0a3b5d7f..269e7ab7 100644
+--- a/test/Makefile.am
++++ b/test/Makefile.am
+@@ -1,9 +1,14 @@
+ ## Process this file with automake to produce Makefile.in
+ 
+-AUTOMAKE_OPTIONS = no-dependencies
++AUTOMAKE_OPTIONS = no-dependencies serial-tests
+ 
+ EXTRA_DIST = notest.c
+ 
++check_PROGRAMS = appcommand_test
++TESTS = appcommand_test
++
++appcommand_test_SOURCES = appcommand_test.c
++
+ noinst_PROGRAMS = wtest wm_fsm_test
+ 
+ wtest_SOURCES = wtest.c
+diff --git a/test/appcommand_test.c b/test/appcommand_test.c
+new file mode 100644
+index 00000000..ef209bd0
+--- /dev/null
++++ b/test/appcommand_test.c
+@@ -0,0 +1,141 @@
++/* appcommand_test.c - tests of the command of docked applications
++ *
++ *  Copyright (c) 2026 Big WindowMaker contributors
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License as published by
++ *  the Free Software Foundation; either version 2 of the License, or
++ *  (at your option) any later version.
++ *
++ * Run by "make check": the .desktop files of a temporary XDG_DATA_HOME,
++ * and command lines of processes made launchable.
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++/* The module itself, built with the test (no library to link). */
++#include "../src/appcommand.c"
++
++static int failures;
++
++static void expect(const char *what, const char *got, const char *want)
++{
++	if ((got == NULL) != (want == NULL) || (got && strcmp(got, want) != 0)) {
++		fprintf(stderr, "FAIL %s: got [%s], want [%s]\n", what, got ? got : "(null)",
++		        want ? want : "(null)");
++		failures++;
++	} else {
++		printf("ok   %s\n", what);
++	}
++}
++
++static void write_file(const char *dir, const char *name, const char *text)
++{
++	char path[4096];
++	FILE *f;
++
++	snprintf(path, sizeof(path), "%s/%s", dir, name);
++	f = fopen(path, "w");
++	if (!f) {
++		perror(path);
++		exit(1);
++	}
++	fputs(text, f);
++	fclose(f);
++}
++
++int main(void)
++{
++	char home[] = "/tmp/appcommand-test-XXXXXX";
++	char apps[4096], sub[4200], cmd[8192];
++	char *s;
++
++	if (!mkdtemp(home))
++		return 1;
++	snprintf(apps, sizeof(apps), "%s/applications", home);
++	mkdir(apps, 0700);
++	snprintf(sub, sizeof(sub), "%s/kde4", apps);
++	mkdir(sub, 0700);
++	setenv("XDG_DATA_HOME", home, 1);
++	setenv("XDG_DATA_DIRS", "/nonexistent", 1);
++	setenv("HOME", home, 1);
++
++	write_file(apps, "org.telegram.desktop.desktop",
++	           "[Desktop Entry]\nType=Application\nName=Telegram\nExec=Telegram -- %u\n"
++	           "StartupWMClass=TelegramDesktop\n");
++	write_file(apps, "firefox.desktop",
++	           "[Desktop Entry]\nType=Application\nName=Firefox\nExec=/usr/lib/firefox/firefox %u\n");
++	write_file(apps, "org.gnome.Calculator.desktop",
++	           "[Desktop Entry]\nType=Application\nName=Calc\nExec=gnome-calculator\n");
++	write_file(apps, "hidden.desktop",
++	           "[Desktop Entry]\nType=Application\nHidden=true\nStartupWMClass=Hidden\n");
++	write_file(apps, "link.desktop",
++	           "[Desktop Entry]\nType=Link\nURL=x\nStartupWMClass=Link\n");
++	write_file(apps, "tts.desktop",
++	           "[Desktop Entry]\nType=Application\nName=TTS\nExec=env A=1 /usr/bin/biglinux-tts-x --x\n");
++	write_file(sub, "okular.desktop",
++	           "[Desktop Entry]\nType=Application\nName=Okular\nExec=okular\n");
++
++	/* StartupWMClass, case-insensitive; the id keeps its ".desktop". */
++	s = wAppDesktopIdFor("Telegram", "TelegramDesktop", "Telegram");
++	expect("StartupWMClass", s, "org.telegram.desktop.desktop");
++	free(s);
++	s = wAppGtkLaunchCommand("org.telegram.desktop.desktop");
++	expect("gtk-launch with the suffix", s, "gtk-launch org.telegram.desktop.desktop");
++	free(s);
++	/* The desktop id as the class; the last part of a reverse name. */
++	s = wAppDesktopIdFor("Navigator", "firefox", "firefox");
++	expect("desktop id = class", s, "firefox.desktop");
++	free(s);
++	s = wAppDesktopIdFor("calculator", "", NULL);
++	expect("last part of the id", s, "org.gnome.Calculator.desktop");
++	free(s);
++	/* The program of Exec, after env and assignments. */
++	s = wAppDesktopIdFor("x", "y", "biglinux-tts-x");
++	expect("Exec program", s, "tts.desktop");
++	free(s);
++	/* Subdirectories: "kde4-okular.desktop". */
++	s = wAppDesktopIdFor("okular", "okular", "okular");
++	expect("subdirectory id", s, "kde4-okular.desktop");
++	free(s);
++	/* Hidden entries and links are not applications. */
++	s = wAppDesktopIdFor("hidden", "Hidden", NULL);
++	expect("Hidden=true", s, NULL);
++	free(s);
++	s = wAppDesktopIdFor("link", "Link", NULL);
++	expect("Type=Link", s, NULL);
++	free(s);
++
++	/* A script that renamed itself, its file relative: absolute. */
++	write_file(home, "main.py", "#\n");
++	{
++		static const char c[] = "renamed-tts-xyz\0main.py\0--flag\0";
++
++		s = wAppCommandFromProcess(c, sizeof(c) - 1, home, "/usr/bin/python3", "/usr/bin:/bin");
++		snprintf(cmd, sizeof(cmd), "/usr/bin/python3 %s/main.py --flag", home);
++		expect("renamed script", s, cmd);
++		free(s);
++	}
++	/* In the PATH, as it is; special characters quoted for ExpandOptions
++	 * and wtokensplit. */
++	{
++		static const char c[] = "sh\0-c\0echo \"50%\" \\\0";
++
++		s = wAppCommandFromProcess(c, sizeof(c) - 1, NULL, NULL, "/usr/bin:/bin");
++		expect("quoting", s, "sh -c \"echo \\\\\"50\\%\\\\\" \\\\\\\\\"");
++		free(s);
++	}
++	s = wAppCommandFromProcess(NULL, 0, NULL, "/usr/bin/x", NULL);
++	expect("executable only", s, "/usr/bin/x");
++	free(s);
++
++	snprintf(cmd, sizeof(cmd), "rm -rf '%s'", home);
++	if (system(cmd) != 0)
++		failures++;
++	printf("%s\n", failures ? "FAILED" : "PASSED");
++	return failures ? 1 : 0;
++}
+-- 
+2.56.0
+

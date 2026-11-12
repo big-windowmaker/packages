@@ -1,0 +1,64 @@
+From 9e9895682b26bcd158f9c8b3e9d5e6e63098d664 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sun, 8 Nov 2026 23:00:38 -0300
+Subject: [PATCH 20/23] IgnoreDecorationChanges: only on decorated window types
+
+IgnoreDecorationChanges restored the title bar and borders of any window,
+also of docks, menus, splash screens and notifications. Given to all
+windows ("*", Big WindowMaker frames every program that asks for no
+decorations), it framed the tabbed Dock and splash screens. It now applies
+to the decorated types only (normal windows, dialogs), as the MWM hints.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/window.c | 7 +++++--
+ src/wmspec.c | 7 ++++---
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/src/window.c b/src/window.c
+index efa56f8a..713f837b 100644
+--- a/src/window.c
++++ b/src/window.c
+@@ -429,8 +429,11 @@ void wWindowSetupInitialAttributes(WWindow *wwin, int *level, int *workspace)
+ 			       &wwin->defined_user_flags, False);
+ 
+ 	/* Restore decoration if the user has enabled the
+-	 * IgnoreDecorationChanges option */
+-	if (wwin->user_flags.ignore_decoration_changes) {
++	 * IgnoreDecorationChanges option: only for the window types that are
++	 * decorated (normal windows, dialogs), so that it can be given to all
++	 * windows ("*") without framing docks, menus, splash screens or
++	 * notifications */
++	if (wwin->user_flags.ignore_decoration_changes && wNETWMHasDecoratedType(wwin)) {
+ 		WSETUFLAG(wwin, no_titlebar, 0);
+ 		WSETUFLAG(wwin, no_resizable, 0);
+ 		WSETUFLAG(wwin, no_miniaturizable, 0);
+diff --git a/src/wmspec.c b/src/wmspec.c
+index ca2b4f03..ca6bb536 100644
+--- a/src/wmspec.c
++++ b/src/wmspec.c
+@@ -1473,9 +1473,11 @@ static Bool handleWindowType(WWindow *wwin, Atom type, int *layer)
+ 		ret = False;
+ 	}
+ 
++	wwin->type = type;
++
+ 	/* Restore decoration if the user has enabled the
+-	 * IgnoreDecorationChanges option */
+-	if (WFLAGP(wwin, ignore_decoration_changes)) {
++	 * IgnoreDecorationChanges option (decorated window types only) */
++	if (WFLAGP(wwin, ignore_decoration_changes) && wNETWMHasDecoratedType(wwin)) {
+ 		wwin->client_flags.no_titlebar = 0;
+ 		wwin->client_flags.no_resizable = 0;
+ 		wwin->client_flags.no_miniaturizable = 0;
+@@ -1484,7 +1486,6 @@ static Bool handleWindowType(WWindow *wwin, Atom type, int *layer)
+ 		wwin->client_flags.no_movable = 0;
+ 	}
+ 
+-	wwin->type = type;
+ 	*layer = getWindowLayer(wwin);
+ 
+ 	return ret;
+-- 
+2.56.0
+

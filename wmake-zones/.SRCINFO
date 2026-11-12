@@ -1,7 +1,7 @@
 pkgbase = wmake-zones
 	pkgdesc = Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look
-	pkgver = 0.3.1
-	pkgrel = 5
+	pkgver = 0.4.0
+	pkgrel = 1
 	url = https://github.com/big-windowmaker/wmake-zones
 	arch = x86_64
 	license = GPL-2.0-or-later
@@ -32,6 +32,7 @@ pkgbase = wmake-zones
 	depends = libxext
 	depends = libxft
 	depends = libxi
+	depends = libxinerama
 	depends = libxrandr
 	depends = libxrender
 	depends = wayland
@@ -40,17 +41,7 @@ pkgbase = wmake-zones
 	optdepends = picom: zonas translúcidas (sem compositor, contornos com o destino em listras)
 	options = staticlibs
 	options = !lto
-	source = wmake-zones::git+https://github.com/big-windowmaker/wmake-zones.git#tag=v0.3.1
-	source = 0001-tests-dockapp-waits-for-the-tile.patch
-	source = 0002-tiling-gtk4-minimum-size.patch
-	source = 0003-dockapp-drag-and-window-maker-menu.patch
-	source = 0004-review-wm-menu-swap-translation.patch
-	source = 0005-wayland-dockapp-whole-64-px-tile.patch
+	source = wmake-zones::git+https://github.com/big-windowmaker/wmake-zones.git#tag=v0.4.0
 	sha256sums = SKIP
-	sha256sums = 753de49341466478952bffc37c44286f3208f6fc5f7df1091ba7dcab065c86ea
-	sha256sums = 2a7c02e91f37841da09f19d67ce45e2d1a0b52fdf8265f91503c86c502c31a2b
-	sha256sums = 45e420229132aca70b5d38cf351eeeb008b800f234acf04f1950dd415ef6530e
-	sha256sums = 7fc8ed37ee0563e8f382f3c4ba578d97d50c6944752d094d7612bed3c24d4568
-	sha256sums = 8ed6405823d35d5c9fe48a12c3cf11955a851034de66c227a35a4f44e14cda54
 
 pkgname = wmake-zones

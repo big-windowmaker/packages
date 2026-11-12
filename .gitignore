@@ -1,6 +1,7 @@
 # Artefatos de build do makepkg (caso alguém rode o makepkg direto aqui)
 /*/src/
 /*/pkg/
+/*/*.pkg.tar
 /*/*.pkg.tar.*
 /*/*.log
 /*/*.tar.gz

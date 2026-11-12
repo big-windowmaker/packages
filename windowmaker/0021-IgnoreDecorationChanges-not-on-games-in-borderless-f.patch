@@ -1,0 +1,106 @@
+From 9431c6d8a7a7b408d4436cd0677499cb192d7108 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 9 Nov 2026 02:02:26 -0300
+Subject: [PATCH 21/23] IgnoreDecorationChanges: not on games in borderless
+ fullscreen
+
+A game in "borderless fullscreen" (Wine/Proton, SDL) asks for no
+decorations and the size of its head, without the fullscreen state. With
+IgnoreDecorationChanges given to all windows ("*"), it got a title bar
+that pushed it down. wNETWMCoversItsHead(): an undecorated window that
+covers its head keeps no decorations. The client's geometry is known
+before the initial attributes are set up, for this check.
+
+Tested on Xvfb: a 1280x900 window without decorations on a 1280x900
+screen maps at 0,0 without a frame; a 500x300 one gets the frame.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/window.c | 11 +++++++++--
+ src/wmspec.c | 21 ++++++++++++++++++++-
+ src/wmspec.h |  1 +
+ 3 files changed, 30 insertions(+), 3 deletions(-)
+
+diff --git a/src/window.c b/src/window.c
+index 713f837b..a7bcb0ff 100644
+--- a/src/window.c
++++ b/src/window.c
+@@ -432,8 +432,9 @@ void wWindowSetupInitialAttributes(WWindow *wwin, int *level, int *workspace)
+ 	 * IgnoreDecorationChanges option: only for the window types that are
+ 	 * decorated (normal windows, dialogs), so that it can be given to all
+ 	 * windows ("*") without framing docks, menus, splash screens or
+-	 * notifications */
+-	if (wwin->user_flags.ignore_decoration_changes && wNETWMHasDecoratedType(wwin)) {
++	 * notifications; nor games in borderless fullscreen */
++	if (wwin->user_flags.ignore_decoration_changes && wNETWMHasDecoratedType(wwin) &&
++	    !wNETWMCoversItsHead(wwin)) {
+ 		WSETUFLAG(wwin, no_titlebar, 0);
+ 		WSETUFLAG(wwin, no_resizable, 0);
+ 		WSETUFLAG(wwin, no_miniaturizable, 0);
+@@ -836,6 +837,12 @@ WWindow *wManageWindow(WScreen *scr, Window window)
+ 
+ 	/* get geometry stuff */
+ 	wClientGetNormalHints(wwin, &wattribs, True, &x, &y, &width, &height);
++	/* known from now on (set again when placed): the initial attributes
++	 * check whether the window covers its head (wNETWMCoversItsHead) */
++	wwin->client.x = x;
++	wwin->client.y = y;
++	wwin->client.width = width;
++	wwin->client.height = height;
+ 
+ 	/* get colormap windows */
+ 	GetColormapWindows(wwin);
+diff --git a/src/wmspec.c b/src/wmspec.c
+index ca6bb536..28713eb5 100644
+--- a/src/wmspec.c
++++ b/src/wmspec.c
+@@ -1477,7 +1477,8 @@ static Bool handleWindowType(WWindow *wwin, Atom type, int *layer)
+ 
+ 	/* Restore decoration if the user has enabled the
+ 	 * IgnoreDecorationChanges option (decorated window types only) */
+-	if (WFLAGP(wwin, ignore_decoration_changes) && wNETWMHasDecoratedType(wwin)) {
++	if (WFLAGP(wwin, ignore_decoration_changes) && wNETWMHasDecoratedType(wwin) &&
++	    !wNETWMCoversItsHead(wwin)) {
+ 		wwin->client_flags.no_titlebar = 0;
+ 		wwin->client_flags.no_resizable = 0;
+ 		wwin->client_flags.no_miniaturizable = 0;
+@@ -1504,6 +1505,24 @@ void wNETWMPositionSplash(WWindow *wwin, int *x, int *y, int width, int height)
+ /* A window whose decorations come from the application, not from its type:
+  * not a desktop, dock, menu, tooltip, splash... A type wmaker does not know
+  * (Qt puts _KDE_NET_WM_WINDOW_TYPE_OVERRIDE before NORMAL) counts as normal. */
++/*
++ * A game in "borderless fullscreen" (Wine/Proton, SDL): the size of the
++ * head it is on, without decorations and without the fullscreen state.
++ * IgnoreDecorationChanges ("*", Big WindowMaker frames every program) does
++ * not give it a title bar that would push it down.
++ */
++Bool wNETWMCoversItsHead(WWindow *wwin)
++{
++	WMPoint center;
++	WMRect rect;
++
++	center.x = wwin->client.x + wwin->client.width / 2;
++	center.y = wwin->client.y + wwin->client.height / 2;
++	rect = wGetRectForHead(wwin->screen_ptr, wGetHeadForPoint(wwin->screen_ptr, center));
++	return rect.size.width > 0 && rect.size.height > 0 &&
++		wwin->client.width >= rect.size.width && wwin->client.height >= rect.size.height;
++}
++
+ Bool wNETWMHasDecoratedType(WWindow *wwin)
+ {
+ 	Atom t = wwin->type;
+diff --git a/src/wmspec.h b/src/wmspec.h
+index 20dd2afb..e192ab40 100644
+--- a/src/wmspec.h
++++ b/src/wmspec.h
+@@ -53,6 +53,7 @@ void wNETWMUpdateWorkarea(WScreen *scr);
+ Bool wNETWMGetUsableArea(WScreen *scr, int head, WArea *area);
+ void wNETWMCheckInitialClientState(WWindow *wwin);
+ Bool wNETWMHasDecoratedType(WWindow *wwin);
++Bool wNETWMCoversItsHead(WWindow *wwin);
+ void wNETWMCheckInitialFrameState(WWindow *wwin);
+ Bool wNETWMProcessClientMessage(XClientMessageEvent *event);
+ void wNETWMCheckClientHints(WWindow *wwin, int *layer, int *workspace);
+-- 
+2.56.0
+

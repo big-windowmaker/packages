@@ -1,0 +1,64 @@
+# Maintainer: Rafael Ruscher <rruscher@gmail.com>
+# Maintainer: Barnabé Di Kartola <barnabedikartola@gmail.com>
+# Big WindowMaker: https://github.com/big-windowmaker
+#
+# wmpulsemixer: dockapp de volume do Window Maker (descendente do wmsmixer e
+# do wmmixer) para os servidores de áudio atuais. Fala com o servidor pelo
+# libpulse, então funciona com o PulseAudio e com o PipeWire
+# (pipewire-pulse). Saída e microfone (setas trocam o canal), mudo no ícone,
+# volume pela barra ou pela roda do mouse, dispositivo de saída/entrada no
+# clique direito. É o controle de volume padrão do Dock do Big WindowMaker
+# (X11 e, pelo XWayland, Wayland), logo abaixo da bandeja.
+#
+# -w (WithdrawnState) é o modo dockapp: a janela de ícone que o Window Maker
+# e o wlmaker põem no Dock. Sem -w ele abre uma janela comum.
+#
+# Patch 0001: espera o servidor de áudio (login, reinício do PipeWire) em vez
+# de sair e deixar um ladrilho vazio; a roda do mouse parte do volume real
+# (antes, rolar num canal mudo derrubava o volume para 4%). A enviar ao autor.
+pkgname=wmpulsemixer
+pkgver=0.2.2
+pkgrel=1
+pkgdesc='Window Maker dockapp to control PulseAudio/PipeWire output and microphone volume'
+arch=(x86_64)
+url='https://github.com/polletfa/wmpulsemixer'
+license=('GPL-2.0-only')
+depends=(
+  glib2
+  glibc
+  gtk3       # menu de dispositivos (clique direito)
+  libpulse   # PulseAudio ou PipeWire (pipewire-pulse)
+  libx11
+  libxext    # XShape
+  libxpm
+)
+makedepends=(git)
+source=("${pkgname}::git+https://github.com/polletfa/wmpulsemixer.git#tag=${pkgver}"
+        0001-reconnect-to-the-audio-server-and-real-volume-scroll.patch)
+sha256sums=('af63291774b11616d5682c53fc5f7a9356a57c56e67bd8b70a1c3b5c5580235d'
+            '2d5826cedafa34c822a1abd1cd726bee9a7b59a888986fe23881028e3ad951a2')
+
+prepare() {
+  cd "${pkgname}"
+  patch -Np1 -i "${srcdir}/0001-reconnect-to-the-audio-server-and-real-volume-scroll.patch"
+}
+
+build() {
+  cd "${pkgname}"
+  # CFLAGS/LDFLAGS do makepkg vêm pelo ambiente (o Makefile usa +=).
+  CFLAGS="${CFLAGS} ${CPPFLAGS}" make
+}
+
+check() {
+  cd "${pkgname}"
+  # O programa responde ao --version e ao --help sem abrir o display.
+  ./wmpulsemixer --version 2>&1 | grep -qx "wmpulsemixer version ${pkgver}"
+  ./wmpulsemixer --help 2>&1 | grep -q -- '-w .*WithdrawnState'
+}
+
+package() {
+  cd "${pkgname}"
+  make DESTDIR="${pkgdir}" PREFIX=/usr install
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  install -Dm644 CHANGELOG.md "${pkgdir}/usr/share/doc/${pkgname}/CHANGELOG.md"
+}

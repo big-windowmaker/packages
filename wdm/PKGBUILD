@@ -1,4 +1,6 @@
-# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+# Maintainer: Rafael Ruscher <rruscher@gmail.com>
+# Maintainer: Barnabé Di Kartola <barnabedikartola@gmail.com>
+# Big WindowMaker: https://github.com/big-windowmaker
 # Baseado no pacote do Debian (wdm 1.28-27, Axel Beckert e Agustín Martín
 # Domingo) e no do AUR (wdm 1.28-9, Brian Bidulock).
 

@@ -1,4 +1,6 @@
-# Maintainer: Bruno Goncalves <bigbruno@gmail.com>
+# Maintainer: Rafael Ruscher <rruscher@gmail.com>
+# Maintainer: Barnabé Di Kartola <barnabedikartola@gmail.com>
+# Contributor: Bruno Goncalves <bigbruno@gmail.com> (BigLinux, autor do biglinux-livecd)
 #
 # TEMPORÁRIO (Big WindowMaker): biglinux-livecd com o suporte à sessão live
 # do Window Maker (branch main de big-windowmaker/biglinux-livecd),

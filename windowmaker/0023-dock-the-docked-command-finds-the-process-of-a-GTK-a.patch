@@ -1,0 +1,80 @@
+From 83aeb2f79ba9019412c91208ffffe6b941ddddba Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 9 Nov 2026 02:36:10 -0300
+Subject: [PATCH 23/23] dock: the docked command finds the process of a GTK
+ application
+
+The icon's owner may be the client leader, which has no _NET_WM_PID (GTK):
+take a window of the application that has it. The program of Exec also
+matches the instance without a known executable. Found with
+gnome-calculator on X11, docked as "gnome-calculator" instead of
+"gtk-launch org.gnome.Calculator.desktop".
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/appcommand.c       |  2 +-
+ src/dock.c             | 13 ++++++++++---
+ test/appcommand_test.c |  5 +++++
+ 3 files changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/src/appcommand.c b/src/appcommand.c
+index 1a4a44ab..986a96f7 100644
+--- a/src/appcommand.c
++++ b/src/appcommand.c
+@@ -309,7 +309,7 @@ static int score_file(const char *path, const char *id, const char *wm_instance,
+ 		else if (strcmp(line, "StartupWMClass") == 0) {
+ 			if (same(v, wm_class) || same(v, wm_instance))
+ 				score = score > 6 ? score : 6;
+-		} else if (strcmp(line, "Exec") == 0 && exe) {
++		} else if (strcmp(line, "Exec") == 0) {
+ 			char *prog = exec_program(v);
+ 
+ 			if (prog && (same(prog, exe) || same(prog, wm_instance)))
+diff --git a/src/dock.c b/src/dock.c
+index fc9acc5a..ef00a329 100644
+--- a/src/dock.c
++++ b/src/dock.c
+@@ -2384,14 +2384,21 @@ int wDockReceiveDNDDrop(WScreen *scr, XEvent *event)
+  */
+ static char *dockedCommandFor(WAppIcon *icon)
+ {
+-	WWindow *wwin = icon->icon->owner;
++	WWindow *wwin = icon->icon->owner, *w;
+ 	char *made, *command = NULL;
++	int pid;
+ 
+ 	if (!wwin || wwin->flags.is_dockapp)
+ 		return NULL;
++	/* The owner may be the group leader, which has no _NET_WM_PID (GTK):
++	 * then a window of the application that has it. */
++	pid = wNETWMGetPidForWindow(wwin->client_win);
++	for (w = wwin->screen_ptr->focused_window; pid <= 0 && w; w = w->prev) {
++		if (w->main_window == wwin->main_window)
++			pid = wNETWMGetPidForWindow(w->client_win);
++	}
+ 	made = wAppLaunchCommand(icon->wm_instance ? icon->wm_instance : wwin->wm_instance,
+-	                         icon->wm_class ? icon->wm_class : wwin->wm_class,
+-	                         wNETWMGetPidForWindow(wwin->client_win));
++	                         icon->wm_class ? icon->wm_class : wwin->wm_class, pid);
+ 	if (made) {
+ 		command = wstrdup(made);
+ 		free(made);
+diff --git a/test/appcommand_test.c b/test/appcommand_test.c
+index ef209bd0..7cc5972b 100644
+--- a/test/appcommand_test.c
++++ b/test/appcommand_test.c
+@@ -98,6 +98,11 @@ int main(void)
+ 	s = wAppDesktopIdFor("x", "y", "biglinux-tts-x");
+ 	expect("Exec program", s, "tts.desktop");
+ 	free(s);
++	/* Without the executable (no _NET_WM_PID): the instance as the
++	 * program of Exec. */
++	s = wAppDesktopIdFor("biglinux-tts-x", "Other", NULL);
++	expect("Exec program = instance", s, "tts.desktop");
++	free(s);
+ 	/* Subdirectories: "kde4-okular.desktop". */
+ 	s = wAppDesktopIdFor("okular", "okular", "okular");
+ 	expect("subdirectory id", s, "kde4-okular.desktop");
+-- 
+2.56.0
+
