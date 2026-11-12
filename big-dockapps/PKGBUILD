@@ -1,4 +1,6 @@
-# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+# Maintainer: Rafael Ruscher <rruscher@gmail.com>
+# Maintainer: Barnabé Di Kartola <barnabedikartola@gmail.com>
+# Big WindowMaker: https://github.com/big-windowmaker
 # Partes baseadas nos PKGBUILDs do AUR de cada dockapp.
 
 # Pacote "split" que compila, de uma vez, os dockapps do conjunto curado do Big

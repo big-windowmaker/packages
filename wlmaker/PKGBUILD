@@ -1,4 +1,6 @@
-# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+# Maintainer: Rafael Ruscher <rruscher@gmail.com>
+# Maintainer: Barnabé Di Kartola <barnabedikartola@gmail.com>
+# Big WindowMaker: https://github.com/big-windowmaker
 # Baseado no PKGBUILD do AUR (wlmaker), de Adrian Perez de Castro.
 
 # Snapshot do `main` do upstream (desenvolvimento da 0.9), fixado no commit

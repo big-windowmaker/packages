@@ -1,4 +1,6 @@
-# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+# Maintainer: Rafael Ruscher <rruscher@gmail.com>
+# Maintainer: Barnabé Di Kartola <barnabedikartola@gmail.com>
+# Big WindowMaker: https://github.com/big-windowmaker
 #
 # wmpulsemixer: dockapp de volume do Window Maker (descendente do wmsmixer e
 # do wmmixer) para os servidores de áudio atuais. Fala com o servidor pelo
