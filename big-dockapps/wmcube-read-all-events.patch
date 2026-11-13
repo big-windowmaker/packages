@@ -1,0 +1,25 @@
+wmcube: reads every pending event, not one per frame
+
+The event loop ends with a "break" that leaves the while (XPending) loop
+after the first event, so wmcube handled one event per frame (10 ms plus
+the drawing). The dock-app asks for pointer motion: a mouse moving over
+it at 125-1000 Hz piles up motion events, and a click waited behind
+them. Measured in a nested wlmaker (X11 dock-app on XWayland), after 2 s
+of motion over the tile: the object changed 522-679 ms after the click,
+or not within 5 s at 500 Hz. With every pending event read: 105 ms at
+125, 500 and 1000 Hz (the measurement's floor).
+
+diff --git a/wmcube/wmcube/wmcube.c b/wmcube/wmcube/wmcube.c
+index 3d51247..7a4ebd4 100644
+--- a/wmcube/wmcube/wmcube.c
++++ b/wmcube/wmcube/wmcube.c
+@@ -384,7 +384,8 @@ int main(int argc, char **argv)
+ 							break;
+ 					}
+ 			}	
+-			break;
++			/* every pending event, not one per frame: the pointer motion
++			 * of a fast mouse piled up and a click waited for seconds */
+ 		}
+ 		usleep(screen_speed);
+ 	}
