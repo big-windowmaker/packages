@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r80.g7481afe
-	pkgrel = 35
+	pkgrel = 36
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -173,6 +173,7 @@ pkgbase = wlmaker
 	source = 0146-zones-pointer-control-command.patch
 	source = 0147-popups-XWayland-menus-and-xdg_popups-open-where-the-app-asked.patch
 	source = 0148-wlmeyes-The-dock-app-can-be-dragged-from-anywhere.patch
+	source = 0149-input-Adds-support-for-pointer-constraints-unstable-v1.patch
 	source = libbase-0001-subprocess-close-pipes.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
@@ -315,6 +316,7 @@ pkgbase = wlmaker
 	sha256sums = 5b9141f66360211f4e2a56bb8b4a29ab82195fd143a90453b4b7468f088c630a
 	sha256sums = c76724e5bfa65ddcb2af4a35f3002617da35afcd3e11a3efe2e763ba9e0d4512
 	sha256sums = 1a235066a147e4745b06342dc04d308414890ad286912bf78cf4d3cb68926add
+	sha256sums = bc489e428cf72b498ad4e89cc093817436d0682eec136c5c5d51dc9f824e590d
 	sha256sums = 64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb
 
 pkgname = wlmaker
