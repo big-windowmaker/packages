@@ -1,0 +1,37 @@
+# Maintainer: Big WindowMaker <https://github.com/big-windowmaker>
+# Based on the Arch Linux libxfce4ui PKGBUILD (Evangelos Foutras, Robin Candau,
+# Xavier Devlamynck). 4.21 development series: thunar-git needs >= 4.21.8.
+# Same soname (libxfce4ui-2.so.0) as the 4.20 it replaces.
+
+pkgname=libxfce4ui
+pkgver=4.21.9
+pkgrel=1
+pkgdesc="Widgets library for the Xfce desktop environment (4.21 series, for thunar-git)"
+arch=('x86_64')
+url="https://docs.xfce.org/xfce/libxfce4ui/start"
+license=('GPL-2.0-only' 'LGPL-2.0-or-later')
+depends=('libxfce4util' 'gtk3' 'xfconf' 'libsm' 'startup-notification'
+         'libgtop' 'libepoxy' 'hicolor-icon-theme' 'libgudev')
+makedepends=('git' 'meson' 'glib2-devel' 'gobject-introspection' 'vala' 'xfce4-dev-tools')
+source=("git+https://gitlab.xfce.org/xfce/libxfce4ui.git#commit=9e5b8a1efbd887821d451bb68d582bdeee2c5e7b") # tag libxfce4ui-4.21.9
+sha256sums=('SKIP')
+
+build() {
+  local meson_options=(
+    -D vala=enabled
+    -D introspection=true
+    -D x11=enabled
+    -D wayland=enabled
+    -D vendor-info='Big WindowMaker'
+  )
+  arch-meson $pkgname build "${meson_options[@]}"
+  meson compile -C build
+}
+
+check() {
+  meson test -C build --print-errorlogs
+}
+
+package() {
+  meson install -C build --destdir "$pkgdir"
+}

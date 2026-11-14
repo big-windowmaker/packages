@@ -41,6 +41,8 @@ integração do [big-wm](https://github.com/big-windowmaker/big-wm).
 | [`qtstep-kvantum/`](qtstep-kvantum/PKGBUILD) | `qtstep-kvantum` | `0.r23.36dc0d3-2` | [andbgr/QTStep](https://github.com/andbgr/QTStep): tema NeXTSTEP do Kvantum para os aplicativos Qt. |
 | [`retrothemes-firefox/`](retrothemes-firefox/PKGBUILD) | `retrothemes-firefox` | `0.r68.dfc4eea-2` | [matthewmx86/RetroThemesFirefox](https://github.com/matthewmx86/RetroThemesFirefox): temas retrô do Firefox, com um patch. |
 | [`wdm/`](wdm/PKGBUILD) | `wdm` | `1.28-14` | [raorn/wdm](https://github.com/raorn/wdm) (WINGs Display Manager), com 5 patches. |
+| [`libxfce4ui/`](libxfce4ui/PKGBUILD) | `libxfce4ui` | `4.21.9-1` | Tag `libxfce4ui-4.21.9` do [Xfce](https://gitlab.xfce.org/xfce/libxfce4ui) (série 4.21, de desenvolvimento), fixada no commit; meson. Mesmo soname (`libxfce4ui-2.so.0`) da 4.20 do Manjaro, que substitui. Existe porque o `thunar-git` pede `>= 4.21.8`. |
+| [`thunar-git/`](thunar-git/PKGBUILD) | `thunar-git` | `4.21.7+r139+g222d036c8-1` | `master` do [Thunar](https://gitlab.xfce.org/xfce/thunar) fixado no commit `222d036`, a partir do PKGBUILD do AUR (twa022). Gerenciador de arquivos padrão do Big WindowMaker: `provides`/`conflicts`/`replaces` `thunar`, então o Super+E, o `inode/directory` e os plugins (`thunar-archive-plugin`, `thunar-volman`...) continuam valendo. O CI compila o `libxfce4ui` deste repositório antes (`.ci-localdeps`). |
 
 ## Instalar os pacotes
 
