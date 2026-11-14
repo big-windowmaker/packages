@@ -196,7 +196,10 @@ Com `.ci-localdeps`, compile e instale antes o pacote listado. Para o
 
 ## Atualizar um pacote
 
-1. Edite o `PKGBUILD`: commit ou tag, `pkgver`, e `pkgrel=1`.
+1. Edite o `PKGBUILD`: commit ou tag e `pkgver`. Volte o `pkgrel` para 1
+   só quando o `pkgver` mudar; se ele continua igual (mudança só na receita,
+   ou um commit novo do `biglinux-livecd`, cujo `pkgver` é fixo), suba o
+   `pkgrel`, senão o pacote novo fica mais velho que o instalado.
 2. Regenere os checksums e a `.SRCINFO` dentro do contêiner, com
    [`ci/update-sums.sh`](ci/update-sums.sh). O `--userns=keep-id` mantém os
    arquivos com o seu usuário:
