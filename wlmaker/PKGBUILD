@@ -283,9 +283,17 @@
 #   0149  pointer-constraints-unstable-v1 (travar e confinar o ponteiro): o
 #         virt-manager e o spicy (spice-gtk) travam o ponteiro no clique e
 #         caíam (SIGSEGV) sem esse protocolo
+#   0150  XWayland: o "Propriedades..." da Steam aparece (superfície que
+#         chegou antes da associação é mapeada, como o wlroots 08a9f9f1);
+#         jogos ficam em tela cheia (a posição vai com o último tamanho
+#         enviado, não o antigo de um ConfigureNotify atrasado; tela cheia
+#         pedida antes de mapear é aplicada ao mapear)
+#   0151  XWayland: a saída primária do RandR é a nossa (a do Dock); sem
+#         ela, o Wine tomava a saída na origem e o jogo pedido em outro
+#         monitor abria no monitor errado
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=36
+pkgrel=38
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -465,6 +473,8 @@ _patches=(
   0147-popups-XWayland-menus-and-xdg_popups-open-where-the-app-asked.patch
   0148-wlmeyes-The-dock-app-can-be-dragged-from-anywhere.patch
   0149-input-Adds-support-for-pointer-constraints-unstable-v1.patch
+  0150-xwl-Steam-Properties-dialog-shows-X11-games-stay-fullscreen.patch
+  0151-xwl-XWayland-primary-output-follows-ours.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -615,6 +625,8 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'c76724e5bfa65ddcb2af4a35f3002617da35afcd3e11a3efe2e763ba9e0d4512'
             '1a235066a147e4745b06342dc04d308414890ad286912bf78cf4d3cb68926add'
             'bc489e428cf72b498ad4e89cc093817436d0682eec136c5c5d51dc9f824e590d'
+            'c0a476f1a04e7341adabebb5a905e66b57c9c95c758c5d95aa264c1a84da2a95'
+            'ab08f93427c509574f0aee24bc83c6c5a0dd72d79d21ff8cf7b3e320fb8f7aeb'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb')
 
 prepare() {
