@@ -1,0 +1,66 @@
+wmusic: lista de players pelo PlayerctlPlayerManager, sem consultar o D-Bus
+
+A lista de players era pedida uma vez por segundo com
+playerctl_list_players(), que pergunta aos dois barramentos (sessão e
+sistema), cada vez numa conexão nova (o barramento é pego e solto: sem
+outra referência o GLib fecha a conexão). Sem nenhum player, no OptiPlex
+760 (Core 2 Duo): 44 ticks de CPU por minuto no wmusic (~0,7 % de um
+núcleo), 77 trocas de contexto/s, e os dois dbus-broker acordando junto
+(~31/s o da sessão, ~29/s o do sistema).
+
+Um PlayerctlPlayerManager guarda a lista pelos sinais NameOwnerChanged
+dos barramentos; a leitura de cada segundo vira uma cópia da lista, sem
+mensagens. Sem barramento (sem gerenciador), fica o caminho antigo.
+
+A enviar para wmaker-dev@googlegroups.com.
+
+--- a/wmusic/src/wmusic.c
++++ b/wmusic/src/wmusic.c
+@@ -316,6 +316,29 @@
+ 	}
+ }
+ 
++/* The player names, kept by a PlayerctlPlayerManager from the buses'
++ * NameOwnerChanged signals. playerctl_list_players() asked both buses
++ * (session and system) every time, each time on a new connection: once a
++ * second, with no player at all, that was dozens of D-Bus messages and two
++ * reconnections, and the bus daemons woke up with it. Without a manager
++ * (no bus), the old way. Free the list with playerctl_player_name_free. */
++static GList *ListPlayers(GError **error)
++{
++	static PlayerctlPlayerManager *manager = NULL;
++	static Bool tried = False;
++	GList *names = NULL;
++
++	if (!tried) {
++		tried = True;
++		manager = playerctl_player_manager_new(NULL);
++	}
++	if (!manager)
++		return playerctl_list_players(error);
++	g_object_get(manager, "player-names", &names, NULL);
++	return g_list_copy_deep(names, (GCopyFunc)playerctl_player_name_copy,
++				NULL);
++}
++
+ int CurrentPlayerIndex(GList *players)
+ {
+ 	int i, n;
+@@ -350,7 +373,7 @@
+ 		int i, n;
+ 
+ 		error = NULL;
+-		players = playerctl_list_players(&error);
++		players = ListPlayers(&error);
+ 		if (error)
+ 			DAWarning("%s", error->message);
+ 		g_clear_error(&error);
+@@ -649,7 +672,7 @@
+ 	last_list = now;
+ 	player_exited = 0;
+ 
+-	players = playerctl_list_players(&error);
++	players = ListPlayers(&error);
+ 	if (error)
+ 		DAWarning("%s", error->message);
+ 	g_clear_error(&error);
