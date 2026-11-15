@@ -291,9 +291,16 @@
 #   0151  XWayland: a saída primária do RandR é a nossa (a do Dock); sem
 #         ela, o Wine tomava a saída na origem e o jogo pedido em outro
 #         monitor abria no monitor errado
+#   0152  janelas em tela cheia abaixo da camada overlay do layer-shell
+#         (como manda o protocolo): o controle na tela e o teclado do
+#         big-keyboard, a lista de janelas e o seletor de zonas ficam
+#         visíveis sobre um jogo em tela cheia
+#   0153  painéis layer-shell comuns mantêm o ponteiro enquanto um botão está
+#         apertado, também fora deles: o teclado na tela é arrastado pelo
+#         título (antes o movimento e o soltar se perdiam ao sair dele)
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=38
+pkgrel=39
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -475,6 +482,8 @@ _patches=(
   0149-input-Adds-support-for-pointer-constraints-unstable-v1.patch
   0150-xwl-Steam-Properties-dialog-shows-X11-games-stay-fullscreen.patch
   0151-xwl-XWayland-primary-output-follows-ours.patch
+  0152-toolkit-Stacks-fullscreen-windows-below-the-overlay-layer.patch
+  0153-layer_panel-Plain-panels-keep-the-pointer-while-a-button-is-held.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -627,6 +636,8 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'bc489e428cf72b498ad4e89cc093817436d0682eec136c5c5d51dc9f824e590d'
             'c0a476f1a04e7341adabebb5a905e66b57c9c95c758c5d95aa264c1a84da2a95'
             'ab08f93427c509574f0aee24bc83c6c5a0dd72d79d21ff8cf7b3e320fb8f7aeb'
+            '6a6c7f4c25c4ab4a44db0b20852659f01d50af07b08615c9d81f1d9da69b36ef'
+            'aaabe8d208251cb4b2e324f3ce6264bae7daeedf1b2e1b01879eb1f186a7a760'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb')
 
 prepare() {
