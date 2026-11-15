@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r80.g7481afe
-	pkgrel = 39
+	pkgrel = 40
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -178,6 +178,7 @@ pkgbase = wlmaker
 	source = 0151-xwl-XWayland-primary-output-follows-ours.patch
 	source = 0152-toolkit-Stacks-fullscreen-windows-below-the-overlay-layer.patch
 	source = 0153-layer_panel-Plain-panels-keep-the-pointer-while-a-button-is-held.patch
+	source = 0154-xdg_toplevel-Fullscreen-asked-for-before-mapping-is-applied.patch
 	source = libbase-0001-subprocess-close-pipes.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
@@ -325,6 +326,7 @@ pkgbase = wlmaker
 	sha256sums = ab08f93427c509574f0aee24bc83c6c5a0dd72d79d21ff8cf7b3e320fb8f7aeb
 	sha256sums = 6a6c7f4c25c4ab4a44db0b20852659f01d50af07b08615c9d81f1d9da69b36ef
 	sha256sums = aaabe8d208251cb4b2e324f3ce6264bae7daeedf1b2e1b01879eb1f186a7a760
+	sha256sums = 44a612e01ecf48f20c414d2e2b87563331cd3e2b77239fbf5f9e0e56dca9d16c
 	sha256sums = 64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb
 
 pkgname = wlmaker

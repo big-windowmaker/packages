@@ -298,9 +298,12 @@
 #   0153  painéis layer-shell comuns mantêm o ponteiro enquanto um botão está
 #         apertado, também fora deles: o teclado na tela é arrastado pelo
 #         título (antes o movimento e o soltar se perdiam ao sair dele)
+#   0154  tela cheia pedida antes de mapear por um cliente Wayland nativo
+#         (mpv --fs, jogos SDL) é aplicada ao mapear (antes, era recusada
+#         sem saída e a janela ficava com moldura), como o 0150 no XWayland
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=39
+pkgrel=40
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -484,6 +487,7 @@ _patches=(
   0151-xwl-XWayland-primary-output-follows-ours.patch
   0152-toolkit-Stacks-fullscreen-windows-below-the-overlay-layer.patch
   0153-layer_panel-Plain-panels-keep-the-pointer-while-a-button-is-held.patch
+  0154-xdg_toplevel-Fullscreen-asked-for-before-mapping-is-applied.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -638,6 +642,7 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'ab08f93427c509574f0aee24bc83c6c5a0dd72d79d21ff8cf7b3e320fb8f7aeb'
             '6a6c7f4c25c4ab4a44db0b20852659f01d50af07b08615c9d81f1d9da69b36ef'
             'aaabe8d208251cb4b2e324f3ce6264bae7daeedf1b2e1b01879eb1f186a7a760'
+            '44a612e01ecf48f20c414d2e2b87563331cd3e2b77239fbf5f9e0e56dca9d16c'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb')
 
 prepare() {
