@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 16 Nov 2026 01:40:00 -0300
+Subject: [PATCH] wdm: login automático na primeira tela (wdmAutoLogin)
+
+Com DisplayManager*wdmAutoLogin: true, a primeira tela de login de cada
+display desde o boot entra direto como wdmDefaultUser, com a senha
+wdmDefaultPasswd, pelo mesmo Verify (PAM) de um login digitado, na
+wdmDefaultSession, sem mostrar a janela. Uma marca em wdmRunDir (tmpfs,
+vazio no boot) faz isso uma vez só: depois de sair da sessão, ou se ela
+cair, a tela aparece, e uma sessão que falha não entra em loop. Se a
+autenticação falhar, a tela aparece como sempre.
+
+Para a sessão live da ISO (usuário e senha conhecidos); o padrão é false.
+---
+ src/wdm/Greet.c    | 57 ++++++++++++++++++++++++++++++++++++++++++++++
+ src/wdm/resource.c |  3 +++
+ 2 files changed, 60 insertions(+)
+
+diff --git a/src/wdm/Greet.c b/src/wdm/Greet.c
+index efbed5e..aa6a851 100644
+--- a/src/wdm/Greet.c
++++ b/src/wdm/Greet.c
+@@ -117,6 +117,7 @@ from the X Consortium.
+ #include <sys/param.h>
+ #endif
+ #include <limits.h>
++#include <sys/stat.h>
+ 
+ #include <wdmlib.h>
+ 
+@@ -135,6 +136,8 @@ extern int   wdmRoot;
+ extern int   wdmVerify;
+ extern int   wdmAnimations;
+ extern int   wdmUserList;
++extern int   wdmAutoLogin;
++extern char *wdmRunDir;
+ extern char *wdmLocale;
+ extern char *wdmLoginConfig;
+ extern char *wdmCursorTheme;
+@@ -438,6 +441,48 @@ static int Greet (struct display *d, struct greet_info *greet)
+     return code;
+ }
+ 
++/*
++ * wdmAutoLogin: the first greeting on a display since boot logs
++ * wdmDefaultUser in with wdmDefaultPasswd, through Verify (PAM) as a typed
++ * login would, in the default session, without the login window (the live
++ * session of a distribution). A mark in wdmRunDir (a tmpfs, emptied on
++ * boot) makes it happen once: after a logout or a crashed session the
++ * window shows, so a failing session cannot loop. Returns True when the
++ * user was verified.
++ */
++static int AutoLogin (struct display *d, struct greet_info *greet,
++                      struct verify_info *verify)
++{
++    char mark[PATH_MAX];
++    int fd;
++
++    if (!wdmAutoLogin || !wdmDefaultUser || !*wdmDefaultUser)
++        return False;
++    if (!wdmRunDir || !*wdmRunDir)
++        return False;
++    if (mkdir (wdmRunDir, 0755) != 0 && errno != EEXIST)
++        return False;
++    snprintf (mark, sizeof (mark), "%s/autologin-%s", wdmRunDir, d->name);
++    fd = open (mark, O_WRONLY | O_CREAT | O_EXCL, 0644);
++    if (fd < 0)
++        return False;           /* done before (or cannot be marked) */
++    close (fd);
++
++    snprintf (name, sizeof (name), "%s", wdmDefaultUser);
++    snprintf (password, sizeof (password), "%s",
++              wdmDefaultPasswd ? wdmDefaultPasswd : "");
++    greet->name = name;
++    greet->password = password;
++    greet->string = NULL;       /* wdmDefaultSession (verify.c) */
++    if (Verify (d, greet, verify)) {
++        WDMInfo ("autologin of %s on %s\n", name, d->name);
++        return True;
++    }
++    WDMError ("autologin of %s on %s failed\n", name, d->name);
++    memset (password, 0, CREDENTIAL_LEN);
++    return False;
++}
++
+ /**** This is the entry point from session.c ****/
+ 
+ greet_user_rtn GreetUser(struct display *d, Display **dpy, struct verify_info
+@@ -461,6 +506,18 @@ greet_user_rtn GreetUser(struct display *d, Display **dpy, struct verify_info
+         exit (RESERVER_DISPLAY);
+     }
+ 
++    if (AutoLogin (d, greet, verify)) {
++        memset (password, 0, CREDENTIAL_LEN);
++        DeleteXloginResources (d, *dpy);
++        if (source (verify->systemEnviron, d->startup) != 0)
++        {
++            WDMDebug("Startup program %s exited with non-zero status\n",
++                    d->startup);
++            SessionExit (d, OBEYSESS_DISPLAY, FALSE);
++        }
++        return Greet_Success;
++    }
++
+     pid = InitGreet(d); /* fork and exec the external program */
+ 
+     for (;;) {
+diff --git a/src/wdm/resource.c b/src/wdm/resource.c
+index 2c796b5..4b7d1f3 100644
+--- a/src/wdm/resource.c
++++ b/src/wdm/resource.c
+@@ -105,6 +105,7 @@ char	*wdmDefaultSession;	/* session preselected in wdmLogin ("big-wm") */
+ char	*wdmSessionStateDir;	/* last session of each user */
+ char	*wdmRunDir;		/* runtime state (failed session notices) */
+ int_resource	wdmUserList;	/* wdmLogin shows a list of the users */
++int_resource	wdmAutoLogin;	/* first greeting logs wdmDefaultUser in */
+ 
+ # define DM_STRING	0
+ # define DM_INT		1
+@@ -417,6 +418,8 @@ struct dmResources wdmResources[] = {
+ 				"/run/wdm"} ,
+ { "wdmUserList",	"WdmUserList",	DM_BOOL,	&wdmUserList.c,
+ 				"true"} ,
++{ "wdmAutoLogin",	"WdmAutoLogin",	DM_BOOL,	&wdmAutoLogin.c,
++				"false"} ,
+ };
+ 
+ # define NUM_WDM_RESOURCES	(sizeof wdmResources/\
+-- 
+2.56.0
+

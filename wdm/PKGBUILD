@@ -32,6 +32,9 @@
 #   0005  lista de usuários (pop-up com "Nome (login)" das contas humanas,
 #         último usuário pré-selecionado, setas/Home/End/primeiras letras;
 #         "Outro..." abre o campo de texto para LDAP e contas ocultas).
+#   0006  login automático na primeira tela desde o boot (wdmAutoLogin, com
+#         wdmDefaultUser e wdmDefaultPasswd, pelo PAM como um login
+#         digitado); depois de sair, a tela aparece. Usado na sessão live.
 # A configuração (wdm-config, Xservers, Xsession, Wsession, PAM, unidade do
 # systemd) fica neste diretório, fora dos patches.
 #
@@ -41,7 +44,7 @@ pkgname=wdm
 pkgver=1.28
 _debrel=27
 _snapshot=20230829T151102Z
-pkgrel=14
+pkgrel=15
 pkgdesc='WINGs Display Manager: login screen with the NeXT look, X11 and Wayland sessions'
 arch=(x86_64)
 url='https://github.com/raorn/wdm'
@@ -88,6 +91,7 @@ source=(
   0003-wdmLogin-session-selector-keyboard-pt_BR.patch
   0004-pam-messages-faillock-capslock.patch
   0005-wdmLogin-user-list.patch
+  0006-wdm-autologin-first-greeting.patch
   wdm-config
   wdmLogin-config
   Xservers
@@ -110,7 +114,8 @@ sha256sums=('dbd4a1fe635592bda8ff748f6c071ba29141c7ea41c80477a64bf672c5d072b7'
             '6c94049ef09823996c44588e4bf7865332bb6071e3315fd5b9792b7837943ac1'
             '9a963fc742d4d6d8889cc746e128783be9012b725c0bd9cf6a9fda531b9bee44'
             '97569ffba2864e8e7c74173181f27ed0a8f10a15269c6f550691025381839245'
-            '38f14ce0f3aa79352781b988bc8956cc317fc638cce468db7402191de4e8a5a3'
+            '7e7f4e54a10722f38c85013eb4aac48fc391dd3105bd7d4d5923196dbb885fa9'
+            '4ce62e85e6773d33b7604e18fa4fb6da9acd33d66143e13544d8196f1f48eede'
             '5894cdcf5c6149f79c3f4833533a152371a9ecb0acec9de7b24f67e0a57779fb'
             '2307e89b459169f00a7ef000de7bf4e39d8124ca060edaadcffa552f8fccabee'
             'ea0b27c20519b8087e5a331d8b76f4a7042bdc8171b1ac26fb9cbf3001822311'
