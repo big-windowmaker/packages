@@ -36,6 +36,10 @@ DisplayManager*wdmAnimations:	true
 ! "Outro...", abre o campo de texto (LDAP, contas ocultas). false = só o
 ! campo de texto.
 DisplayManager*wdmUserList:	true
+! Login automático na primeira tela desde o boot (sessão live): entra como
+! wdmDefaultUser com a senha wdmDefaultPasswd, pelo PAM, na
+! wdmDefaultSession; depois de sair da sessão, a tela aparece.
+DisplayManager*wdmAutoLogin:	false
 ! Reiniciar e desligar pela tela de login, sem senha (como no LightDM).
 DisplayManager*wdmReboot:	/usr/bin/systemctl reboot
 DisplayManager*wdmHalt:		/usr/bin/systemctl poweroff
