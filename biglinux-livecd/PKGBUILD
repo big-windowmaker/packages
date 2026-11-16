@@ -10,7 +10,7 @@
 
 pkgname=biglinux-livecd
 pkgver=26.10.26
-pkgrel=15
+pkgrel=16
 pkgdesc="BigLinux live-session setup and Calamares installer integration"
 arch=('any')
 url="https://github.com/biglinux/biglinux-livecd"
@@ -47,7 +47,7 @@ optdepends=(
     'qt6-multimedia: sound effects of the NeuroDefender game in the bigwindowmaker installer'
 )
 makedepends=('git')
-_commit=d69f82e08f9fd81046768eff42f1ff600912f515
+_commit=3aa4b72e093e4e123317d556086d083b08907795
 source=("biglinux-livecd::git+https://github.com/big-windowmaker/biglinux-livecd.git#commit=${_commit}")
 sha256sums=('2571f06d44d69d99909141f412095d8fab1790263ecb5e5ad31998f8733f4f2b')
 install="${pkgname}.install"
