@@ -49,7 +49,7 @@ optdepends=(
 makedepends=('git')
 _commit=3aa4b72e093e4e123317d556086d083b08907795
 source=("biglinux-livecd::git+https://github.com/big-windowmaker/biglinux-livecd.git#commit=${_commit}")
-sha256sums=('2571f06d44d69d99909141f412095d8fab1790263ecb5e5ad31998f8733f4f2b')
+sha256sums=('608f71033d412637b4ed5007938caf1fb541cd6fd6a45055e77c9de1bc30d247')
 install="${pkgname}.install"
 
 package() {
