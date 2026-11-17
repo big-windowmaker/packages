@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r80.g7481afe
-	pkgrel = 43
+	pkgrel = 44
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -182,6 +182,8 @@ pkgbase = wlmaker
 	source = 0155-xwl-Dissociates-when-the-wlr_surface-is-destroyed-before-its-scene-trees.patch
 	source = 0156-xwl-A-press-on-an-X11-surface-keeps-the-pointer-until-all-buttons-are-up.patch
 	source = 0157-layer-Panels-without-destroy-move-to-an-output-still-in-the-layout.patch
+	source = 0158-toolkit-A-press-keeps-the-pointer-until-all-buttons-are-up.patch
+	source = 0159-server-Ignores-activation-requests-without-user-input.patch
 	source = libbase-0001-subprocess-close-pipes.patch
 	sha256sums = de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9
 	sha256sums = 6507fdb399cd3b46d95f8e8cf8988bc4a5aa7c67a8013f74d5a8d1ea99e96d91
@@ -333,6 +335,8 @@ pkgbase = wlmaker
 	sha256sums = 95152daa488e0fd22c57a662ecf7c5c5c4053b6587f8d2b1036fd31098d69401
 	sha256sums = 96c5832e13a2778f188df992fcf602c6beff21381fbc57914146aa10e343c123
 	sha256sums = a48991703463ddcaf1750857ee3c576ea1c0356004f04b17340c543f7418dfdc
+	sha256sums = 272e6f0e4e58b8585cb636d6879addbb9c2d1d40a7ef12a7675aa385515687ed
+	sha256sums = 4f9185454fd25e253f5469f0d155766108c0e6b37b2264f876dadf914102f63b
 	sha256sums = 64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb
 
 pkgname = wlmaker

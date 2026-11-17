@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 17 Nov 2026 04:02:20 -0300
+Subject: [PATCH 2/2] server: Ignores activation requests without user input.
+
+Any xdg-activation token was accepted, so an application presenting its
+window on its own (eg. when a message arrives, together with its
+notification) took the keyboard from the window in use, mid-word, and
+closed its open menu. Only tokens with a seat are accepted now: wlroots
+checked at commit that the serial was given to the client and that the
+requesting surface had the focus (a click on a notification's action, on
+a launcher). Other requests are logged and ignored.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/server.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/src/server.c b/src/server.c
+index 996bcda..e3793e1 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -1104,7 +1104,13 @@ void handle_request_set_primary_selection(
+ /**
+  * Handles `request_activate` of `wlr_xdg_activation_v1`: Activates & raises.
+  *
+- * Any valid token is accepted, ie. there is no focus stealing prevention.
++ * Only a token that stems from user input is accepted: wlroots then checked
++ * that the serial of the seat was given to the client, and that the surface
++ * asking for the token had the focus (eg. the click on a notification's
++ * action, or on a launcher). A token without a seat is an application
++ * presenting itself on its own (a message arrived): That would take the
++ * keyboard from the window in use, mid-word, and close its open menu. Such a
++ * request is ignored; the window stays where it is.
+  * Windows that are not on the current workspace are left untouched.
+  *
+  * @param listener_ptr
+@@ -1126,6 +1132,12 @@ void _wlmaker_server_handle_xdg_activation_request_activate(
+         event_ptr->surface);
+     if (NULL == window_ptr) return;
+ 
++    if (NULL == event_ptr->token || NULL == event_ptr->token->seat) {
++        bs_log(BS_INFO, "Activation request for window %p without user "
++               "input, ignored (focus stealing prevention).", window_ptr);
++        return;
++    }
++
+     wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(window_ptr);
+     if (NULL == workspace_ptr) return;
+     if (workspace_ptr != wlmtk_desktop_get_current_workspace(
+-- 
+2.56.0
+
