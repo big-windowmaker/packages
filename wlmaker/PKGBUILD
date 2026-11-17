@@ -315,9 +315,20 @@
 #         gavetas, as zonas, a lista de tarefas e os overlays X11 vão para um
 #         output que continua no layout, como o Clip; antes a camada os
 #         destruía sem destroy (SIGSEGV em _wlmtk_layer_output_destroy)
+#   0158  grab implícito também nas superfícies Wayland: com um botão
+#         apertado, o ponteiro fica com a superfície que recebeu o clique
+#         até soltar todos os botões; antes, sair dela (Clip, área de
+#         trabalho, uma notificação que aparecia embaixo) mandava `leave` e o
+#         soltar ia para outro lugar: o arraste do Inkscape se perdia, o GTK
+#         achava o botão ainda apertado (a roda só voltava após outro clique)
+#         e o menu aberto no clique ficava preso
+#   0159  pedidos de ativação (xdg-activation) sem entrada do usuário são
+#         ignorados: antes, um aplicativo que se apresentava sozinho ao
+#         chegar uma mensagem tirava o teclado da janela em uso no meio da
+#         digitação e fechava o menu aberto
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=43
+pkgrel=44
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -505,6 +516,8 @@ _patches=(
   0155-xwl-Dissociates-when-the-wlr_surface-is-destroyed-before-its-scene-trees.patch
   0156-xwl-A-press-on-an-X11-surface-keeps-the-pointer-until-all-buttons-are-up.patch
   0157-layer-Panels-without-destroy-move-to-an-output-still-in-the-layout.patch
+  0158-toolkit-A-press-keeps-the-pointer-until-all-buttons-are-up.patch
+  0159-server-Ignores-activation-requests-without-user-input.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -663,6 +676,8 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             '95152daa488e0fd22c57a662ecf7c5c5c4053b6587f8d2b1036fd31098d69401'
             '96c5832e13a2778f188df992fcf602c6beff21381fbc57914146aa10e343c123'
             'a48991703463ddcaf1750857ee3c576ea1c0356004f04b17340c543f7418dfdc'
+            '272e6f0e4e58b8585cb636d6879addbb9c2d1d40a7ef12a7675aa385515687ed'
+            '00e85d2ea0e89e602aec9ae1e04895a85cb9599b6bb53012ea921f835ffc78f4'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb')
 
 prepare() {
