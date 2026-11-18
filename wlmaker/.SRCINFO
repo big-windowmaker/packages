@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r96.g5576886
-	pkgrel = 1
+	pkgrel = 2
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -189,6 +189,7 @@ pkgbase = wlmaker
 	source = 0162-Fixes-compiler-warnings.patch
 	source = 0163-wlmaker-Blocks-SIGCHLD-and-SIGHUP-in-all-threads.patch
 	source = 0164-wlmaker-Autostarted-programs-are-monitored.patch
+	source = 0165-wlmaker-Ends-on-SIGTERM-and-SIGINT-as-the-Quit-action.patch
 	source = libbase-0001-subprocess-close-pipes.patch
 	source = libbase-0002-subprocess-test-initializes-outputs.patch
 	sha256sums = 7b05e9cf7d18e1e32ea915ba1c8f171069d61c5adc2f9f295c28bc051d5f201a
@@ -348,6 +349,7 @@ pkgbase = wlmaker
 	sha256sums = 98b61e0d786160f840bb33c4b323455b03718af894be16958d8a084a69f25412
 	sha256sums = fe4a9ddbc9ad70a6f9b3d356328720ebb86818d63e540e93d1c9fb2fc59bc48c
 	sha256sums = f4f091c6ecd3a210080438e9527967136f1109b61bc3dcf0b23510356abf3f1e
+	sha256sums = 2a8fcc7404b34feedec757f57bfe4ae078b798894d53e984bb5910e7e025cb14
 	sha256sums = 64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb
 	sha256sums = 14af6e01a2fd6f593e815d917a2185da0337d1e82070597abdb3938f8890b698
 
