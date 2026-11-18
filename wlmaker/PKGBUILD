@@ -326,9 +326,15 @@
 #         ignorados: antes, um aplicativo que se apresentava sozinho ao
 #         chegar uma mensagem tirava o teclado da janela em uso no meio da
 #         digitação e fechava o menu aberto
+#   0160  o limite de arquivos abertos sobe do flexível (1024) ao rígido no
+#         início, como no sway e no labwc, e volta ao original nos programas
+#         que o wlmaker abre (quando ainda podem abrir arquivos com ele):
+#         com 1024, sob carga, o Xwayland que caiu não
+#         voltava mais (o wlroots não conseguia vigiar os sockets X11, sem
+#         avisar) e os programas X11 travavam ao conectar
 pkgname=wlmaker
 pkgver=0.8.r80.g7481afe
-pkgrel=44
+pkgrel=45
 epoch=1
 _commit=7481afe45a8beb8bf5c181fdb4034c00f6eba760
 _libbase_commit=1a58652fd88fcca5d9f33d8d078434f2dc30c30b
@@ -518,6 +524,7 @@ _patches=(
   0157-layer-Panels-without-destroy-move-to-an-output-still-in-the-layout.patch
   0158-toolkit-A-press-keeps-the-pointer-until-all-buttons-are-up.patch
   0159-server-Ignores-activation-requests-without-user-input.patch
+  0160-wlmaker-Raises-the-limit-of-open-files.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -678,6 +685,7 @@ sha256sums=('de0e7394708d42246c28a3b7f4fd4774a37641788bd46292c73c3e463053d4f9'
             'a48991703463ddcaf1750857ee3c576ea1c0356004f04b17340c543f7418dfdc'
             '272e6f0e4e58b8585cb636d6879addbb9c2d1d40a7ef12a7675aa385515687ed'
             '00e85d2ea0e89e602aec9ae1e04895a85cb9599b6bb53012ea921f835ffc78f4'
+            'f0520e2aa2ec5cb992a0dc8cc84944d62cb44c4291ad9dece189492a4c5af5a1'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb')
 
 prepare() {
