@@ -1,4 +1,4 @@
-From ff70ec7d7067e633ad8ced3eed4cefdbcb55da14 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 16:27:11 -0300
 Subject: [PATCH] dockapps: Supports several placements, moving dock-apps
@@ -600,5 +600,5 @@ index 115a1ce..9584cca 100644
  extern const bs_test_set_t wlmaker_dockapps_test_set;
  
 -- 
-2.55.0
+2.56.0
 

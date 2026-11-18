@@ -1,7 +1,7 @@
-From 25a0635c72bf73090c009491588722cdc63adb9a Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Wed, 4 Nov 2026 16:58:36 -0300
-Subject: [PATCH 1/2] zones: Window zones and tiling (wmake-zones) in the
+Subject: [PATCH] zones: Window zones and tiling (wmake-zones) in the
  compositor
 
 While a window is dragged, the zones of the layout of its output are
@@ -92,10 +92,10 @@ index c684ffa..ef1a1c9 100644
  void wlmtk_window_position_changed(wlmtk_window_t *window_ptr);
  
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 3584fd1..6a2c86c 100644
+index 1472754..2b6d64c 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -20,6 +20,8 @@ pkg_check_modules(WLROOTS REQUIRED IMPORTED_TARGET wlroots-0.20>=0.20)
+@@ -33,6 +33,8 @@ endif()
  pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb>=1.15)
  # XWayland considered optional.
  pkg_check_modules(XWAYLAND xwayland>=22.1.9)
@@ -104,23 +104,23 @@ index 3584fd1..6a2c86c 100644
  add_subdirectory(backend)
  add_subdirectory(dock)
  add_subdirectory(input)
-@@ -53,6 +55,7 @@ set(public_header_files
+@@ -66,6 +68,7 @@ set(public_header_files
    root_menu.h
    server.h
    task_list.h
 +  zones.h
    tile_drag.h
-   toplevel_tracker.h
    tl_menu.h
-@@ -90,6 +93,7 @@ target_sources(wlmaker_lib PRIVATE
+   toplevel_tracker.h
+@@ -104,6 +107,7 @@ target_sources(wlmaker_lib PRIVATE
    root_menu.c
    server.c
    task_list.c
 +  zones.c
    tile_drag.c
-   toplevel_tracker.c
    tl_menu.c
-@@ -160,6 +164,11 @@ if(wmmenugen_executable)
+   toplevel_tracker.c
+@@ -175,6 +179,11 @@ if(wmmenugen_executable)
    target_compile_definitions(
      wlmaker_lib PRIVATE "WLMAKER_WMMENUGEN_PATH=\"${wmmenugen_executable}\"")
  endif()
@@ -187,10 +187,10 @@ index 9f43243..2923f72 100644
  
  extern const char *wlmaker_action_config_dict_key;
 diff --git a/src/server.h b/src/server.h
-index 2177d9c..c6ffebb 100644
+index 033d95d..3da8eb4 100644
 --- a/src/server.h
 +++ b/src/server.h
-@@ -172,6 +172,9 @@ struct _wlmaker_server_t {
+@@ -174,6 +174,9 @@ struct _wlmaker_server_t {
      /** Whether the task list is currently shown. */
      bool                      task_list_enabled;
      /** Signal: When the task list is enabled. (to be shown) */
@@ -201,10 +201,10 @@ index 2177d9c..c6ffebb 100644
      /** Signal: When the task list is disabled. (to be hidden) */
      struct wl_signal          task_list_disabled_event;
 diff --git a/src/toolkit/desktop.c b/src/toolkit/desktop.c
-index 341ef14..afc2089 100644
+index d959477..82bd945 100644
 --- a/src/toolkit/desktop.c
 +++ b/src/toolkit/desktop.c
-@@ -250,6 +250,9 @@ wlmtk_desktop_t *wlmtk_desktop_create(
+@@ -256,6 +256,9 @@ wlmtk_desktop_t *wlmtk_desktop_create(
      wl_signal_init(&desktop_ptr->events.unlock_event);
      wl_signal_init(&desktop_ptr->events.window_mapped);
      wl_signal_init(&desktop_ptr->events.window_unmapped);
@@ -215,7 +215,7 @@ index 341ef14..afc2089 100644
  }
  
 diff --git a/src/toolkit/window.c b/src/toolkit/window.c
-index 04fd8e9..47720d4 100644
+index dbf86e5..1de0a6e 100644
 --- a/src/toolkit/window.c
 +++ b/src/toolkit/window.c
 @@ -387,6 +387,39 @@ struct wlr_box wlmtk_window_get_bounding_box(wlmtk_window_t *window_ptr)
@@ -259,7 +259,7 @@ index 04fd8e9..47720d4 100644
  void wlmtk_window_position_changed(wlmtk_window_t *window_ptr)
  {
 diff --git a/src/toolkit/workspace.c b/src/toolkit/workspace.c
-index 7b1b565..9e60aff 100644
+index 75e1f9c..3762290 100644
 --- a/src/toolkit/workspace.c
 +++ b/src/toolkit/workspace.c
 @@ -93,6 +93,8 @@ struct _wlmtk_workspace_t {
@@ -271,7 +271,7 @@ index 7b1b565..9e60aff 100644
  
      /** Top left X coordinate of workspace. */
      int                       x1;
-@@ -155,6 +157,9 @@ static struct wlr_box _wlmtk_workspace_usable_area(
+@@ -173,6 +175,9 @@ static struct wlr_box _wlmtk_workspace_usable_area(
      wlmtk_workspace_t *workspace_ptr,
      struct wlr_output *wlr_output_ptr);
  
@@ -281,7 +281,7 @@ index 7b1b565..9e60aff 100644
  static bool pfsm_move_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
  static bool pfsm_move_motion(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
  static bool pfsm_resize_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
-@@ -1148,6 +1153,26 @@ void _wlmtk_workspace_place_window(wlmtk_workspace_t *workspace_ptr,
+@@ -1241,6 +1246,26 @@ void _wlmtk_workspace_place_window(wlmtk_workspace_t *workspace_ptr,
      wlmtk_window_position_changed(window_ptr);
  }
  
@@ -308,7 +308,7 @@ index 7b1b565..9e60aff 100644
  /* ------------------------------------------------------------------------- */
  /** Initiates a move. */
  bool pfsm_move_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr)
-@@ -1166,6 +1191,9 @@ bool pfsm_move_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr)
+@@ -1259,6 +1284,9 @@ bool pfsm_move_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr)
          &workspace_ptr->initial_x,
          &workspace_ptr->initial_y);
  
@@ -317,8 +317,8 @@ index 7b1b565..9e60aff 100644
 +
      // TODO(kaeser@gubbe.ch): When in move mode, set (and keep) a corresponding
      // cursor image.
-     return true;
-@@ -1191,6 +1219,7 @@ bool pfsm_move_motion(wlmtk_fsm_t *fsm_ptr, __UNUSED__ void *ud_ptr)
+ 
+@@ -1289,6 +1317,7 @@ bool pfsm_move_motion(wlmtk_fsm_t *fsm_ptr, __UNUSED__ void *ud_ptr)
          workspace_ptr->initial_x + rel_x,
          workspace_ptr->initial_y + rel_y);
  
@@ -326,7 +326,7 @@ index 7b1b565..9e60aff 100644
      return true;
  }
  
-@@ -1276,6 +1305,10 @@ bool pfsm_reset(wlmtk_fsm_t *fsm_ptr, __UNUSED__ void *ud_ptr)
+@@ -1378,6 +1407,10 @@ bool pfsm_reset(wlmtk_fsm_t *fsm_ptr, __UNUSED__ void *ud_ptr)
  
      wlmtk_window_set_resize_edges(workspace_ptr->grabbed_window_ptr, 0);
  
@@ -335,21 +335,21 @@ index 7b1b565..9e60aff 100644
 +        workspace_ptr->moving = false;
 +    }
      workspace_ptr->grabbed_window_ptr = NULL;
-     return true;
- }
+     wlmtk_element_t *e = wlmtk_workspace_window_element(workspace_ptr);
+     if (NULL != e->parent_container_ptr) {
 diff --git a/src/wlmaker.c b/src/wlmaker.c
-index 91d3a3b..96bd4a3 100644
+index c96ddf4..5fa1081 100644
 --- a/src/wlmaker.c
 +++ b/src/wlmaker.c
-@@ -45,6 +45,7 @@
- #include "config.h"
+@@ -46,6 +46,7 @@
  #include "root_menu.h"
  #include "server.h"
+ #include "workspace_manager.h"
 +#include "zones.h"
  #include "task_list.h"
  #include "toolkit/toolkit.h"
  #include "util/backtrace.h"
-@@ -225,6 +226,7 @@ bool create_workspaces(
+@@ -169,6 +170,7 @@ bool start_subprocess(const char *cmdline_ptr)
  static int _wlmaker_handle_sighup(__UNUSED__ int signal_number, void *data_ptr)
  {
      wlmaker_server_reload(data_ptr);
@@ -357,7 +357,7 @@ index 91d3a3b..96bd4a3 100644
      return 0;
  }
  
-@@ -384,6 +386,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+@@ -330,6 +332,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
  
          clip_ptr = wlmaker_clip_create(
              server_ptr, state_dict_ptr, &style);
@@ -365,7 +365,7 @@ index 91d3a3b..96bd4a3 100644
          task_list_ptr = wlmaker_task_list_create(
              server_ptr, &style.task_list);
          if (NULL == clip_ptr || NULL == task_list_ptr) {
-@@ -397,6 +400,10 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+@@ -343,6 +346,10 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
          rv = EXIT_FAILURE;
      }
  

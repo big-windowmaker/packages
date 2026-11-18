@@ -1,4 +1,4 @@
-From d0bb57f5dcff06d62a3c2ad855883c642be4afaa Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 21:09:56 -0300
 Subject: [PATCH] Alt+Tab: Window Maker's switch panel (icons, title,
@@ -37,10 +37,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 src/app_icon.h
 
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 5f7112f..d2dd724 100644
+index bb0f3a2..3114426 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -43,6 +43,7 @@ set(public_header_files
+@@ -56,6 +56,7 @@ set(public_header_files
    dock_fx.h
    dock_launchers.h
    dock_menu.h
@@ -48,7 +48,7 @@ index 5f7112f..d2dd724 100644
    dock_position.h
    window_attributes.h
    dockapp_prefs.h
-@@ -82,6 +83,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -96,6 +97,7 @@ target_sources(wlmaker_lib PRIVATE
    dock_fx.c
    dock_launchers.c
    dock_menu.c
@@ -56,7 +56,7 @@ index 5f7112f..d2dd724 100644
    dock_position.c
    window_attributes.c
    dockapp_prefs.c
-@@ -146,6 +148,7 @@ target_link_libraries(
+@@ -161,6 +163,7 @@ target_link_libraries(
    wlmutil_lib
    wlmaker_protocols
    PkgConfig::CAIRO
@@ -711,10 +711,10 @@ index 0000000..583c927
 +#endif /* __WLMAKER_APP_ICON_H__ */
 +/* == End of app_icon.h ==================================================== */
 diff --git a/src/server.c b/src/server.c
-index 87841fc..1874d5a 100644
+index 4e20a98..9b0ac2c 100644
 --- a/src/server.c
 +++ b/src/server.c
-@@ -71,6 +71,11 @@ static void _wlmaker_server_handle_dock_fx_theme_changed(
+@@ -72,6 +72,11 @@ static void _wlmaker_server_handle_dock_fx_theme_changed(
  static void _wlmaker_server_handle_input_activity(
      struct wl_listener *listener_ptr,
      void *data_ptr);
@@ -726,7 +726,7 @@ index 87841fc..1874d5a 100644
  static void _wlmaker_server_handle_deactivate_task_list(
      struct wl_listener *listener_ptr,
      void *data_ptr);
-@@ -679,11 +684,112 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
+@@ -694,11 +699,112 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
      free(server_ptr);
  }
  
@@ -839,7 +839,7 @@ index 87841fc..1874d5a 100644
  }
  
  /* ------------------------------------------------------------------------- */
-@@ -882,18 +988,7 @@ static void _wlmaker_server_handle_deactivate_task_list(
+@@ -897,18 +1003,7 @@ static void _wlmaker_server_handle_deactivate_task_list(
      wlmaker_server_t *server_ptr = BS_CONTAINER_OF(
          listener_ptr, wlmaker_server_t, deactivate_task_list_listener);
  
@@ -860,10 +860,10 @@ index 87841fc..1874d5a 100644
  
  /* ------------------------------------------------------------------------- */
 diff --git a/src/server.h b/src/server.h
-index 75aac37..780637a 100644
+index 62fa58a..87758be 100644
 --- a/src/server.h
 +++ b/src/server.h
-@@ -171,6 +171,10 @@ struct _wlmaker_server_t {
+@@ -173,6 +173,10 @@ struct _wlmaker_server_t {
      wlmtk_root_t              *root_ptr;
      /** Whether the task list is currently shown. */
      bool                      task_list_enabled;
@@ -874,7 +874,7 @@ index 75aac37..780637a 100644
      /** Signal: When the task list is enabled. (to be shown) */
      /** Window zones and tiling (wmake-zones). NULL if unavailable. */
      struct _wlmaker_zones_t   *zones_ptr;
-@@ -320,6 +324,14 @@ void wlmaker_server_configure_desktop(
+@@ -322,6 +326,14 @@ void wlmaker_server_configure_desktop(
   */
  void wlmaker_server_activate_task_list(wlmaker_server_t *server_ptr);
  
@@ -1367,7 +1367,7 @@ index bbfc69f..263f145 100644
          task_list_ptr->style = style_ptr->task_list;
      }
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index 1799472..f8af544 100644
+index c5f7459..2f4dbc1 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -34,6 +34,7 @@
@@ -1378,7 +1378,7 @@ index 1799472..f8af544 100644
  #include "dock_position.h"
  #include "window_attributes.h"
  #include "dockapp_prefs.h"
-@@ -67,6 +68,7 @@ int main(int argc, const char **argv)
+@@ -68,6 +69,7 @@ int main(int argc, const char **argv)
          &wlmaker_action_item_test_set,
          &wlmaker_action_test_set,
          &wlmaker_clip_test_set,

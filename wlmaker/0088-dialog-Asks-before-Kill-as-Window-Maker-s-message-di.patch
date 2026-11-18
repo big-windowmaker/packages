@@ -1,8 +1,7 @@
-From dd541e937ae195daf70ab4e156fe111d648407e9 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 17:46:18 -0300
-Subject: [PATCH 88/99] dialog: Asks before "Kill", as Window Maker's message
- dialog.
+Subject: [PATCH] dialog: Asks before "Kill", as Window Maker's message dialog.
 
 "Kill" in the menu of the Dock's, the Clip's and the dock-apps' tiles
 asks first, as Window Maker does ("Kill Application": "<name> will be
@@ -28,10 +27,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 src/dialog.h
 
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index d2cefc0..a8b0d1b 100644
+index 4afdc3c..bc23f9c 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -33,6 +33,7 @@ set(public_header_files
+@@ -46,6 +46,7 @@ set(public_header_files
    config.h
    context_menu.h
    corner.h
@@ -39,7 +38,7 @@ index d2cefc0..a8b0d1b 100644
    dock_fx.h
    dock_launchers.h
    dock_menu.h
-@@ -67,6 +68,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -81,6 +82,7 @@ target_sources(wlmaker_lib PRIVATE
    config.c
    context_menu.c
    corner.c
@@ -863,7 +862,7 @@ index 508a475..072f8fd 100644
      { "Dock-app", "Dockapp" },
      { "Workspace", "Área" },
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index 5874188..a2552e5 100644
+index 96846da..dca4c27 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -28,6 +28,7 @@
@@ -874,7 +873,7 @@ index 5874188..a2552e5 100644
  #include "dock_fx.h"
  #include "dock_launchers.h"
  #include "dock_menu.h"
-@@ -66,6 +67,7 @@ int main(int argc, const char **argv)
+@@ -67,6 +68,7 @@ int main(int argc, const char **argv)
          &wlmaker_config_test_set,
          &wlmaker_context_menu_test_set,
          &wlmaker_corner_test_set,
@@ -883,5 +882,5 @@ index 5874188..a2552e5 100644
          &wlmaker_dock_launchers_test_set,
          &wlmaker_dock_menu_test_set,
 -- 
-2.55.0
+2.56.0
 

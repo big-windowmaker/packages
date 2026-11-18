@@ -1,7 +1,7 @@
-From 30967d283eafe9a6556ee86bd3069f8c0ac8b1ff Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <teste@hemofilia.org.br>
 Date: Tue, 27 Oct 2026 01:36:55 -0300
-Subject: [PATCH 51/51] apps: Makes wlmmixer's volume meter interactive.
+Subject: [PATCH] apps: Makes wlmmixer's volume meter interactive.
 
 The meter's bars light up in proportion to the volume, exactly: 0% at the
 left end, 100% at the right, the last bar partly. Clicking on the meter
@@ -428,5 +428,5 @@ index 961aad3..fb53538 100644
      wl_list_remove(&mixer_ptr->pointer_button_listener.link);
      if (NULL != mixer_ptr->dblbuf_ptr) {
 -- 
-2.55.0
+2.56.0
 

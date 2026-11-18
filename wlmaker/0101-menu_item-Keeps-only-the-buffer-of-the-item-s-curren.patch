@@ -1,8 +1,7 @@
-From d1d5a31020c6088567c20c0188c24c217f663da9 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Wed, 28 Oct 2026 08:01:31 -0300
-Subject: [PATCH 101/103] menu_item: Keeps only the buffer of the item's
- current state.
+Subject: [PATCH] menu_item: Keeps only the buffer of the item's current state.
 
 A menu item drew and kept three buffers: enabled, highlighted and
 disabled. Most items are only ever shown enabled, and menus can have
@@ -298,5 +297,5 @@ index 3c32da6..7ce7583 100644
      wlmtk_menu_item_destroy(item_ptr);
      wlmtk_menu_style_ref_release(wlmtk_menu_style_to_ref(s));
 -- 
-2.55.0
+2.56.0
 

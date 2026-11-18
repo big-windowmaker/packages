@@ -1,4 +1,4 @@
-From 688ba43b6fc8d6654ebbbea93aeb62d192f7d673 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 16:21:09 -0300
 Subject: [PATCH] dock_fx: Adds Window Maker's dragged icon, ghost, slide,
@@ -36,10 +36,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 src/dock_fx.h
 
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 7a301d0..233fa28 100644
+index 677d694..3c34a67 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -33,6 +33,7 @@ set(public_header_files
+@@ -46,6 +46,7 @@ set(public_header_files
    config.h
    context_menu.h
    corner.h
@@ -47,7 +47,7 @@ index 7a301d0..233fa28 100644
    dock_position.h
    dockapp_prefs.h
    i18n.h
-@@ -63,6 +64,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -77,6 +78,7 @@ target_sources(wlmaker_lib PRIVATE
    config.c
    context_menu.c
    corner.c
@@ -1597,10 +1597,10 @@ index 0000000..56d4cab
 +#endif /* __WLMAKER_DOCK_FX_H__ */
 +/* == End of dock_fx.h ===================================================== */
 diff --git a/src/server.c b/src/server.c
-index 2d5569e..312741d 100644
+index df8101d..9928e99 100644
 --- a/src/server.c
 +++ b/src/server.c
-@@ -58,6 +58,9 @@ static const char             *seat_name_ptr = "seat0";
+@@ -59,6 +59,9 @@ static const char             *seat_name_ptr = "seat0";
  static void _wlmaker_server_unclaimed_button_event_handler(
      struct wl_listener *listener_ptr,
      void *data_ptr);
@@ -1610,7 +1610,7 @@ index 2d5569e..312741d 100644
  static void _wlmaker_server_handle_input_activity(
      struct wl_listener *listener_ptr,
      void *data_ptr);
-@@ -204,6 +207,21 @@ wlmaker_server_t *wlmaker_server_create(
+@@ -214,6 +217,21 @@ wlmaker_server_t *wlmaker_server_create(
          &server_ptr->unclaimed_button_event_listener,
          _wlmaker_server_unclaimed_button_event_handler);
  
@@ -1632,7 +1632,7 @@ index 2d5569e..312741d 100644
      server_ptr->input_manager_ptr = wlmim_input_manager_create(
          server_ptr->wl_display_ptr,
          wlmbe_backend_wlr(server_ptr->backend_ptr),
-@@ -571,6 +589,13 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
+@@ -581,6 +599,13 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
          server_ptr->input_manager_ptr = NULL;
      }
  
@@ -1646,7 +1646,7 @@ index 2d5569e..312741d 100644
      if (NULL != server_ptr->root_ptr) {
          wlmtk_util_disconnect_listener(
              &server_ptr->unclaimed_button_event_listener);
-@@ -646,6 +671,19 @@ void _wlmaker_server_unclaimed_button_event_handler(
+@@ -661,6 +686,19 @@ void _wlmaker_server_unclaimed_button_event_handler(
      }
  }
  
@@ -1667,7 +1667,7 @@ index 2d5569e..312741d 100644
  /** Handles input activity: Resets the idle timer. */
  void _wlmaker_server_handle_input_activity(
 diff --git a/src/server.h b/src/server.h
-index 9f0cf1e..bc09062 100644
+index 4006942..33a19e9 100644
 --- a/src/server.h
 +++ b/src/server.h
 @@ -43,6 +43,7 @@ typedef struct _wlmaker_server_t wlmaker_server_t;
@@ -1678,7 +1678,7 @@ index 9f0cf1e..bc09062 100644
  #include "cursor.h"  // IWYU pragma: keep
  #include "icon_manager.h"  // IWYU pragma: keep
  #include "idle.h"  // IWYU pragma: keep
-@@ -198,6 +199,10 @@ struct _wlmaker_server_t {
+@@ -200,6 +201,10 @@ struct _wlmaker_server_t {
      wlmtk_dock_t              *clip_dock_ptr;
      /** Placement of dock-apps in the clip. Set by the clip, may be NULL. */
      struct _wlmaker_dockapps_t *dockapps_ptr;
@@ -1690,7 +1690,7 @@ index 9f0cf1e..bc09062 100644
      /** Root menu, when active. NULL when not invoked. */
      wlmaker_root_menu_t       *root_menu_ptr;
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index 4903a3c..5e0ba94 100644
+index 90938f7..c252817 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -28,6 +28,7 @@
@@ -1701,7 +1701,7 @@ index 4903a3c..5e0ba94 100644
  #include "dock_position.h"
  #include "dockapp_prefs.h"
  #include "i18n.h"
-@@ -62,6 +63,7 @@ int main(int argc, const char **argv)
+@@ -63,6 +64,7 @@ int main(int argc, const char **argv)
          &wlmaker_config_test_set,
          &wlmaker_context_menu_test_set,
          &wlmaker_corner_test_set,
@@ -1710,5 +1710,5 @@ index 4903a3c..5e0ba94 100644
          &wlmaker_dockapp_prefs_test_set,
          &wlmaker_i18n_test_set,
 -- 
-2.55.0
+2.56.0
 

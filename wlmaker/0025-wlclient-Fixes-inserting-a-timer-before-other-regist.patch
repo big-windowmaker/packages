@@ -1,8 +1,8 @@
-From 9c470a0460a0350cdad7beb13568948b29e01f76 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 18:59:22 -0300
-Subject: [PATCH 25/30] wlclient: Fixes inserting a timer before other
- registered timers.
+Subject: [PATCH] wlclient: Fixes inserting a timer before other registered
+ timers.
 
 wlmcl_client_timer_create() did not stop iterating after inserting the
 new timer before a timer that is due later: It inserted the same node
@@ -30,5 +30,5 @@ index 9f38c95..e64b4c9 100644
      if (NULL == dlnode_ptr) {
          bs_dllist_push_back(&client_ptr->timers, &timer_ptr->dlnode);
 -- 
-2.55.0
+2.56.0
 

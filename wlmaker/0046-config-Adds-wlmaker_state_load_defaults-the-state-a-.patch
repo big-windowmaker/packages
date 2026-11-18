@@ -1,8 +1,8 @@
-From 9371c80f9c28c76152f4bba8c1906cc067610cb2 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <teste@hemofilia.org.br>
 Date: Mon, 26 Oct 2026 23:23:33 -0300
-Subject: [PATCH 46/48] config: Adds wlmaker_state_load_defaults, the state a
- user starts with.
+Subject: [PATCH] config: Adds wlmaker_state_load_defaults, the state a user
+ starts with.
 
 For restoring defaults (eg. the Dock's launchers): Loads the given file,
 else the one configured at build time (CMake WLMAKER_DEFAULT_STATE_FILE,
@@ -18,10 +18,10 @@ wlm_util_files_xdg_config_find_system for that. With a unit test.
  5 files changed, 109 insertions(+)
 
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index cc0310c..a2dbf9c 100644
+index 72073b0..1669f93 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -143,6 +143,12 @@ endif()
+@@ -158,6 +158,12 @@ endif()
  if(XWAYLAND_FOUND)
    target_compile_definitions(wlmaker_lib PUBLIC WLMAKER_HAVE_XWAYLAND)
  endif()
@@ -201,5 +201,5 @@ index 56a64e7..324a0c0 100644
   * Finds a file (or directory, ...) from XDG data directories.
   *
 -- 
-2.55.0
+2.56.0
 

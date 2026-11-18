@@ -1,8 +1,7 @@
-From c736e48a759fb1c01942633413506fd3384ed2ec Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 18:34:25 -0300
-Subject: [PATCH 19/24] toolkit: Toggles shade on double-click on the title
- bar.
+Subject: [PATCH] toolkit: Toggles shade on double-click on the title bar.
 
 As in Window Maker, a double-click (two left-button presses within
 300 ms) on the window's title toggles shading: The window rolls up to its
@@ -137,3 +136,6 @@ index 62aaf4f..7dfb7e8 100644
 +}
 +
  /* == End of titlebar_title.c ============================================== */
+-- 
+2.56.0
+

@@ -1,8 +1,7 @@
-From b74dfadc1dab6b997da96590d366f127b1565641 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 19:31:01 -0300
-Subject: [PATCH 96/99] clip: Lowers an auto-raised dock once the pointer is
- away.
+Subject: [PATCH] clip: Lowers an auto-raised dock once the pointer is away.
 
 Raising moves the dock's surfaces to the other layer, which may lose the
 pointer's "leave": The dock stayed raised. While raised, the pointer is
@@ -60,5 +59,5 @@ index 491d93c..82bc29b 100644
  
  /** Timer callback: Auto-raise or lower the Clip. */
 -- 
-2.55.0
+2.56.0
 

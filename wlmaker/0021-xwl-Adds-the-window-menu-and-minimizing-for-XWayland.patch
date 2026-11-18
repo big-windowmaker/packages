@@ -1,7 +1,7 @@
-From c7bcb50d6ce0774c71536165687ac54b9b0ba3b7 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 18:36:49 -0300
-Subject: [PATCH 21/24] xwl: Adds the window menu and minimizing for XWayland
+Subject: [PATCH] xwl: Adds the window menu and minimizing for XWayland
  windows.
 
 X11 windows had an empty window menu: The toplevel menu (Maximize,
@@ -147,3 +147,6 @@ index dade857..5e63b5a 100644
      wl_signal_init(&wlr_xwayland_surface_ptr->events.associate);
      wl_signal_init(&wlr_xwayland_surface_ptr->events.dissociate);
      wl_signal_init(&wlr_xwayland_surface_ptr->events.set_title);
+-- 
+2.56.0
+

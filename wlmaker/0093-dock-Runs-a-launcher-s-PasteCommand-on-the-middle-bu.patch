@@ -1,8 +1,7 @@
-From 7c46108743ca8fe2e977210ecd1be73821fc2d3b Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 18:18:05 -0300
-Subject: [PATCH 93/99] dock: Runs a launcher's PasteCommand on the middle
- button.
+Subject: [PATCH] dock: Runs a launcher's PasteCommand on the middle button.
 
 As Window Maker's PasteCommand: The middle button on a launcher of the
 Dock, the Clip or a drawer reads the selection (the primary selection,
@@ -479,5 +478,5 @@ index 90bc69f..069ee97 100644
      if (docklike && BTN_RIGHT == button_event_ptr->button) {
          if (WLMTK_BUTTON_DOWN == button_event_ptr->type) {
 -- 
-2.55.0
+2.56.0
 

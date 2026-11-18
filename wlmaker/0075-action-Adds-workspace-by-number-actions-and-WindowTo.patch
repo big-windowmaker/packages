@@ -1,4 +1,4 @@
-From 7dddfd9e24e84378fe24008fa129a7a8c6d4b77e Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 16:04:40 -0300
 Subject: [PATCH] action: Adds workspace-by-number actions, and
@@ -267,10 +267,10 @@ index 1f69f51..2ec3f0b 100644
      WLMAKER_ACTION_ROOT_MENU,
  
 diff --git a/src/toolkit/desktop.c b/src/toolkit/desktop.c
-index 9e25395..6e23d5b 100644
+index a443d6e..1f7adf0 100644
 --- a/src/toolkit/desktop.c
 +++ b/src/toolkit/desktop.c
-@@ -448,6 +448,31 @@ void wlmtk_desktop_switch_to_previous_workspace(wlmtk_desktop_t *desktop_ptr)
+@@ -454,6 +454,31 @@ void wlmtk_desktop_switch_to_previous_workspace(wlmtk_desktop_t *desktop_ptr)
      _wlmtk_desktop_switch_to_workspace(desktop_ptr, workspace_ptr);
  }
  
@@ -302,7 +302,7 @@ index 9e25395..6e23d5b 100644
  /* ------------------------------------------------------------------------- */
  void wlmtk_desktop_for_each_workspace(
      wlmtk_desktop_t *desktop_ptr,
-@@ -1006,6 +1031,25 @@ void test_workspaces(bs_test_t *test_ptr)
+@@ -1073,6 +1098,25 @@ void test_workspaces(bs_test_t *test_ptr)
      BS_TEST_VERIFY_EQ(test_ptr, ws2_ptr, l.last_data_ptr);
      wlmtk_util_clear_test_listener(&l);
  
@@ -329,5 +329,5 @@ index 9e25395..6e23d5b 100644
      BS_TEST_VERIFY_EQ(test_ptr, 1, l.calls);
      wlmtk_util_clear_test_listener(&l);
 -- 
-2.55.0
+2.56.0
 

@@ -1,7 +1,7 @@
-From 6f46b472704aec2533f1410edb47d9477a916d53 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 18:27:12 -0300
-Subject: [PATCH 94/99] dnd: Adds drag and drop of clients, and Window Maker's
+Subject: [PATCH] dnd: Adds drag and drop of clients, and Window Maker's
  DropCommand.
 
 Clients could not drag and drop: The seat's request_start_drag was not
@@ -35,10 +35,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 src/dnd.h
 
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index a43fe7b..3584fd1 100644
+index 8510730..1472754 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -34,6 +34,7 @@ set(public_header_files
+@@ -47,6 +47,7 @@ set(public_header_files
    context_menu.h
    corner.h
    dialog.h
@@ -46,7 +46,7 @@ index a43fe7b..3584fd1 100644
    drawer.h
    dock_fx.h
    dock_launchers.h
-@@ -70,6 +71,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -84,6 +85,7 @@ target_sources(wlmaker_lib PRIVATE
    context_menu.c
    corner.c
    dialog.c
@@ -826,7 +826,7 @@ index 6fbab99..c9b3c8b 100644
  extern const bs_test_set_t wlmaker_layer_panel_test_set;
  
 diff --git a/src/server.c b/src/server.c
-index 8075596..a6ba239 100644
+index 302125b..795267a 100644
 --- a/src/server.c
 +++ b/src/server.c
 @@ -21,6 +21,8 @@
@@ -838,7 +838,7 @@ index 8075596..a6ba239 100644
  #include <libbase/libbase.h>
  #include <libbase/plist.h>
  #include <linux/input-event-codes.h>
-@@ -222,6 +224,14 @@ wlmaker_server_t *wlmaker_server_create(
+@@ -232,6 +234,14 @@ wlmaker_server_t *wlmaker_server_create(
          &server_ptr->dock_fx_theme_changed_listener,
          _wlmaker_server_handle_dock_fx_theme_changed);
  
@@ -853,7 +853,7 @@ index 8075596..a6ba239 100644
      server_ptr->input_manager_ptr = wlmim_input_manager_create(
          server_ptr->wl_display_ptr,
          wlmbe_backend_wlr(server_ptr->backend_ptr),
-@@ -595,6 +605,10 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
+@@ -605,6 +615,10 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
          wlmaker_dock_fx_destroy(server_ptr->dock_fx_ptr);
          server_ptr->dock_fx_ptr = NULL;
      }
@@ -865,10 +865,10 @@ index 8075596..a6ba239 100644
      if (NULL != server_ptr->root_ptr) {
          wlmtk_util_disconnect_listener(
 diff --git a/src/server.h b/src/server.h
-index 397266c..2177d9c 100644
+index b1b1a5c..033d95d 100644
 --- a/src/server.h
 +++ b/src/server.h
-@@ -209,6 +209,8 @@ struct _wlmaker_server_t {
+@@ -211,6 +211,8 @@ struct _wlmaker_server_t {
      struct _wlmaker_tile_drag_t *tile_drag_ptr;
      /** Visual effects of Dock and Clip: Dragged icon, ghost, balloons. */
      wlmaker_dock_fx_t         *dock_fx_ptr;
@@ -878,7 +878,7 @@ index 397266c..2177d9c 100644
      struct wl_listener        dock_fx_theme_changed_listener;
  
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index 7b3c01b..bc88ae3 100644
+index 2dde71b..a75adcd 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -29,6 +29,7 @@
@@ -889,7 +889,7 @@ index 7b3c01b..bc88ae3 100644
  #include "drawer.h"
  #include "dock_fx.h"
  #include "dock_launchers.h"
-@@ -69,6 +70,7 @@ int main(int argc, const char **argv)
+@@ -70,6 +71,7 @@ int main(int argc, const char **argv)
          &wlmaker_context_menu_test_set,
          &wlmaker_corner_test_set,
          &wlmaker_dialog_test_set,
@@ -898,5 +898,5 @@ index 7b3c01b..bc88ae3 100644
          &wlmaker_dock_fx_test_set,
          &wlmaker_dock_launchers_test_set,
 -- 
-2.55.0
+2.56.0
 

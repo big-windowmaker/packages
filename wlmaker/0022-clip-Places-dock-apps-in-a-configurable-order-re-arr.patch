@@ -1,7 +1,7 @@
-From 7e96be37b39fe43db098746da18b3360ba525a9b Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 18:50:07 -0300
-Subject: [PATCH 22/24] clip: Places dock-apps in a configurable order,
+Subject: [PATCH] clip: Places dock-apps in a configurable order,
  re-arrangeable by drag.
 
 Dock-apps (wlmclock, wlmcpugraph, ...) were attached to the Clip in the
@@ -115,10 +115,10 @@ index 363d9b1..fd6680e 100644
  wlmtk_panel_t *wlmtk_dock_panel(wlmtk_dock_t *dock_ptr);
  
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 7badae4..2e8e9ae 100644
+index 4edf3b3..04f8c31 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -32,6 +32,7 @@ set(public_header_files
+@@ -45,6 +45,7 @@ set(public_header_files
    clip.h
    config.h
    corner.h
@@ -126,7 +126,7 @@ index 7badae4..2e8e9ae 100644
    icon_manager.h
    idle.h
    input_observation.h
-@@ -56,6 +57,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -70,6 +71,7 @@ target_sources(wlmaker_lib PRIVATE
    clip.c
    config.c
    corner.c
@@ -1135,10 +1135,10 @@ index 34a4a6b..30c1d49 100644
  
  /* ------------------------------------------------------------------------- */
 diff --git a/src/server.h b/src/server.h
-index b2f33f3..4956573 100644
+index 7cb80ab..e866842 100644
 --- a/src/server.h
 +++ b/src/server.h
-@@ -185,6 +185,8 @@ struct _wlmaker_server_t {
+@@ -187,6 +187,8 @@ struct _wlmaker_server_t {
  
      /** Temporary: Points to the @ref wlmtk_dock_t of the clip. */
      wlmtk_dock_t              *clip_dock_ptr;
@@ -1310,7 +1310,7 @@ index 79a5b3d..3c3a94d 100644
 +
  /* == End of dock.c ======================================================== */
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index c31e3d9..c938d5c 100644
+index b869dff..c74efdb 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -27,6 +27,7 @@
@@ -1321,7 +1321,7 @@ index c31e3d9..c938d5c 100644
  #include "layer_panel.h"
  #include "lock_mgr.h"
  #include "root_menu.h"
-@@ -55,6 +56,7 @@ int main(int argc, const char **argv)
+@@ -56,6 +57,7 @@ int main(int argc, const char **argv)
          &wlmaker_clip_test_set,
          &wlmaker_config_test_set,
          &wlmaker_corner_test_set,
@@ -1329,3 +1329,6 @@ index c31e3d9..c938d5c 100644
          &wlmaker_layer_panel_test_set,
          &wlmaker_lock_mgr_test_set,
          &wlmaker_root_menu_test_set,
+-- 
+2.56.0
+

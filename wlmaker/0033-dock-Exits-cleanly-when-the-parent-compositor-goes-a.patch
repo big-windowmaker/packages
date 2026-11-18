@@ -1,8 +1,7 @@
-From bee3c2c7223b35692a9012a7f7c254fa41ab2fbd Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 19:12:01 -0300
-Subject: [PATCH 33/34] dock: Exits cleanly when the parent compositor goes
- away.
+Subject: [PATCH] dock: Exits cleanly when the parent compositor goes away.
 
 At the end of a session, wlmdock aborted on a wlroots assertion and left
 a core dump: When the connection to the parent compositor is lost, the
@@ -233,3 +232,6 @@ index e4484c4..0712b40 100644
 +}
 +
  /* == End of wlmdock.c ===================================================== */
+-- 
+2.56.0
+

@@ -1,7 +1,7 @@
-From a74b3da86d213ded10c311e4af5276e8b0e2a603 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 02:59:19 -0300
-Subject: [PATCH 71/73] apps: Lets wlmclock follow the 'Theme' preference.
+Subject: [PATCH] apps: Lets wlmclock follow the 'Theme' preference.
 
 Like the other DockApps: wlmclock reads its preferences file, and redraws
 with the chosen color theme right away.
@@ -158,5 +158,5 @@ index ec21d16..bb8ce50 100644
  }
  /* == End of wlmclock.c ==================================================== */
 -- 
-2.55.0
+2.56.0
 

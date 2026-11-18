@@ -1,8 +1,8 @@
-From 28a8ea85cdecc62ec2f66e54ff86f71587722b53 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 02:57:20 -0300
-Subject: [PATCH 69/73] apps: Gives the graph DockApps preferences: Themes,
- style, label, click.
+Subject: [PATCH] apps: Gives the graph DockApps preferences: Themes, style,
+ label, click.
 
 wlm_graph_shared reads the preferences file of wlmcpugraph, wlmmemgraph and
 wlmnetgraph, watches it, and applies changes right away, clearing the graph:
@@ -975,5 +975,5 @@ index ddb2a2c..f108619 100644
  
      return wlm_graph_app_run(argc, argv, &config);
 -- 
-2.55.0
+2.56.0
 

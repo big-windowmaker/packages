@@ -1,8 +1,8 @@
-From 701e26e8531f6ecb86c9be0c2fe9957af6026179 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 19:21:09 -0300
-Subject: [PATCH 35/41] dock: Renders wlmdock with pixman by default, and
- reports failures.
+Subject: [PATCH] dock: Renders wlmdock with pixman by default, and reports
+ failures.
 
 In a real session (DRM backend, here on virtio-gpu), wlmdock ran but drew
 nothing, and logged "DRM_IOCTL_MODE_CREATE_DUMB failed: Permission
@@ -79,5 +79,5 @@ index 0712b40..c5c74b8 100644
          bs_log(BS_ERROR, "Failed to create renderer.");
          _wlmdock_destroy(dock_ptr);
 -- 
-2.55.0
+2.56.0
 

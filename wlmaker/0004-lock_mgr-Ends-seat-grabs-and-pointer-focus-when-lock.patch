@@ -1,8 +1,8 @@
-From 854949bd57d98eb3a8eb44ebd5605bdf3ad6d6fd Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 18:01:23 -0300
-Subject: [PATCH 04/17] lock_mgr: Ends seat grabs and pointer focus when
- locking the session.
+Subject: [PATCH] lock_mgr: Ends seat grabs and pointer focus when locking the
+ session.
 
 An xdg_popup with a grab (eg. the GtkMenu of a layer-shell panel or tray,
 opened through zwlr_layer_surface_v1.get_popup) holds a keyboard grab on
@@ -160,3 +160,6 @@ index a63bd96..7b542f6 100644
 +}
 +
  /* == End of lock_mgr.c ==================================================== */
+-- 
+2.56.0
+

@@ -1,7 +1,7 @@
-From c6618ab8184e13e1afdf91f52ac12b00154c6e68 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 18:36:06 -0300
-Subject: [PATCH 20/24] toolkit: Implements minimizing (miniaturizing) windows.
+Subject: [PATCH] toolkit: Implements minimizing (miniaturizing) windows.
 
 wlmtk_window_request_minimize() was a stub, so the title bar's minimize
 button, and clients' xdg_toplevel.set_minimized did nothing.
@@ -29,9 +29,9 @@ Signed-off-by: ruscher <rruscher@gmail.com>
  src/action.h                |   1 +
  src/tl_menu.c               |  11 +++
  src/toolkit/window.c        |  20 +++++-
- src/toolkit/workspace.c     | 130 ++++++++++++++++++++++++++++++++++--
+ src/toolkit/workspace.c     | 129 ++++++++++++++++++++++++++++++++++--
  src/xdg_toplevel.c          |   2 +-
- 8 files changed, 196 insertions(+), 10 deletions(-)
+ 8 files changed, 195 insertions(+), 10 deletions(-)
 
 diff --git a/include/toolkit/window.h b/include/toolkit/window.h
 index 9b65622..c92654a 100644
@@ -64,10 +64,10 @@ index 9b65622..c92654a 100644
   * Requests the window to be fullscreen (or end fullscreen).
   *
 diff --git a/include/toolkit/workspace.h b/include/toolkit/workspace.h
-index 31a9d7c..d208530 100644
+index 02cc05a..4eb087d 100644
 --- a/include/toolkit/workspace.h
 +++ b/include/toolkit/workspace.h
-@@ -255,11 +255,26 @@ void wlmtk_workspace_activate_previous_window(
+@@ -280,11 +280,26 @@ void wlmtk_workspace_activate_previous_window(
  void wlmtk_workspace_activate_next_window(
      wlmtk_workspace_t *workspace_ptr);
  
@@ -172,7 +172,7 @@ index 6ad72a2..e95dbf4 100644
      wlmtk_menu_item_set_enabled(
          wlmaker_action_item_menu_item(tl_menu_ptr->maximize_ai_ptr),
 diff --git a/src/toolkit/window.c b/src/toolkit/window.c
-index 068ff74..dfeb9a7 100644
+index 0574b97..1f3d3cb 100644
 --- a/src/toolkit/window.c
 +++ b/src/toolkit/window.c
 @@ -136,6 +136,8 @@ struct _wlmtk_window_t {
@@ -184,7 +184,7 @@ index 068ff74..dfeb9a7 100644
      /** Whether this window is currently activated (has keyboard focus). */
      bool                      activated;
  };
-@@ -573,7 +575,23 @@ void wlmtk_window_request_close(wlmtk_window_t *window_ptr)
+@@ -574,7 +576,23 @@ void wlmtk_window_request_close(wlmtk_window_t *window_ptr)
  /* ------------------------------------------------------------------------- */
  void wlmtk_window_request_minimize(wlmtk_window_t *window_ptr)
  {
@@ -210,10 +210,10 @@ index 068ff74..dfeb9a7 100644
  
  /* ------------------------------------------------------------------------- */
 diff --git a/src/toolkit/workspace.c b/src/toolkit/workspace.c
-index 7694b3a..f673f20 100644
+index 6a4e856..ab46c78 100644
 --- a/src/toolkit/workspace.c
 +++ b/src/toolkit/workspace.c
-@@ -198,6 +198,9 @@ static const wlmtk_fsm_transition_t pfsm_transitions[] = {
+@@ -226,6 +226,9 @@ static const wlmtk_fsm_transition_t pfsm_transitions[] = {
  /** For window placement: Pixel distance between each stacked position. */
  static const int _wlmtk_workspace_placement_step = 24;
  
@@ -223,7 +223,7 @@ index 7694b3a..f673f20 100644
  /* == Exported methods ===================================================== */
  
  /* ------------------------------------------------------------------------- */
-@@ -480,15 +483,12 @@ void wlmtk_workspace_unmap_window(wlmtk_workspace_t *workspace_ptr,
+@@ -564,15 +567,12 @@ void wlmtk_workspace_unmap_window(wlmtk_workspace_t *workspace_ptr,
              window_ptr);
      }
  
@@ -243,7 +243,7 @@ index 7694b3a..f673f20 100644
      }
  }
  
-@@ -666,6 +666,12 @@ void wlmtk_workspace_raise_window(
+@@ -750,6 +750,12 @@ void wlmtk_workspace_raise_window(
  {
      BS_ASSERT(workspace_ptr == wlmtk_window_get_workspace(window_ptr));
  
@@ -256,7 +256,7 @@ index 7694b3a..f673f20 100644
      // No raising if this window isn't int the window container, eg. when
      // being full-screen.
      if (wlmtk_window_element(window_ptr)->parent_container_ptr !=
-@@ -679,6 +685,28 @@ void wlmtk_workspace_raise_window(
+@@ -763,6 +769,28 @@ void wlmtk_workspace_raise_window(
                                           wlmtk_window_element(window_ptr));
  }
  
@@ -285,7 +285,7 @@ index 7694b3a..f673f20 100644
  /* ------------------------------------------------------------------------- */
  wlmtk_element_t *wlmtk_workspace_window_element(wlmtk_workspace_t *workspace_ptr)
  {
-@@ -723,6 +751,25 @@ wlmtk_workspace_t *wlmtk_workspace_from_dlnode(
+@@ -807,6 +835,25 @@ wlmtk_workspace_t *wlmtk_workspace_from_dlnode(
  
  /* == Local (static) methods =============================================== */
  
@@ -311,7 +311,7 @@ index 7694b3a..f673f20 100644
  /* ------------------------------------------------------------------------- */
  /** Virtual destructor, wraps to our dtor. */
  void _wlmtk_workspace_window_element_destroy(wlmtk_element_t *element_ptr)
-@@ -1096,6 +1143,7 @@ static void test_resize(bs_test_t *test_ptr);
+@@ -1253,6 +1300,7 @@ static void test_resize(bs_test_t *test_ptr);
  static void test_enable(bs_test_t *test_ptr);
  static void test_activate(bs_test_t *test_ptr);
  static void test_activate_cycling(bs_test_t *test_ptr);
@@ -319,7 +319,7 @@ index 7694b3a..f673f20 100644
  static void test_multi_output_extents(bs_test_t *test_ptr);
  static void test_multi_output_reposition(bs_test_t *test_ptr);
  static void test_window_position(bs_test_t *test_ptr);
-@@ -1115,6 +1163,7 @@ static const bs_test_case_t _wlmtk_workspace_test_cases[] = {
+@@ -1273,6 +1321,7 @@ static const bs_test_case_t _wlmtk_workspace_test_cases[] = {
      { 1, "enable", test_enable } ,
      { 1, "activate", test_activate },
      { 1, "activate_cycling", test_activate_cycling },
@@ -327,11 +327,10 @@ index 7694b3a..f673f20 100644
      { 1, "multi_output_extents", test_multi_output_extents },
      { 1, "multi_output_reposition", test_multi_output_reposition },
      { 1, "window_position", test_window_position },
-@@ -2006,4 +2055,71 @@ void test_window_position(bs_test_t *test_ptr)
-     wlr_output_layout_remove(c_ptr->wlr_output_layout_ptr, &o1);
+@@ -2229,4 +2278,70 @@ void test_reposition(bs_test_t *test_ptr)
+     wlr_output_layout_remove(c_ptr->wlr_output_layout_ptr, &o);
  }
  
-+
 +/* ------------------------------------------------------------------------- */
 +/** Tests minimizing and restoring windows. */
 +void test_minimize(bs_test_t *test_ptr)
@@ -412,3 +411,6 @@ index 464b59e..d694ceb 100644
  }
  
  /* ------------------------------------------------------------------------- */
+-- 
+2.56.0
+

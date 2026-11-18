@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Wed, 18 Nov 2026 13:59:49 -0300
+Subject: [PATCH] wlmaker: Blocks SIGCHLD and SIGHUP in all threads, before any
+ starts.
+
+The event loop reads both through a signalfd, which only sees signals
+blocked in every thread; wl_event_loop_add_signal() blocks them in the
+calling thread only. GLib threads started before (gdbus, pool-spawner)
+took them: a SIGCHLD was dropped, so a terminated subprocess was not
+noticed (a generated menu stayed empty, the child a zombie), and a
+SIGHUP to reload the configuration could end the compositor.
+
+Blocks both at the start of main(), and unblocks them in forked
+children. The unit test main() blocks SIGCHLD the same way:
+root_menu.generated_menu hung in 2 to 3 of 12 runs, now 0 of 25.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/wlmaker.c        | 23 ++++++++++++++++++++++-
+ tests/wlmaker_test.c | 10 ++++++++++
+ 2 files changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/src/wlmaker.c b/src/wlmaker.c
+index 7e9c964..7f0a88e 100644
+--- a/src/wlmaker.c
++++ b/src/wlmaker.c
+@@ -224,7 +224,8 @@ static void _wlmaker_raise_nofile_rlimit(void)
+ 
+ /* ------------------------------------------------------------------------- */
+ /**
+- * In forked processes: Unblocks SIGHUP (only wlmaker monitors it), and
++ * In forked processes: Unblocks SIGHUP and SIGCHLD (only wlmaker monitors
++ * them, see @ref wlmaker_block_monitored_signals), and
+  * restores the limit of open files that wlmaker started with.
+  *
+  * The limit is restored only if the child can still open files under it.
+@@ -238,6 +239,7 @@ static void _wlmaker_atfork_child(void)
+     sigset_t signal_set;
+     sigemptyset(&signal_set);
+     sigaddset(&signal_set, SIGHUP);
++    sigaddset(&signal_set, SIGCHLD);
+     sigprocmask(SIG_UNBLOCK, &signal_set, NULL);
+ 
+     if (wlmaker_nofile_rlimit_raised) {
+@@ -252,6 +254,24 @@ static void _wlmaker_atfork_child(void)
+     }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Blocks the signals wlmaker monitors, in all threads. */
++static void wlmaker_block_monitored_signals(void)
++{
++    // The Wayland event loop reads SIGCHLD (subprocess monitor) and SIGHUP
++    // (reload) through a signalfd, which only sees signals blocked in every
++    // thread. wl_event_loop_add_signal() blocks them in the calling thread
++    // only: Threads started before (eg. GLib's gdbus and pool threads) would
++    // take them, dropping SIGCHLD (a terminated subprocess is never noticed:
++    // a generated menu stays empty) or ending the process on SIGHUP. Blocked
++    // here, before any thread starts, every thread inherits the mask.
++    sigset_t signal_set;
++    sigemptyset(&signal_set);
++    sigaddset(&signal_set, SIGHUP);
++    sigaddset(&signal_set, SIGCHLD);
++    pthread_sigmask(SIG_BLOCK, &signal_set, NULL);
++}
++
+ /* == Main program ========================================================= */
+ /** The main program. */
+ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+@@ -260,6 +280,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+     wlmaker_task_list_t       *task_list_ptr = NULL;
+     int                       rv = EXIT_SUCCESS;
+ 
++    wlmaker_block_monitored_signals();
+     wlmaker_i18n_init();
+     if (!wlm_util_backtrace_setup(argv[0]) ||
+         !wlm_util_wlr_log_init(WLR_DEBUG) ||
+diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
+index 92aa74e..0ebe165 100644
+--- a/tests/wlmaker_test.c
++++ b/tests/wlmaker_test.c
+@@ -20,6 +20,8 @@
+  */
+ 
+ #include <libbase/libbase.h>
++#include <pthread.h>
++#include <signal.h>
+ #include <stdlib.h>
+ 
+ #include "action.h"
+@@ -65,6 +67,14 @@
+ /** Main program, runs the unit tests. */
+ int main(int argc, const char **argv)
+ {
++    // As wlmaker's main(): The subprocess monitor reads SIGCHLD through a
++    // signalfd; blocked before any thread starts (GLib's, eg. gdbus), no
++    // other thread takes and drops it (generated_menu then hung).
++    sigset_t signal_set;
++    sigemptyset(&signal_set);
++    sigaddset(&signal_set, SIGCHLD);
++    pthread_sigmask(SIG_BLOCK, &signal_set, NULL);
++
+     if (!wlm_util_backtrace_setup(argv[0])) return EXIT_FAILURE;
+ 
+     const bs_test_param_t params = { .test_data_dir_ptr = TEST_DATA_DIR };
+-- 
+2.56.0
+

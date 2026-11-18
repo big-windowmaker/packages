@@ -1,8 +1,8 @@
-From 31d5adf210f63b6837b177d79abcbe2d3e6013e5 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <teste@hemofilia.org.br>
 Date: Mon, 26 Oct 2026 20:03:00 -0300
-Subject: [PATCH 38/41] toolkit: Adds wlmtk_dock_set_positioning, to move a
- dock to another corner.
+Subject: [PATCH] toolkit: Adds wlmtk_dock_set_positioning, to move a dock to
+ another corner.
 
 The dock moves to another edge and anchor, keeping its orientation. Tiles
 keep their order, counted from the anchor. With a unit test.
@@ -170,5 +170,5 @@ index 61767c1..449ca18 100644
 +
  /* == End of dock.c ======================================================== */
 -- 
-2.55.0
+2.56.0
 

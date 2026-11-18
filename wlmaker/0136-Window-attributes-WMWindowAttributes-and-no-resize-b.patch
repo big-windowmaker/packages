@@ -1,8 +1,8 @@
-From c0b1e2d37d3bd01bc43d2cbcd7998a22908c8c23 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 10:25:12 -0300
-Subject: [PATCH 136/136] Window attributes (WMWindowAttributes) and no resize
- bar at fixed size
+Subject: [PATCH] Window attributes (WMWindowAttributes) and no resize bar at
+ fixed size
 
 WindowAttributes in Config.plist, keyed as Window Maker does (instance.class,
 instance, class, *; a Wayland app ID is both): NoMiniaturizeButton,
@@ -23,10 +23,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 src/window_attributes.h
 
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index b88916b..5f7112f 100644
+index 9dbda05..bb0f3a2 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -44,6 +44,7 @@ set(public_header_files
+@@ -57,6 +57,7 @@ set(public_header_files
    dock_launchers.h
    dock_menu.h
    dock_position.h
@@ -34,7 +34,7 @@ index b88916b..5f7112f 100644
    dockapp_prefs.h
    i18n.h
    dockapps.h
-@@ -82,6 +83,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -96,6 +97,7 @@ target_sources(wlmaker_lib PRIVATE
    dock_launchers.c
    dock_menu.c
    dock_position.c
@@ -387,7 +387,7 @@ index f187d11..b024a6b 100644
          xs_ptr->window_ptr,
          s->modal || NULL != s->parent ||
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index bc88ae3..1799472 100644
+index a75adcd..c5f7459 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -35,6 +35,7 @@
@@ -398,9 +398,9 @@ index bc88ae3..1799472 100644
  #include "dockapp_prefs.h"
  #include "i18n.h"
  #include "dockapps.h"
-@@ -86,6 +87,7 @@ int main(int argc, const char **argv)
-         &wlmaker_tile_drag_test_set,
+@@ -88,6 +89,7 @@ int main(int argc, const char **argv)
          &wlmaker_toplevel_tracker_test_set,
+         &wlm_workspace_manager_test_set,
          &wlmaker_xdg_decoration_test_set,
 +        &wlmaker_window_attributes_test_set,
          &wlmaker_xdg_toplevel_test_set,

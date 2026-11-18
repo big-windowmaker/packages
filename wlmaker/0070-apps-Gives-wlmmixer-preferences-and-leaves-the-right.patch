@@ -1,8 +1,8 @@
-From 5685947d52dec89063b28c4259fe2ac6021ceb61 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 02:58:42 -0300
-Subject: [PATCH 70/73] apps: Gives wlmmixer preferences, and leaves the right
- button to wlmaker.
+Subject: [PATCH] apps: Gives wlmmixer preferences, and leaves the right button
+ to wlmaker.
 
 wlmaker opens the dock-app's menu on a right-click, which offers muting and
 the mixer application. A middle click still starts the mixer application.
@@ -453,5 +453,5 @@ index fb53538..9868e8e 100644
      return rv;
  }
 -- 
-2.55.0
+2.56.0
 

@@ -1,4 +1,4 @@
-From 5a89f0c198219e5c5568d360600b1c2936d15ee1 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sun, 15 Nov 2026 20:59:42 -0300
 Subject: [PATCH] xwl: Dissociates when the wlr_surface is destroyed, before
@@ -21,10 +21,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 60 insertions(+)
 
 diff --git a/src/xwl_surface.c b/src/xwl_surface.c
-index b3c9a10..fbdf2a1 100644
+index 1f70169..c8fbd84 100644
 --- a/src/xwl_surface.c
 +++ b/src/xwl_surface.c
-@@ -117,6 +117,19 @@ struct _wlmaker_xwl_surface_t {
+@@ -125,6 +125,19 @@ struct _wlmaker_xwl_surface_t {
      struct wl_listener        surface_unmap_listener;
      /** Listener for the `commit` signal. */
      struct wl_listener        surface_commit_listener;
@@ -44,7 +44,7 @@ index b3c9a10..fbdf2a1 100644
  
      /** Listener for @ref wlmtk_window_events_t::request_close. */
      struct wl_listener        window_request_close_listener;
-@@ -211,6 +224,9 @@ static void _xwl_surface_handle_associate(
+@@ -268,6 +281,9 @@ static void _xwl_surface_handle_associate(
  static void _xwl_surface_handle_dissociate(
      struct wl_listener *listener_ptr,
      void *data_ptr);
@@ -54,7 +54,7 @@ index b3c9a10..fbdf2a1 100644
  
  static void _xwl_surface_handle_set_class(
      struct wl_listener *listener_ptr,
-@@ -506,6 +522,8 @@ void wlmaker_xwl_surface_destroy(wlmaker_xwl_surface_t *xwl_surface_ptr)
+@@ -572,6 +588,8 @@ void wlmaker_xwl_surface_destroy(wlmaker_xwl_surface_t *xwl_surface_ptr)
      wlmtk_util_disconnect_listener(&xwl_surface_ptr->set_class_listener);
      wlmtk_util_disconnect_listener(&xwl_surface_ptr->set_title_listener);
      wlmtk_util_disconnect_listener(&xwl_surface_ptr->dissociate_listener);
@@ -63,7 +63,7 @@ index b3c9a10..fbdf2a1 100644
      wlmtk_util_disconnect_listener(&xwl_surface_ptr->associate_listener);
      wlmtk_util_disconnect_listener(&xwl_surface_ptr->request_configure_listener);
      wlmtk_util_disconnect_listener(&xwl_surface_ptr->request_minimize_listener);
-@@ -1018,6 +1036,16 @@ void _xwl_surface_handle_associate(
+@@ -1087,6 +1105,16 @@ void _xwl_surface_handle_associate(
  
      BS_ASSERT(NULL == xwl_surface_ptr->surface_ptr);
  
@@ -80,7 +80,7 @@ index b3c9a10..fbdf2a1 100644
      // An X11 dock-app (its withdrawn leader, or its icon window): A tile on
      // the docks, no window.
      if (_xwl_surface_handle_dockapp(xwl_surface_ptr)) return;
-@@ -1154,6 +1182,15 @@ void _xwl_surface_handle_dissociate(
+@@ -1234,6 +1262,15 @@ void _xwl_surface_handle_dissociate(
      wlmaker_xwl_surface_t *xwl_surface_ptr = BS_CONTAINER_OF(
          listener_ptr, wlmaker_xwl_surface_t, dissociate_listener);
  
@@ -96,7 +96,7 @@ index b3c9a10..fbdf2a1 100644
      bs_log(BS_INFO, "Dissociate XWL surface %p from wlr_surface %p",
             xwl_surface_ptr, xwl_surface_ptr->wlr_xwayland_surface_ptr->surface);
  
-@@ -1216,6 +1253,29 @@ void _xwl_surface_handle_dissociate(
+@@ -1301,6 +1338,29 @@ void _xwl_surface_handle_dissociate(
      xwl_surface_ptr->surface_ptr = NULL;
  }
  

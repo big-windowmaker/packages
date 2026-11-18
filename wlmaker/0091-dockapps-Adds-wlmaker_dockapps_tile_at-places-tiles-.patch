@@ -1,8 +1,8 @@
-From 95d7780b1398f3c8baf25424ac915ba3a35f5dc2 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 18:17:37 -0300
-Subject: [PATCH 91/99] dockapps: Adds wlmaker_dockapps_tile_at, places tiles
- at the dock's start.
+Subject: [PATCH] dockapps: Adds wlmaker_dockapps_tile_at, places tiles at the
+ dock's start.
 
 wlmtk_box only sets an element's position along the box: A tile moved
 from a vertical dock to a horizontal one kept its y position. The tile
@@ -77,5 +77,5 @@ index 9584cca..25644c1 100644
  const char *wlmaker_dockapps_name(
      wlmaker_dockapps_t *dockapps_ptr,
 -- 
-2.55.0
+2.56.0
 

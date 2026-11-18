@@ -1,8 +1,8 @@
-From a13c18605c7bb82f7f169074e5ff80589107f2a8 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Rafael Ruscher <rruscher@gmail.com>
 Date: Sat, 14 Nov 2026 23:22:29 -0300
-Subject: [PATCH 153/153] layer_panel: Plain panels keep the pointer while a
- button is held.
+Subject: [PATCH] layer_panel: Plain panels keep the pointer while a button is
+ held.
 
 Pressing a button on a layer surface and moving the pointer off it lost
 the motion and the release: The panel only had a pointer grab for the Dock

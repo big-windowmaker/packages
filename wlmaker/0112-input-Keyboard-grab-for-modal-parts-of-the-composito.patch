@@ -1,8 +1,7 @@
-From 0ceac08b05504482be8e1b5333b003ba758c58d7 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Thu, 5 Nov 2026 09:06:39 -0300
-Subject: [PATCH 112/116] input: Keyboard grab for modal parts of the
- compositor
+Subject: [PATCH] input: Keyboard grab for modal parts of the compositor
 
 wlmim_set_key_grab() routes every key press to a callback until it is
 reset, before any key binding; releases still reach clients so no key

@@ -1,7 +1,7 @@
-From 76ddbb91be98cac6eb826303173da13791c35e32 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <teste@hemofilia.org.br>
 Date: Mon, 26 Oct 2026 23:23:33 -0300
-Subject: [PATCH 45/48] dock: Draws without running out of output buffers.
+Subject: [PATCH] dock: Draws without running out of output buffers.
 
 The transparent buffer below the dock's contents was replaced on every
 commit: wlmdock then ran out of buffers ('No free output buffer slot'),
@@ -38,7 +38,7 @@ index 6ec90b3..5031eb4 100644
          wlr_scene_buffer_set_buffer(
              container_surface_ptr->transparent_buffer_ptr, wlr_buffer_ptr);
 diff --git a/src/dock/subcompositor.c b/src/dock/subcompositor.c
-index f932775..5411fcd 100644
+index d869dda..bedaa65 100644
 --- a/src/dock/subcompositor.c
 +++ b/src/dock/subcompositor.c
 @@ -100,6 +100,13 @@ struct _wlmdock_subcompositor_t {
@@ -96,5 +96,5 @@ index f932775..5411fcd 100644
  }
  
 -- 
-2.55.0
+2.56.0
 

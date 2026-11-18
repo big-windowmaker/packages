@@ -1,4 +1,4 @@
-From 9eb2bc038da58344b3870283716123dd46cf2f49 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 16:04:40 -0300
 Subject: [PATCH] corner: Fixes the swapped bottom corners; permits actions
@@ -24,7 +24,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 207 insertions(+), 60 deletions(-)
 
 diff --git a/src/corner.c b/src/corner.c
-index ab482e3..e0b227d 100644
+index 1f79fe4..52f66a7 100644
 --- a/src/corner.c
 +++ b/src/corner.c
 @@ -41,6 +41,14 @@
@@ -42,7 +42,7 @@ index ab482e3..e0b227d 100644
  /**
   * State of the hot-corner handler.
   *
-@@ -85,21 +93,21 @@ struct _wlmaker_corner_t {
+@@ -87,21 +95,21 @@ struct _wlmaker_corner_t {
      /** Configuration: Wait time before triggering 'Enter',. */
      uint64_t                  trigger_delay_msec;
      /** Action when entering the top-left corner. */
@@ -72,7 +72,7 @@ index ab482e3..e0b227d 100644
  };
  
  static void _wlmaker_corner_clear(wlmaker_corner_t *corner_ptr);
-@@ -113,6 +121,19 @@ static void _wlmaker_corner_evaluate(
+@@ -115,6 +123,19 @@ static void _wlmaker_corner_evaluate(
      wlmaker_corner_t *corner_ptr);
  
  static int _wlmaker_corner_handle_timer(void *data_ptr);
@@ -92,7 +92,7 @@ index ab482e3..e0b227d 100644
  
  static void _wlmaker_corner_handle_output_layout_changed(
      struct wl_listener *listener_ptr,
-@@ -128,38 +149,46 @@ static const bspl_desc_t _wlmaker_corner_config_desc[] = {
+@@ -130,38 +151,46 @@ static const bspl_desc_t _wlmaker_corner_config_desc[] = {
      BSPL_DESC_UINT64(
          "TriggerDelay", true, wlmaker_corner_t,
          trigger_delay_msec, trigger_delay_msec, 500),
@@ -157,7 +157,7 @@ index ab482e3..e0b227d 100644
      BSPL_DESC_SENTINEL()
  };
  
-@@ -231,6 +260,7 @@ void wlmaker_corner_destroy(wlmaker_corner_t *corner_ptr)
+@@ -234,6 +263,7 @@ void wlmaker_corner_destroy(wlmaker_corner_t *corner_ptr)
          corner_ptr->timer_event_source_ptr = NULL;
      }
  
@@ -165,7 +165,7 @@ index ab482e3..e0b227d 100644
      free(corner_ptr);
  }
  
-@@ -246,23 +276,10 @@ void _wlmaker_corner_clear(wlmaker_corner_t *corner_ptr)
+@@ -249,23 +279,10 @@ void _wlmaker_corner_clear(wlmaker_corner_t *corner_ptr)
      wl_event_source_timer_update(corner_ptr->timer_event_source_ptr, 0);
  
      if (corner_ptr->corner_triggered) {
@@ -193,7 +193,7 @@ index ab482e3..e0b227d 100644
          corner_ptr->corner_triggered = false;
      }
      corner_ptr->current_corner = 0;
-@@ -343,30 +360,131 @@ void _wlmaker_corner_evaluate(
+@@ -346,30 +363,131 @@ void _wlmaker_corner_evaluate(
  }
  
  /* ------------------------------------------------------------------------- */
@@ -342,7 +342,7 @@ index ab482e3..e0b227d 100644
      return 0;
  }
  
-@@ -441,6 +559,8 @@ void _wlmaker_corner_test(bs_test_t *test_ptr)
+@@ -443,6 +561,8 @@ void _wlmaker_corner_test(bs_test_t *test_ptr)
      bspl_object_t *obj_ptr = bspl_create_object_from_plist_string(
          "{"
          "TriggerDelay = 500;"
@@ -351,7 +351,7 @@ index ab482e3..e0b227d 100644
          "}");
      BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, obj_ptr);
  
-@@ -465,6 +585,33 @@ void _wlmaker_corner_test(bs_test_t *test_ptr)
+@@ -467,6 +587,33 @@ void _wlmaker_corner_test(bs_test_t *test_ptr)
      BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, c_ptr);
  
      BS_TEST_VERIFY_EQ(test_ptr, 500, c_ptr->trigger_delay_msec);
@@ -386,5 +386,5 @@ index ab482e3..e0b227d 100644
      BS_TEST_VERIFY_EQ(
          test_ptr, 0, c_ptr->current_corner);
 -- 
-2.55.0
+2.56.0
 

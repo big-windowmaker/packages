@@ -1,8 +1,8 @@
-From 61871c78c13a09dcbca635e18099035dfb6f99f3 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 17:45:29 -0300
-Subject: [PATCH 15/17] toolkit: Keeps a right-click menu open when it was
- opened by a click.
+Subject: [PATCH] toolkit: Keeps a right-click menu open when it was opened by
+ a click.
 
 In right-click mode, the menu is mapped at the pointer position. A quick
 right click (press, then release without moving) released the button on
@@ -366,3 +366,6 @@ index 6a21de5..9d57c28 100644
 +}
 +
  /* == End of menu.c ======================================================== */
+-- 
+2.56.0
+

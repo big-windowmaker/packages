@@ -1,8 +1,7 @@
-From f549c7468a72993d042201990752cbb4e6ee1a54 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 10:08:29 -0300
-Subject: [PATCH 134/136] Root menu: Window Maker behaviour for submenus and
- clicks
+Subject: [PATCH] Root menu: Window Maker behaviour for submenus and clicks
 
 - Submenus carry their title (title bar style); dragging it tears off a
   copy as a pinned window with the close button, also from torn copies.

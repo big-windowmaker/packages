@@ -1,0 +1,142 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Wed, 18 Nov 2026 13:59:49 -0300
+Subject: [PATCH] app_icon, wlmmixer, wlmnetgraph: Fixes compiler warnings.
+
+app_icon: A path that does not fit the buffer is skipped (or the lookup
+ends), instead of opening a truncated one (-Wformat-truncation).
+wlmmixer: The icon position is set also when the icon has no size yet
+(-Wmaybe-uninitialized: an undefined volume on such a drag).
+wlmnetgraph: The rate labels have room for the largest values (a rate in
+terabytes was cut, -Wformat-truncation).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ apps/wlmmixer.c    |  1 +
+ apps/wlmnetgraph.c |  4 ++--
+ src/app_icon.c     | 39 +++++++++++++++++++++++++++------------
+ 3 files changed, 30 insertions(+), 14 deletions(-)
+
+diff --git a/apps/wlmmixer.c b/apps/wlmmixer.c
+index 9868e8e..e649875 100644
+--- a/apps/wlmmixer.c
++++ b/apps/wlmmixer.c
+@@ -654,6 +654,7 @@ static void _set_volume_percent(mixer_t *mixer_ptr, unsigned percent)
+ static bool _on_meter(mixer_t *mixer_ptr, double x, double y,
+                       double *icon_x_ptr)
+ {
++    *icon_x_ptr = 0;
+     if (0 == mixer_ptr->width || 0 == mixer_ptr->height) return false;
+     double ix = x * ICON_SIZE / mixer_ptr->width;
+     double iy = y * ICON_SIZE / mixer_ptr->height;
+diff --git a/apps/wlmnetgraph.c b/apps/wlmnetgraph.c
+index f108619..00892eb 100644
+--- a/apps/wlmnetgraph.c
++++ b/apps/wlmnetgraph.c
+@@ -153,7 +153,7 @@ typedef struct {
+     /** Transmit rate, in bytes per second. */
+     unsigned long long tx_per_sec;
+     /** The label. */
+-    char label[48];
++    char label[80];  // Two arrows (3 bytes each), two rates, newline.
+ } netgraph_state_t;
+ 
+ /* == Label ================================================================ */
+@@ -214,7 +214,7 @@ static size_t _scale_index_ceil(const unsigned long long val)
+ static const char *_label_fn(void *app_state)
+ {
+     netgraph_state_t *state = app_state;
+-    char a[16], b[16];
++    char a[32], b[32];  // Up to 20 digits, a unit and a suffix.
+     if (state->label_rates) {
+         _format_rate(a, sizeof(a), state->rx_per_sec, state->bits);
+         _format_rate(b, sizeof(b), state->tx_per_sec, state->bits);
+diff --git a/src/app_icon.c b/src/app_icon.c
+index 9e8d0a7..f240e3d 100644
+--- a/src/app_icon.c
++++ b/src/app_icon.c
+@@ -226,7 +226,9 @@ static void _build_wmclass_index(void)
+                 continue;
+             }
+             char path[PATH_MAX + 288];
+-            snprintf(path, sizeof(path), "%s/%s", apps, de->d_name);
++            if ((size_t)snprintf(path, sizeof(path), "%s/%s", apps, de->d_name) >= sizeof(path)) {
++                continue;  // Does not fit: not a file we could open.
++            }
+             char *wmclass_ptr = _desktop_value(path, "StartupWMClass");
+             if (NULL == wmclass_ptr) continue;
+             char *icon_ptr = _desktop_value(path, "Icon");
+@@ -265,8 +267,10 @@ char *_desktop_icon(const char *name_ptr)
+     for (size_t c = 0; c < 2; ++c) {
+         for (size_t i = 0; i < n; ++i) {
+             char path[PATH_MAX + 256];
+-            snprintf(path, sizeof(path), "%s/applications/%s.desktop",
+-                     dirs[i], candidates[c]);
++            if ((size_t)snprintf(path, sizeof(path), "%s/applications/%s.desktop",
++                     dirs[i], candidates[c]) >= sizeof(path)) {
++                continue;  // Does not fit: not a file we could open.
++            }
+             char *icon_ptr = _desktop_value(path, "Icon");
+             if (NULL != icon_ptr) return icon_ptr;
+         }
+@@ -312,10 +316,15 @@ static char *_user_icon_theme(void)
+     const char *ch_ptr = getenv("XDG_CONFIG_HOME");
+     const char *home_ptr = getenv("HOME");
+     if (NULL != ch_ptr && '/' == *ch_ptr) {
+-        snprintf(path, sizeof(path), "%s/gtk-3.0/settings.ini", ch_ptr);
++        if ((size_t)snprintf(path, sizeof(path), "%s/gtk-3.0/settings.ini",
++                             ch_ptr) >= sizeof(path)) {
++            return NULL;  // Does not fit: not a file we could open.
++        }
+     } else if (NULL != home_ptr) {
+-        snprintf(path, sizeof(path), "%s/.config/gtk-3.0/settings.ini",
+-                 home_ptr);
++        if ((size_t)snprintf(path, sizeof(path), "%s/.config/gtk-3.0/settings.ini",
++                 home_ptr) >= sizeof(path)) {
++            return NULL;  // Does not fit: not a file we could open.
++        }
+     } else {
+         return NULL;
+     }
+@@ -363,8 +372,10 @@ char *_find_icon_file(const char *icon_ptr, int size)
+     if (0 < nthemes) {
+         for (size_t i = 0; i < ndirs && nthemes < 5; ++i) {
+             char path[PATH_MAX + 256];
+-            snprintf(path, sizeof(path), "%s/icons/%s/index.theme",
+-                     dirs[i], themes[0]);
++            if ((size_t)snprintf(path, sizeof(path), "%s/icons/%s/index.theme",
++                     dirs[i], themes[0]) >= sizeof(path)) {
++                continue;  // Does not fit: not a file we could open.
++            }
+             FILE *f = fopen(path, "r");
+             if (NULL == f) continue;
+             char line[512];
+@@ -403,8 +414,10 @@ char *_find_icon_file(const char *icon_ptr, int size)
+             for (size_t i = 0; i < ndirs; ++i) {
+                 for (size_t e = 0; e < 2; ++e) {
+                     char path[PATH_MAX + 512];
+-                    snprintf(path, sizeof(path), "%s/icons/%s/%s/apps/%s.%s",
+-                             dirs[i], themes[t], sizes[s], icon_ptr, exts[e]);
++                    if ((size_t)snprintf(path, sizeof(path), "%s/icons/%s/%s/apps/%s.%s",
++                             dirs[i], themes[t], sizes[s], icon_ptr, exts[e]) >= sizeof(path)) {
++                        continue;  // Does not fit: not a file we could open.
++                    }
+                     if (_is_file(path)) return logged_strdup(path);
+                 }
+             }
+@@ -413,8 +426,10 @@ char *_find_icon_file(const char *icon_ptr, int size)
+     for (size_t i = 0; i < ndirs; ++i) {
+         for (size_t e = 0; e < 2; ++e) {
+             char path[PATH_MAX + 512];
+-            snprintf(path, sizeof(path), "%s/pixmaps/%s.%s",
+-                     dirs[i], icon_ptr, exts[e]);
++            if ((size_t)snprintf(path, sizeof(path), "%s/pixmaps/%s.%s",
++                     dirs[i], icon_ptr, exts[e]) >= sizeof(path)) {
++                continue;  // Does not fit: not a file we could open.
++            }
+             if (_is_file(path)) return logged_strdup(path);
+         }
+     }
+-- 
+2.56.0
+

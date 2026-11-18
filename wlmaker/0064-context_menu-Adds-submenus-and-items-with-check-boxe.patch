@@ -1,8 +1,8 @@
-From 8120d0ff6c5d9ffd7b90f025f9bb902ab33fd3d4 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 02:37:17 -0300
-Subject: [PATCH 64/73] context_menu: Adds submenus, and items with check boxes
- or radio buttons.
+Subject: [PATCH] context_menu: Adds submenus, and items with check boxes or
+ radio buttons.
 
 wlmaker_context_menu_add_submenu adds an item with a submenu, to the
 context menu or to one of its submenus. wlmaker_context_menu_add_option adds
@@ -280,5 +280,5 @@ index e3d5916..7edff09 100644
   * Opens the context menu in right-click mode, at the pointer's position and
   * within the usable area of the output: Not covering docks and panels.
 -- 
-2.55.0
+2.56.0
 

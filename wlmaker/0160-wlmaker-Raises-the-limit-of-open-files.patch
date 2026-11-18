@@ -53,7 +53,7 @@ index 0000000..34f2024
 +
 +Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 diff --git a/src/wlmaker.c b/src/wlmaker.c
-index 6fe8a9c..8c009e0 100644
+index c506233..7e9c964 100644
 --- a/src/wlmaker.c
 +++ b/src/wlmaker.c
 @@ -23,6 +23,7 @@
@@ -73,7 +73,7 @@ index 6fe8a9c..8c009e0 100644
  #include <wayland-server-core.h>
  /// Use non-stable features of wlroots.
  #define WLR_USE_UNSTABLE
-@@ -145,6 +148,11 @@ static struct wl_event_source *wlmaker_sighup_event_source_ptr = NULL;
+@@ -146,6 +149,11 @@ static struct wl_event_source *wlmaker_sighup_event_source_ptr = NULL;
  /** References auto-started subprocesses. */
  static bs_ptr_stack_t         wlmaker_subprocess_stack;
  
@@ -82,10 +82,10 @@ index 6fe8a9c..8c009e0 100644
 +/** Whether @ref wlmaker_nofile_rlimit was raised, and needs restoring. */
 +static bool                   wlmaker_nofile_rlimit_raised = false;
 +
- /** Contents of the workspace style. */
- typedef struct {
-     /** Workspace name. */
-@@ -232,13 +240,72 @@ static int _wlmaker_handle_sighup(__UNUSED__ int signal_number, void *data_ptr)
+ /* ------------------------------------------------------------------------- */
+ /** Launches a sub-process, and keeps it on the subprocess stack. */
+ bool start_subprocess(const char *cmdline_ptr)
+@@ -176,13 +184,72 @@ static int _wlmaker_handle_sighup(__UNUSED__ int signal_number, void *data_ptr)
  }
  
  /* ------------------------------------------------------------------------- */
@@ -159,7 +159,7 @@ index 6fe8a9c..8c009e0 100644
  }
  
  /* == Main program ========================================================= */
-@@ -281,6 +348,9 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+@@ -225,6 +292,9 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
      bs_log(BS_INFO, "Starting wlmaker %s (%s)",
             wlm_util_version,
             wlm_util_version_full);
@@ -169,14 +169,14 @@ index 6fe8a9c..8c009e0 100644
  
      wlm_util_files_t *files_ptr = wlm_util_files_create("wlmaker");
      if (NULL == files_ptr) {
-@@ -357,7 +427,6 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+@@ -301,7 +371,6 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
          bs_log(BS_WARNING, "Failed wl_event_loop_add_signal(SIGHUP): "
                 "Reloading by signal is not available.");
      }
 -    pthread_atfork(NULL, NULL, _wlmaker_atfork_child);
  
-     if (!create_workspaces(state_dict_ptr, server_ptr)) {
-         return EXIT_FAILURE;
+     if (!wlm_workspace_manager_apply_state(
+             server_ptr->workspace_manager_ptr,
 -- 
 2.56.0
 

@@ -1,8 +1,8 @@
-From cc0dfe27d4ea11454354b5d94498a03ca942bd5d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <teste@hemofilia.org.br>
 Date: Mon, 26 Oct 2026 23:23:38 -0300
-Subject: [PATCH 47/48] i18n: Adds a small translation table for menu items,
- with Portuguese.
+Subject: [PATCH] i18n: Adds a small translation table for menu items, with
+ Portuguese.
 
 wlmaker_i18n() translates the items of the Clip's, Dock's and dock-apps'
 menus for Portuguese locales (pt, pt_BR), taken from LANGUAGE, LC_ALL,
@@ -18,10 +18,10 @@ gettext catalogs. With a unit test.
  create mode 100644 src/i18n.h
 
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index a2dbf9c..29a76a6 100644
+index 1669f93..80dac40 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -34,6 +34,7 @@ set(public_header_files
+@@ -47,6 +47,7 @@ set(public_header_files
    context_menu.h
    corner.h
    dock_position.h
@@ -29,7 +29,7 @@ index a2dbf9c..29a76a6 100644
    dockapps.h
    icon_manager.h
    idle.h
-@@ -61,6 +62,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -75,6 +76,7 @@ target_sources(wlmaker_lib PRIVATE
    context_menu.c
    corner.c
    dock_position.c
@@ -246,7 +246,7 @@ index 0000000..9235e1e
 +#endif /* __WLMAKER_I18N_H__ */
 +/* == End of i18n.h ======================================================== */
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index f7b96a7..1987df2 100644
+index 323a5a8..9221c89 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -29,6 +29,7 @@
@@ -257,7 +257,7 @@ index f7b96a7..1987df2 100644
  #include "dockapps.h"
  #include "layer_panel.h"
  #include "lock_mgr.h"
-@@ -60,6 +61,7 @@ int main(int argc, const char **argv)
+@@ -61,6 +62,7 @@ int main(int argc, const char **argv)
          &wlmaker_context_menu_test_set,
          &wlmaker_corner_test_set,
          &wlmaker_dock_position_test_set,
@@ -266,5 +266,5 @@ index f7b96a7..1987df2 100644
          &wlmaker_layer_panel_test_set,
          &wlmaker_lock_mgr_test_set,
 -- 
-2.55.0
+2.56.0
 

@@ -1,4 +1,4 @@
-From 69c141a5e0da7abf0563ad46918e6b6f492cda9c Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Thu, 12 Nov 2026 00:30:56 -0300
 Subject: [PATCH] wlmeyes: The dock-app can be dragged to the Dock and the Clip
@@ -16,7 +16,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 11 insertions(+)
 
 diff --git a/apps/wlmeyes.c b/apps/wlmeyes.c
-index d5d8b0a6..5802edd7 100644
+index d5d8b0a..5802edd 100644
 --- a/apps/wlmeyes.c
 +++ b/apps/wlmeyes.c
 @@ -27,6 +27,7 @@

@@ -1,4 +1,4 @@
-From 5ac30bf934c01d7bfe8f9464dcfd85c0fb7d9e09 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 16:04:40 -0300
 Subject: [PATCH] config: Adds pointer acceleration, double-click time and
@@ -293,10 +293,10 @@ index c7a0708..4b79c5f 100644
  /** Unit test set for pointers. */
  extern const bs_test_set_t wlmim_pointer_test_set;
 diff --git a/src/server.c b/src/server.c
-index 8ad114f..ef573e9 100644
+index e0a0aed..1e30542 100644
 --- a/src/server.c
 +++ b/src/server.c
-@@ -187,20 +187,7 @@ wlmaker_server_t *wlmaker_server_create(
+@@ -188,20 +188,7 @@ wlmaker_server_t *wlmaker_server_create(
          wlmaker_server_destroy(server_ptr);
          return NULL;
      }
@@ -316,9 +316,9 @@ index 8ad114f..ef573e9 100644
 -    }
 +    wlmaker_server_configure_desktop(server_ptr, server_ptr->config_dict_ptr);
  
-     // root element wrapper.
-     server_ptr->root_ptr = wlmtk_root_create(
-@@ -387,6 +374,48 @@ wlmaker_server_t *wlmaker_server_create(
+     server_ptr->workspace_manager_ptr = wlm_workspace_manager_create(
+         server_ptr->wl_display_ptr,
+@@ -397,6 +384,48 @@ wlmaker_server_t *wlmaker_server_create(
      return server_ptr;
  }
  
@@ -368,10 +368,10 @@ index 8ad114f..ef573e9 100644
  void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
  {
 diff --git a/src/server.h b/src/server.h
-index 28d25d0..13d2aff 100644
+index bf0b795..64b21b4 100644
 --- a/src/server.h
 +++ b/src/server.h
-@@ -230,6 +230,18 @@ wlmaker_server_t *wlmaker_server_create(
+@@ -232,6 +232,18 @@ wlmaker_server_t *wlmaker_server_create(
   */
  void wlmaker_server_destroy(wlmaker_server_t *server_ptr);
  
@@ -391,10 +391,10 @@ index 28d25d0..13d2aff 100644
   * Activates the task list.
   *
 diff --git a/src/toolkit/desktop.c b/src/toolkit/desktop.c
-index 6e23d5b..37f3865 100644
+index 1f7adf0..5703a41 100644
 --- a/src/toolkit/desktop.c
 +++ b/src/toolkit/desktop.c
-@@ -89,6 +89,8 @@ struct _wlmtk_desktop_t {
+@@ -92,6 +92,8 @@ struct _wlmtk_desktop_t {
      struct wlr_output_layout  *wlr_output_layout_ptr;
      /** Policy for placing new windows. */
      wlmtk_window_placement_t  window_placement;
@@ -402,8 +402,8 @@ index 6e23d5b..37f3865 100644
 +    bool                      focus_follows_pointer;
  };
  
- static void _wlmtk_desktop_switch_to_workspace(
-@@ -625,6 +627,20 @@ wlmtk_window_placement_t wlmtk_desktop_get_window_placement(
+ static void _wlmtk_desktop_element_layout(wlmtk_element_t *element_ptr);
+@@ -605,6 +607,20 @@ wlmtk_window_placement_t wlmtk_desktop_get_window_placement(
      return desktop_ptr->window_placement;
  }
  
@@ -424,21 +424,22 @@ index 6e23d5b..37f3865 100644
  /* ------------------------------------------------------------------------- */
  wlmtk_element_t *wlmtk_desktop_element(wlmtk_desktop_t *desktop_ptr)
  {
-@@ -897,11 +913,13 @@ bool _wlmtk_desktop_workspace_set_style(
- 
+@@ -931,12 +947,14 @@ bool _wlmtk_desktop_workspace_set_style(
  static void test_create_destroy(bs_test_t *test_ptr);
  static void test_workspaces(bs_test_t *test_ptr);
+ static void test_layout(bs_test_t *test_ptr);
 +static void test_focus_follows_pointer(bs_test_t *test_ptr);
  
  /** Test cases */
  static const bs_test_case_t _wlmtk_desktop_test_cases[] = {
      { 1, "create_destroy", test_create_destroy },
      { 1, "workspaces", test_workspaces },
+     { 1, "layout", test_layout },
 +    { 1, "focus_follows_pointer", test_focus_follows_pointer },
      BS_TEST_CASE_SENTINEL()
  };
  
-@@ -971,6 +989,59 @@ static void test_destroy_current_last(
+@@ -1043,6 +1061,59 @@ static void test_destroy_current_last(
      wlmtk_workspace_destroy(ws1_ptr);
  }
  
@@ -539,7 +540,7 @@ index 836ffdf..646d46c 100644
  
  /* ------------------------------------------------------------------------- */
 diff --git a/src/toolkit/window.c b/src/toolkit/window.c
-index 47d44ed..04fd8e9 100644
+index df36ffc..dbf86e5 100644
 --- a/src/toolkit/window.c
 +++ b/src/toolkit/window.c
 @@ -142,6 +142,8 @@ struct _wlmtk_window_t {
@@ -581,7 +582,7 @@ index 47d44ed..04fd8e9 100644
      wlmtk_window_set_server_side_decorated(window_ptr, false);
  
      if (NULL != window_ptr->window_menu_ptr) {
-@@ -1311,6 +1322,29 @@ void _wlmtk_window_request_fullscreen_size(wlmtk_window_t *window_ptr,
+@@ -1312,6 +1323,29 @@ void _wlmtk_window_request_fullscreen_size(wlmtk_window_t *window_ptr,
      wl_signal_emit(&window_ptr->events.request_size, &desired_size);
  }
  
@@ -612,5 +613,5 @@ index 47d44ed..04fd8e9 100644
  
  static void test_create_destroy(bs_test_t *test_ptr);
 -- 
-2.55.0
+2.56.0
 

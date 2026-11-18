@@ -1,4 +1,4 @@
-From 3fb1c81c62522ed70c5d02b4617987233f991be9 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 16:47:28 -0300
 Subject: [PATCH] dock: Docked icons behave as on Window Maker: Drag, ghost,
@@ -79,10 +79,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 src/tile_drag.h
 
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 233fa28..d2cefc0 100644
+index 3c34a67..4afdc3c 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -34,6 +34,8 @@ set(public_header_files
+@@ -47,6 +47,8 @@ set(public_header_files
    context_menu.h
    corner.h
    dock_fx.h
@@ -91,15 +91,15 @@ index 233fa28..d2cefc0 100644
    dock_position.h
    dockapp_prefs.h
    i18n.h
-@@ -48,6 +50,7 @@ set(public_header_files
+@@ -61,6 +63,7 @@ set(public_header_files
    root_menu.h
    server.h
    task_list.h
 +  tile_drag.h
-   toplevel_tracker.h
    tl_menu.h
-   xdg_decoration.h
-@@ -65,6 +68,8 @@ target_sources(wlmaker_lib PRIVATE
+   toplevel_tracker.h
+   workspace_manager.h
+@@ -79,6 +82,8 @@ target_sources(wlmaker_lib PRIVATE
    context_menu.c
    corner.c
    dock_fx.c
@@ -108,14 +108,14 @@ index 233fa28..d2cefc0 100644
    dock_position.c
    dockapp_prefs.c
    i18n.c
-@@ -79,6 +84,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -93,6 +98,7 @@ target_sources(wlmaker_lib PRIVATE
    root_menu.c
    server.c
    task_list.c
 +  tile_drag.c
-   toplevel_tracker.c
    tl_menu.c
-   x11_cursor.xpm
+   toplevel_tracker.c
+   workspace_manager.c
 diff --git a/src/clip.c b/src/clip.c
 index 0d84fda..52cfc95 100644
 --- a/src/clip.c
@@ -3722,10 +3722,10 @@ index a42bfe3..6fbab99 100644
  extern const bs_test_set_t wlmaker_layer_panel_test_set;
  
 diff --git a/src/server.h b/src/server.h
-index bc09062..397266c 100644
+index 33a19e9..b1b1a5c 100644
 --- a/src/server.h
 +++ b/src/server.h
-@@ -199,6 +199,14 @@ struct _wlmaker_server_t {
+@@ -201,6 +201,14 @@ struct _wlmaker_server_t {
      wlmtk_dock_t              *clip_dock_ptr;
      /** Placement of dock-apps in the clip. Set by the clip, may be NULL. */
      struct _wlmaker_dockapps_t *dockapps_ptr;
@@ -4601,7 +4601,7 @@ index 0000000..1097ee1
 +#endif /* __WLMAKER_TILE_DRAG_H__ */
 +/* == End of tile_drag.h =================================================== */
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index 5e0ba94..5874188 100644
+index c252817..96846da 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -29,6 +29,8 @@
@@ -4620,8 +4620,8 @@ index 5e0ba94..5874188 100644
 +#include "tile_drag.h"
  #include "toplevel_tracker.h"
  #include "util/backtrace.h"
- #include "xdg_decoration.h"
-@@ -64,6 +67,8 @@ int main(int argc, const char **argv)
+ #include "workspace_manager.h"
+@@ -65,6 +68,8 @@ int main(int argc, const char **argv)
          &wlmaker_context_menu_test_set,
          &wlmaker_corner_test_set,
          &wlmaker_dock_fx_test_set,
@@ -4630,14 +4630,14 @@ index 5e0ba94..5874188 100644
          &wlmaker_dock_position_test_set,
          &wlmaker_dockapp_prefs_test_set,
          &wlmaker_i18n_test_set,
-@@ -72,6 +77,7 @@ int main(int argc, const char **argv)
+@@ -73,6 +78,7 @@ int main(int argc, const char **argv)
          &wlmaker_lock_mgr_test_set,
          &wlmaker_menu_scroll_test_set,
          &wlmaker_root_menu_test_set,
 +        &wlmaker_tile_drag_test_set,
          &wlmaker_toplevel_tracker_test_set,
+         &wlm_workspace_manager_test_set,
          &wlmaker_xdg_decoration_test_set,
-         &wlmaker_xdg_toplevel_test_set,
 -- 
-2.55.0
+2.56.0
 
