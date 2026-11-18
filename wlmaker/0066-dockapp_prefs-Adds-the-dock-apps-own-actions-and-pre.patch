@@ -1,7 +1,7 @@
-From 79d715e975bec9383b34adb669cbb6300fcbc1de Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 02:46:06 -0300
-Subject: [PATCH 66/73] dockapp_prefs: Adds the dock-apps' own actions and
+Subject: [PATCH] dockapp_prefs: Adds the dock-apps' own actions and
  preferences to their menus.
 
 What a dock-app's menu offers is described in share/wlmaker/Dockapps.plist,
@@ -239,10 +239,10 @@ index 0000000..9fc02fc
 +  };
 +}
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index e6079b1..7a301d0 100644
+index fff678b..677d694 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -34,6 +34,7 @@ set(public_header_files
+@@ -47,6 +47,7 @@ set(public_header_files
    context_menu.h
    corner.h
    dock_position.h
@@ -250,7 +250,7 @@ index e6079b1..7a301d0 100644
    i18n.h
    dockapps.h
    icon_manager.h
-@@ -63,6 +64,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -77,6 +78,7 @@ target_sources(wlmaker_lib PRIVATE
    context_menu.c
    corner.c
    dock_position.c
@@ -1328,7 +1328,7 @@ index beb7ab4..75300fb 100644
          if (0 == wlmaker_dockapps_delta_towards(
                  server_ptr->dockapps_ptr, tile_ptr, moves[i].direction)) {
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index 73e117e..4903a3c 100644
+index ca8f2c4..90938f7 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -29,6 +29,7 @@
@@ -1339,7 +1339,7 @@ index 73e117e..4903a3c 100644
  #include "i18n.h"
  #include "dockapps.h"
  #include "layer_panel.h"
-@@ -62,6 +63,7 @@ int main(int argc, const char **argv)
+@@ -63,6 +64,7 @@ int main(int argc, const char **argv)
          &wlmaker_context_menu_test_set,
          &wlmaker_corner_test_set,
          &wlmaker_dock_position_test_set,
@@ -1348,5 +1348,5 @@ index 73e117e..4903a3c 100644
          &wlmaker_dockapps_test_set,
          &wlmaker_layer_panel_test_set,
 -- 
-2.55.0
+2.56.0
 

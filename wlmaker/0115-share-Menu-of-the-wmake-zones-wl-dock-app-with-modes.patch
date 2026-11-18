@@ -1,8 +1,8 @@
-From 3371f01a948a6824aea9fdf4ab616f22c912daba Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Thu, 5 Nov 2026 09:07:57 -0300
-Subject: [PATCH 115/116] share: Menu of the wmake-zones-wl dock-app with
- modes, undo and settings
+Subject: [PATCH] share: Menu of the wmake-zones-wl dock-app with modes, undo
+ and settings
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---

@@ -1,8 +1,8 @@
-From 939968833478bea09b1069693624fa1dfc0e2bd9 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 18:59:57 -0300
-Subject: [PATCH 27/30] wlclient: Forwards pointer button and axis events to
- the client.
+Subject: [PATCH] wlclient: Forwards pointer button and axis events to the
+ client.
 
 The client bound the seat's pointer, but ignored its button and axis
 events. DockApps could therefore not react to clicks or the scroll
@@ -240,5 +240,5 @@ index 9dfd2f1..674acd5 100644
  
  /** Key event. */
 -- 
-2.55.0
+2.56.0
 

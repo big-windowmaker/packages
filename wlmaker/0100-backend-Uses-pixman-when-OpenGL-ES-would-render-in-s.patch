@@ -1,8 +1,7 @@
-From 9948508a4c13d6f722d7082b3a7cf2e49b285c1b Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Wed, 28 Oct 2026 08:00:55 -0300
-Subject: [PATCH 100/103] backend: Uses pixman when OpenGL ES would render in
- software.
+Subject: [PATCH] backend: Uses pixman when OpenGL ES would render in software.
 
 On a virtual machine without 3D acceleration (eg. QEMU's virtio-gpu
 without virgl), or a GPU without a Mesa driver, wlroots' automatic
@@ -200,5 +199,5 @@ index cf57471..12a2283 100644
  
  static void _wlmbe_backend_test_find(bs_test_t *test_ptr);
 -- 
-2.55.0
+2.56.0
 

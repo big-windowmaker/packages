@@ -1,8 +1,8 @@
-From 14004835f153c3fde6af2a21332490fdde3c6ed4 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 17:49:01 -0300
-Subject: [PATCH 02/17] xdg_decoration: Adds support for the KDE server
- decoration protocol.
+Subject: [PATCH] xdg_decoration: Adds support for the KDE server decoration
+ protocol.
 
 GTK3 does not implement xdg-decoration-unstable-v1, but binds
 org_kde_kwin_server_decoration_manager and requests server-side
@@ -27,7 +27,7 @@ Signed-off-by: ruscher <rruscher@gmail.com>
  3 files changed, 336 insertions(+)
 
 diff --git a/doc/FEATURES.md b/doc/FEATURES.md
-index d108660..045cdd8 100644
+index cf2fa85..2fc63fa 100644
 --- a/doc/FEATURES.md
 +++ b/doc/FEATURES.md
 @@ -33,6 +33,7 @@ that map to above states.
@@ -38,7 +38,7 @@ index d108660..045cdd8 100644
  * [ ] Override decoration setting per application.
  * [ ] Configure applying window decoration in case application does not support decoration protocol.
  
-@@ -263,6 +264,10 @@ TBD: Raise/Lower.
+@@ -269,6 +270,10 @@ TBD: Raise/Lower.
  * [ ] Switch to the window's workspace, when on a different workspace.
  * [ ] Consider focus stealing prevention (validate token seat and serial).
  
@@ -73,7 +73,7 @@ index 21cfceb..221aa47 100644
  
  This interface allows a compositor to announce support for server-side
 diff --git a/src/xdg_decoration.c b/src/xdg_decoration.c
-index 98bbd72..0c68c07 100644
+index 95f7662..d8fa125 100644
 --- a/src/xdg_decoration.c
 +++ b/src/xdg_decoration.c
 @@ -21,6 +21,7 @@
@@ -84,17 +84,18 @@ index 98bbd72..0c68c07 100644
  #include <libbase/libbase.h>
  #include <libbase/plist.h>
  #include <stdbool.h>
-@@ -30,7 +31,9 @@
+@@ -30,8 +31,10 @@
  #include <wayland-util.h>
  #define WLR_USE_UNSTABLE
  #include <wlr/types/wlr_compositor.h>
 +#include <wlr/types/wlr_server_decoration.h>
  #include <wlr/types/wlr_xdg_decoration_v1.h>
+ #include <wlr/version.h>
 +#include <wlr/types/wlr_xdg_shell.h>
  #undef WLR_USE_UNSTABLE
  
  #include "config.h"
-@@ -57,8 +60,30 @@ struct _wlmaker_xdg_decoration_manager_t {
+@@ -58,8 +61,30 @@ struct _wlmaker_xdg_decoration_manager_t {
      /** Listener for `destroy` of `wlr_xdg_decoration_manager_v1`. */
      struct wl_listener        destroy_listener;
  
@@ -125,7 +126,7 @@ index 98bbd72..0c68c07 100644
  /** A decoration handle. */
  typedef struct {
      /** Points to the wlroots `wlr_xdg_toplevel_decoration_v1`. */
-@@ -102,6 +127,26 @@ static void _xdg_decoration_handle_surface_destroy(
+@@ -103,6 +128,26 @@ static void _xdg_decoration_handle_surface_destroy(
      struct wl_listener *listener_ptr,
      void *data_ptr);
  
@@ -152,7 +153,7 @@ index 98bbd72..0c68c07 100644
  /* == Data ================================================================= */
  
  /** Plist descriptor of decoration mode. @see wlmaker_config_decoration_t. */
-@@ -163,6 +208,23 @@ wlmaker_xdg_decoration_manager_t *wlmaker_xdg_decoration_manager_create(
+@@ -171,6 +216,23 @@ wlmaker_xdg_decoration_manager_t *wlmaker_xdg_decoration_manager_create(
          return NULL;
      }
  
@@ -176,7 +177,7 @@ index 98bbd72..0c68c07 100644
      wlmtk_util_connect_listener_signal(
          &decoration_manager_ptr->wlr_xdg_decoration_manager_v1_ptr->
          events.new_toplevel_decoration,
-@@ -181,6 +243,7 @@ wlmaker_xdg_decoration_manager_t *wlmaker_xdg_decoration_manager_create(
+@@ -189,6 +251,7 @@ wlmaker_xdg_decoration_manager_t *wlmaker_xdg_decoration_manager_create(
  void wlmaker_xdg_decoration_manager_destroy(
      wlmaker_xdg_decoration_manager_t *decoration_manager_ptr)
  {
@@ -184,7 +185,7 @@ index 98bbd72..0c68c07 100644
      wlmtk_util_disconnect_listener(&decoration_manager_ptr->new_toplevel_decoration_listener);
      wlmtk_util_disconnect_listener(&decoration_manager_ptr->destroy_listener);
  
-@@ -230,6 +293,8 @@ static void handle_destroy(
+@@ -238,6 +301,8 @@ static void handle_destroy(
      wlmaker_xdg_decoration_manager_t *decoration_manager_ptr = BS_CONTAINER_OF(
          listener_ptr, wlmaker_xdg_decoration_manager_t, destroy_listener);
  
@@ -193,7 +194,7 @@ index 98bbd72..0c68c07 100644
      free(decoration_manager_ptr);
  }
  
-@@ -427,17 +492,182 @@ void _xdg_decoration_handle_surface_destroy(
+@@ -435,17 +500,182 @@ void _xdg_decoration_handle_surface_destroy(
      wlmtk_util_disconnect_listener(&decoration_ptr->surface_destroy_listener);
  }
  
@@ -376,7 +377,7 @@ index 98bbd72..0c68c07 100644
      BS_TEST_CASE_SENTINEL()
  };
  
-@@ -482,6 +712,10 @@ void test_manager(bs_test_t *test_ptr)
+@@ -490,6 +720,10 @@ void test_manager(bs_test_t *test_ptr)
          wlmaker_xdg_decoration_manager_create(
              wl_display_ptr, bspl_dict_from_object(o));
      BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, d);
@@ -387,7 +388,7 @@ index 98bbd72..0c68c07 100644
  
      wlmaker_xdg_decoration_manager_destroy(d);
      bspl_object_unref(o);
-@@ -608,4 +842,89 @@ void test_decoration_uninitialized(bs_test_t *test_ptr)
+@@ -616,4 +850,89 @@ void test_decoration_uninitialized(bs_test_t *test_ptr)
      wl_signal_emit(&t.decoration.events.destroy, NULL);
  }
  
@@ -477,3 +478,6 @@ index 98bbd72..0c68c07 100644
 +}
 +
  /* == End of xdg_decoration.c ============================================== */
+-- 
+2.56.0
+

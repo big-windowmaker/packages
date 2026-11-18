@@ -1,8 +1,8 @@
-From 9230dc332f378081ec4aeb0f6c9bc4f6597baf61 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 17:22:50 -0300
-Subject: [PATCH 08/17] xdg_shell: Adds support for xdg-foreign-unstable-v1 and
- -v2 protocols.
+Subject: [PATCH] xdg_shell: Adds support for xdg-foreign-unstable-v1 and -v2
+ protocols.
 
 Creates a wlr_xdg_foreign_registry and the v1 and v2 exporter/importer
 globals on it. xdg-desktop-portal uses these to parent file chooser and
@@ -18,10 +18,10 @@ Signed-off-by: ruscher <rruscher@gmail.com>
  4 files changed, 49 insertions(+)
 
 diff --git a/doc/FEATURES.md b/doc/FEATURES.md
-index 8e4e3ba..d5e4266 100644
+index 8a0b678..df9fe2b 100644
 --- a/doc/FEATURES.md
 +++ b/doc/FEATURES.md
-@@ -280,6 +280,11 @@ TBD: Raise/Lower.
+@@ -286,6 +286,11 @@ TBD: Raise/Lower.
  
  * [x] :white_check_mark: Implemented.
  
@@ -117,3 +117,6 @@ index cb709d0..46cc273 100644
      /** Listener for the `new_surface` signal raised by `wlr_xdg_shell`. */
      struct wl_listener        new_surface_listener;
  
+-- 
+2.56.0
+

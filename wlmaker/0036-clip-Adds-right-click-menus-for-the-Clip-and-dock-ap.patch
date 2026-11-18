@@ -1,8 +1,7 @@
-From 8c7871746015459005ad21e8c5dd9ab558f28cdc Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <teste@hemofilia.org.br>
 Date: Mon, 26 Oct 2026 19:37:40 -0300
-Subject: [PATCH 36/41] clip: Adds right-click menus for the Clip and dock-app
- tiles.
+Subject: [PATCH] clip: Adds right-click menus for the Clip and dock-app tiles.
 
 Like on Window Maker: Right-clicking the Clip opens a menu to switch to
 the next or previous workspace, add one, or destroy the last one. A
@@ -30,10 +29,10 @@ under the Clip or Dock.
  create mode 100644 src/context_menu.h
 
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 2e8e9ae..c8cef35 100644
+index 04f8c31..2d27b73 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -31,6 +31,7 @@ set(public_header_files
+@@ -44,6 +44,7 @@ set(public_header_files
    action_item.h
    clip.h
    config.h
@@ -41,7 +40,7 @@ index 2e8e9ae..c8cef35 100644
    corner.h
    dockapps.h
    icon_manager.h
-@@ -56,6 +57,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -70,6 +71,7 @@ target_sources(wlmaker_lib PRIVATE
    action_item.c
    clip.c
    config.c
@@ -1111,10 +1110,10 @@ index 30c1d49..e81ad00 100644
          0 != modifier &&
          BTN_LEFT == button_event_ptr->button &&
 diff --git a/src/server.c b/src/server.c
-index a61dcad..e73eb76 100644
+index aaa5e00..3ac2edc 100644
 --- a/src/server.c
 +++ b/src/server.c
-@@ -390,6 +390,7 @@ wlmaker_server_t *wlmaker_server_create(
+@@ -400,6 +400,7 @@ wlmaker_server_t *wlmaker_server_create(
  /* ------------------------------------------------------------------------- */
  void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
  {
@@ -1123,7 +1122,7 @@ index a61dcad..e73eb76 100644
          wlmaker_root_menu_destroy(server_ptr->root_menu_ptr);
          server_ptr->root_menu_ptr = NULL;
 diff --git a/src/server.h b/src/server.h
-index 4956573..246d6ed 100644
+index e866842..8a31ab5 100644
 --- a/src/server.h
 +++ b/src/server.h
 @@ -50,6 +50,7 @@ typedef struct _wlmaker_server_t wlmaker_server_t;
@@ -1134,7 +1133,7 @@ index 4956573..246d6ed 100644
  #include "toolkit/toolkit.h"
  #include "util/files.h"
  #include "util/subprocess_monitor.h"  // IWYU pragma: keep
-@@ -190,6 +191,8 @@ struct _wlmaker_server_t {
+@@ -192,6 +193,8 @@ struct _wlmaker_server_t {
  
      /** Root menu, when active. NULL when not invoked. */
      wlmaker_root_menu_t       *root_menu_ptr;
@@ -1144,7 +1143,7 @@ index 4956573..246d6ed 100644
      bspl_array_t            *root_menu_array_ptr;
      /** Listener for `unclaimed_button_event` signal raised by `wlmtk_root`. */
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index c938d5c..5f96120 100644
+index c74efdb..4beecbd 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -26,6 +26,7 @@
@@ -1155,7 +1154,7 @@ index c938d5c..5f96120 100644
  #include "corner.h"
  #include "dockapps.h"
  #include "layer_panel.h"
-@@ -55,6 +56,7 @@ int main(int argc, const char **argv)
+@@ -56,6 +57,7 @@ int main(int argc, const char **argv)
          &wlmaker_action_test_set,
          &wlmaker_clip_test_set,
          &wlmaker_config_test_set,
@@ -1164,5 +1163,5 @@ index c938d5c..5f96120 100644
          &wlmaker_dockapps_test_set,
          &wlmaker_layer_panel_test_set,
 -- 
-2.55.0
+2.56.0
 

@@ -1,8 +1,8 @@
-From a7a708fe764ec09b0cbd33302d3fea179d0c2b07 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 18:59:48 -0300
-Subject: [PATCH 26/30] wlclient: Sleeps until the next timer, and permits
- watching file descriptors.
+Subject: [PATCH] wlclient: Sleeps until the next timer, and permits watching
+ file descriptors.
 
 The client's mainloop polled with a 100ms timeout, to check the timers.
 Every DockApp thus woke up 10 times per second, also when it had nothing
@@ -392,5 +392,5 @@ index 6bfe37d..9dfd2f1 100644
  }  // extern "C"
  #endif  // __cplusplus
 -- 
-2.55.0
+2.56.0
 

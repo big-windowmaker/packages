@@ -1,8 +1,8 @@
-From 08329ae20967f3ae0e21389a330c72b298ff9416 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 02:46:14 -0300
-Subject: [PATCH 67/73] apps: Adds wlm_settings, for the DockApps' preferences
- and color themes.
+Subject: [PATCH] apps: Adds wlm_settings, for the DockApps' preferences and
+ color themes.
 
 A DockApp reads its preferences from ${XDG_CONFIG_HOME}/wlmaker/<app>.plist,
 as wlmaker stores them from the dock-app's menu, and watches the file
@@ -774,5 +774,5 @@ index 0000000..6a2c3a4
 +#endif /* __WLM_SETTINGS_H__ */
 +/* == End of wlm_settings.h ================================================ */
 -- 
-2.55.0
+2.56.0
 

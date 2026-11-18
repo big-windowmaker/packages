@@ -1,8 +1,8 @@
-From e7cae7ee8a9934e264abadc23bca317d9b3ae280 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 19:12:01 -0300
-Subject: [PATCH 34/34] wlclient: Exits cleanly on SIGTERM, and unblocks
- signals for children.
+Subject: [PATCH] wlclient: Exits cleanly on SIGTERM, and unblocks signals for
+ children.
 
 * SIGTERM is handled like SIGINT, through the client's signal fd: Clients
   like wlmdock and the dock-apps exit their loop and clean up, eg. when
@@ -75,3 +75,6 @@ index ea8bca9..1a91c2d 100644
      if (sigprocmask(SIG_BLOCK, &signal_set, NULL) == -1) {
          bs_log(BS_ERROR | BS_ERRNO, "Failed sigprocmask(SIG_BLOCK, %p, NULL)",
                 &signal_set);
+-- 
+2.56.0
+

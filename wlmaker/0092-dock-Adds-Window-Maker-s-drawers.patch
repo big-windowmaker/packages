@@ -1,7 +1,7 @@
-From e16cda2f64c0aa86ccef62e1475a8f0cf10e7121 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 18:17:57 -0300
-Subject: [PATCH 92/99] dock: Adds Window Maker's drawers.
+Subject: [PATCH] dock: Adds Window Maker's drawers.
 
 "Add a drawer" in the Dock's menu adds a drawer's tile after the clicked
 launcher: An entry of the Dock's `Launchers` with `Drawer = Yes`, an
@@ -53,10 +53,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 src/drawer.h
 
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index a8b0d1b..a43fe7b 100644
+index bc23f9c..8510730 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -34,6 +34,7 @@ set(public_header_files
+@@ -47,6 +47,7 @@ set(public_header_files
    context_menu.h
    corner.h
    dialog.h
@@ -64,7 +64,7 @@ index a8b0d1b..a43fe7b 100644
    dock_fx.h
    dock_launchers.h
    dock_menu.h
-@@ -69,6 +70,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -83,6 +84,7 @@ target_sources(wlmaker_lib PRIVATE
    context_menu.c
    corner.c
    dialog.c
@@ -3530,7 +3530,7 @@ index 1097ee1..9a3b732 100644
      size_t                    index;
      /** Slot in the column: 0 is the Dock's main tile, or the Clip. */
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index a2552e5..7b3c01b 100644
+index dca4c27..2dde71b 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -29,6 +29,7 @@
@@ -3541,7 +3541,7 @@ index a2552e5..7b3c01b 100644
  #include "dock_fx.h"
  #include "dock_launchers.h"
  #include "dock_menu.h"
-@@ -68,6 +69,7 @@ int main(int argc, const char **argv)
+@@ -69,6 +70,7 @@ int main(int argc, const char **argv)
          &wlmaker_context_menu_test_set,
          &wlmaker_corner_test_set,
          &wlmaker_dialog_test_set,
@@ -3550,5 +3550,5 @@ index a2552e5..7b3c01b 100644
          &wlmaker_dock_launchers_test_set,
          &wlmaker_dock_menu_test_set,
 -- 
-2.55.0
+2.56.0
 

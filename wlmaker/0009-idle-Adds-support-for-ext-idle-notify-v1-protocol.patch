@@ -1,7 +1,7 @@
-From 4db36e8d0a3a2de4bcb1820af1cf8dda63ca4599 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 17:23:55 -0300
-Subject: [PATCH 09/17] idle: Adds support for ext-idle-notify-v1 protocol.
+Subject: [PATCH] idle: Adds support for ext-idle-notify-v1 protocol.
 
 Creates the wlr_idle_notifier_v1 global in the idle monitor. Activity is
 reported from the same input path that resets wlmaker's own idle timer,
@@ -20,7 +20,7 @@ Signed-off-by: ruscher <rruscher@gmail.com>
  4 files changed, 38 insertions(+), 3 deletions(-)
 
 diff --git a/doc/FEATURES.md b/doc/FEATURES.md
-index d5e4266..d2909b2 100644
+index df9fe2b..d39e9ad 100644
 --- a/doc/FEATURES.md
 +++ b/doc/FEATURES.md
 @@ -211,7 +211,7 @@ TBD: Raise/Lower.
@@ -153,3 +153,6 @@ index 828e39a..497b570 100644
   *
   * @param idle_monitor_ptr
   */
+-- 
+2.56.0
+

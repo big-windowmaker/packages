@@ -1,4 +1,4 @@
-From f26db213a9fc40f2ac8c124ca2439686cad5f3f8 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Thu, 5 Nov 2026 04:43:24 -0300
 Subject: [PATCH] zones: Counts workspaces from 1, as the toolkit does

@@ -1,8 +1,8 @@
-From 5e93030b56745c63970faa5b7d8b5dda7dfdfdfb Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 18:10:21 -0300
-Subject: [PATCH 16/17] wlclient: Creates the pointer observer only when the
- seat has a pointer.
+Subject: [PATCH] wlclient: Creates the pointer observer only when the seat has
+ a pointer.
 
 Without a pointer on the seat (headless, WLR_LIBINPUT_NO_DEVICES=1, or a
 touch-only machine), the dock-apps called
@@ -363,3 +363,6 @@ index a68dcb5..1f3c3c5 100644
  /* ------------------------------------------------------------------------- */
  /** Updates the server-side decoration mode. */
  void _wlmcl_xdg_configure_decoration(wlmcl_xdg_toplevel_t *toplevel_ptr)
+-- 
+2.56.0
+

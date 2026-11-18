@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 17 Nov 2026 04:02:20 -0300
-Subject: [PATCH 2/2] server: Ignores activation requests without user input.
+Subject: [PATCH] server: Ignores activation requests without user input.
 
 Any xdg-activation token was accepted, so an application presenting its
 window on its own (eg. when a message arrives, together with its
@@ -23,10 +23,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 50 insertions(+), 1 deletion(-)
 
 diff --git a/src/server.c b/src/server.c
-index 996bcda..bcc835f 100644
+index 54256e2..49e9288 100644
 --- a/src/server.c
 +++ b/src/server.c
-@@ -92,6 +92,14 @@ static void handle_request_set_primary_selection(
+@@ -93,6 +93,14 @@ static void handle_request_set_primary_selection(
  static void _wlmaker_server_handle_xdg_activation_request_activate(
      struct wl_listener *listener_ptr,
      void *data_ptr);
@@ -41,7 +41,7 @@ index 996bcda..bcc835f 100644
  
  /* == Exported methods ===================================================== */
  
-@@ -371,6 +379,10 @@ wlmaker_server_t *wlmaker_server_create(
+@@ -381,6 +389,10 @@ wlmaker_server_t *wlmaker_server_create(
          &server_ptr->wlr_xdg_activation_v1_ptr->events.request_activate,
          &server_ptr->xdg_activation_request_activate_listener,
          _wlmaker_server_handle_xdg_activation_request_activate);
@@ -52,7 +52,7 @@ index 996bcda..bcc835f 100644
  
      server_ptr->layer_shell_ptr = wlmaker_layer_shell_create(server_ptr);
      if (NULL == server_ptr->layer_shell_ptr) {
-@@ -653,6 +665,7 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
+@@ -663,6 +675,7 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
      // The activation manager is destroyed along with the display.
      wlmtk_util_disconnect_listener(
          &server_ptr->xdg_activation_request_activate_listener);
@@ -60,7 +60,7 @@ index 996bcda..bcc835f 100644
  
      if (NULL != server_ptr->xdg_decoration_manager_ptr) {
          wlmaker_xdg_decoration_manager_destroy(
-@@ -1104,7 +1117,12 @@ void handle_request_set_primary_selection(
+@@ -1119,7 +1132,12 @@ void handle_request_set_primary_selection(
  /**
   * Handles `request_activate` of `wlr_xdg_activation_v1`: Activates & raises.
   *
@@ -74,7 +74,7 @@ index 996bcda..bcc835f 100644
   * Windows that are not on the current workspace are left untouched.
   *
   * @param listener_ptr
-@@ -1126,6 +1144,13 @@ void _wlmaker_server_handle_xdg_activation_request_activate(
+@@ -1141,6 +1159,13 @@ void _wlmaker_server_handle_xdg_activation_request_activate(
          event_ptr->surface);
      if (NULL == window_ptr) return;
  
@@ -88,7 +88,7 @@ index 996bcda..bcc835f 100644
      wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(window_ptr);
      if (NULL == workspace_ptr) return;
      if (workspace_ptr != wlmtk_desktop_get_current_workspace(
-@@ -1139,4 +1164,28 @@ void _wlmaker_server_handle_xdg_activation_request_activate(
+@@ -1154,4 +1179,28 @@ void _wlmaker_server_handle_xdg_activation_request_activate(
      wlmtk_workspace_activate_window(workspace_ptr, window_ptr);
  }
  

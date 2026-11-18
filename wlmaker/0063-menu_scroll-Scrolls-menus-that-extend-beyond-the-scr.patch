@@ -1,8 +1,8 @@
-From 7b20a40cc3ffb29e21d301368ffbd8b4fd3ff6c7 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 02:36:24 -0300
-Subject: [PATCH 63/73] menu_scroll: Scrolls menus that extend beyond the
- screen, like Window Maker.
+Subject: [PATCH] menu_scroll: Scrolls menus that extend beyond the screen,
+ like Window Maker.
 
 When a menu, with its open submenus, extends beyond the usable area and the
 pointer is at the edge of the output, next to the menu: The menu's window
@@ -64,10 +64,10 @@ index e26f5fb..f0fe96a 100644
   * Disconnects a listener from the signal.
   *
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 28076f6..e6079b1 100644
+index a54f640..fff678b 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -42,6 +42,7 @@ set(public_header_files
+@@ -55,6 +55,7 @@ set(public_header_files
    layer_panel.h
    layer_shell.h
    lock_mgr.h
@@ -75,7 +75,7 @@ index 28076f6..e6079b1 100644
    root_menu.h
    server.h
    task_list.h
-@@ -70,6 +71,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -84,6 +85,7 @@ target_sources(wlmaker_lib PRIVATE
    layer_panel.c
    layer_shell.c
    lock_mgr.c
@@ -651,7 +651,7 @@ index aee8d7e..8bc18ea 100644
  void wlmtk_util_disconnect_listener(
      struct wl_listener *listener_ptr)
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index 1987df2..73e117e 100644
+index 9221c89..ca8f2c4 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -33,6 +33,7 @@
@@ -662,14 +662,14 @@ index 1987df2..73e117e 100644
  #include "root_menu.h"
  #include "toplevel_tracker.h"
  #include "util/backtrace.h"
-@@ -65,6 +66,7 @@ int main(int argc, const char **argv)
+@@ -66,6 +67,7 @@ int main(int argc, const char **argv)
          &wlmaker_dockapps_test_set,
          &wlmaker_layer_panel_test_set,
          &wlmaker_lock_mgr_test_set,
 +        &wlmaker_menu_scroll_test_set,
          &wlmaker_root_menu_test_set,
          &wlmaker_toplevel_tracker_test_set,
-         &wlmaker_xdg_decoration_test_set,
+         &wlm_workspace_manager_test_set,
 -- 
-2.55.0
+2.56.0
 

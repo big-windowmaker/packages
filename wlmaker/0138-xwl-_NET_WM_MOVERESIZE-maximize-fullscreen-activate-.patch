@@ -1,7 +1,7 @@
-From aa91c3ec833b7889b6a27ac523c7c445e0148531 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 18:37:01 -0300
-Subject: [PATCH 138/139] xwl: _NET_WM_MOVERESIZE, maximize/fullscreen/activate
+Subject: [PATCH] xwl: _NET_WM_MOVERESIZE, maximize/fullscreen/activate
  requests; X knows the position
 
 Programs that draw their own frame (Steam/CEF, Chromium and Electron with
@@ -44,7 +44,7 @@ index 509bfb9..2927b6b 100644
  
  /** Style options for the window. */
 diff --git a/src/toolkit/window.c b/src/toolkit/window.c
-index 552c986..36629c3 100644
+index 1bfef3b..37d0e56 100644
 --- a/src/toolkit/window.c
 +++ b/src/toolkit/window.c
 @@ -250,6 +250,7 @@ wlmtk_window_t *wlmtk_window_create(
@@ -63,7 +63,7 @@ index 552c986..36629c3 100644
      if (window_ptr->inorganic_sizing) return;
      wlmtk_element_get_position(
          wlmtk_window_element(window_ptr),
-@@ -1215,9 +1217,15 @@ void _wlmtk_window_element_layout(
+@@ -1216,9 +1218,15 @@ void _wlmtk_window_element_layout(
          y += window_ptr->old_box.height - new_box.height;
      }
      // TODO: Should we rather use wlmtk_workspace_set_window_position ?

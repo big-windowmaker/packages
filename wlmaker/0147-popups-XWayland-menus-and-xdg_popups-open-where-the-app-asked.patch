@@ -1,4 +1,4 @@
-From 1b44cd2fc3586b70dc3920e9c85ae521583c4afb Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Wed, 11 Nov 2026 14:42:49 -0300
 Subject: [PATCH] popups: XWayland menus and xdg_popups open where the app
@@ -29,7 +29,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  6 files changed, 191 insertions(+), 42 deletions(-)
 
 diff --git a/src/icon_manager.c b/src/icon_manager.c
-index 2904fe46..9ed9fec3 100644
+index 2904fe4..9ed9fec 100644
 --- a/src/icon_manager.c
 +++ b/src/icon_manager.c
 @@ -2065,7 +2065,8 @@ void _wlmaker_toplevel_icon_handle_layer_new_popup(
@@ -43,7 +43,7 @@ index 2904fe46..9ed9fec3 100644
          wl_resource_post_error(wlr_xdg_popup_ptr->resource,
                                 WL_DISPLAY_ERROR_NO_MEMORY,
 diff --git a/src/layer_panel.c b/src/layer_panel.c
-index 5ae72dae..fb60a8d5 100644
+index 5ae72da..fb60a8d 100644
 --- a/src/layer_panel.c
 +++ b/src/layer_panel.c
 @@ -1577,7 +1577,8 @@ void _wlmaker_layer_panel_handle_new_popup(
@@ -57,7 +57,7 @@ index 5ae72dae..fb60a8d5 100644
          wl_resource_post_error(
              wlr_xdg_popup_ptr->resource,
 diff --git a/src/xdg_popup.c b/src/xdg_popup.c
-index 0feff915..5b2daae9 100644
+index 0feff91..5b2daae 100644
 --- a/src/xdg_popup.c
 +++ b/src/xdg_popup.c
 @@ -28,6 +28,7 @@
@@ -207,7 +207,7 @@ index 0feff915..5b2daae9 100644
  
  /* ------------------------------------------------------------------------- */
 diff --git a/src/xdg_popup.h b/src/xdg_popup.h
-index 830bf94d..0df90abf 100644
+index 830bf94..0df90ab 100644
 --- a/src/xdg_popup.h
 +++ b/src/xdg_popup.h
 @@ -42,12 +42,16 @@ extern "C" {
@@ -229,7 +229,7 @@ index 830bf94d..0df90abf 100644
  /**
   * Destroys the popup.
 diff --git a/src/xdg_toplevel.c b/src/xdg_toplevel.c
-index b37d9524..abcfb57f 100644
+index b37d952..abcfb57 100644
 --- a/src/xdg_toplevel.c
 +++ b/src/xdg_toplevel.c
 @@ -880,7 +880,8 @@ void _wlmaker_xdg_toplevel_handle_new_popup(
@@ -243,7 +243,7 @@ index b37d9524..abcfb57f 100644
          wl_resource_post_error(
              wlr_xdg_popup_ptr->resource,
 diff --git a/src/xwl_surface.c b/src/xwl_surface.c
-index e558384a..bf158731 100644
+index e558384..bf15873 100644
 --- a/src/xwl_surface.c
 +++ b/src/xwl_surface.c
 @@ -293,6 +293,7 @@ static void _wlmaker_xwl_surface_handle_window_position_changed(

@@ -1,4 +1,4 @@
-From b86dd93389ef1a5449c8452cb5660485a6e7b7de Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Fri, 13 Nov 2026 19:32:41 -0300
 Subject: [PATCH] input: Adds support for pointer-constraints-unstable-v1 (lock
@@ -22,7 +22,7 @@ exists, so without it virt-manager and spicy crashed on that click
  2 files changed, 171 insertions(+)
 
 diff --git a/src/input/CMakeLists.txt b/src/input/CMakeLists.txt
-index c6272375..460c9265 100644
+index c627237..460c926 100644
 --- a/src/input/CMakeLists.txt
 +++ b/src/input/CMakeLists.txt
 @@ -17,6 +17,8 @@ set(public_header_files
@@ -43,7 +43,7 @@ index c6272375..460c9265 100644
    PkgConfig::WLROOTS
    PkgConfig::XKBCOMMON
 diff --git a/src/input/cursor.c b/src/input/cursor.c
-index c098026a..55f546c4 100644
+index c098026..55f546c 100644
 --- a/src/input/cursor.c
 +++ b/src/input/cursor.c
 @@ -44,6 +44,7 @@

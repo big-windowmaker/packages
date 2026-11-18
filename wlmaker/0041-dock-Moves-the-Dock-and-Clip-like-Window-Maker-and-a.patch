@@ -1,8 +1,8 @@
-From f11a08ab60e5c7f05f96caa2783655dc89f3d969 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <teste@hemofilia.org.br>
 Date: Mon, 26 Oct 2026 20:03:00 -0300
-Subject: [PATCH 41/41] dock: Moves the Dock and Clip like Window Maker, and
- adds the launcher menu.
+Subject: [PATCH] dock: Moves the Dock and Clip like Window Maker, and adds the
+ launcher menu.
 
 Dock and Clip can be dragged to another corner of the output: Edge
 left/right by the horizontal half, anchor top/bottom by the vertical half
@@ -93,10 +93,10 @@ index 0412900..1b1d9f7 100644
 +the other side or end. Changes are stored in the state file; `wlmdock` re-reads
 +its position on `SIGUSR1`, which wlmaker sends after moving it.
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index c8cef35..cc0310c 100644
+index 2d27b73..72073b0 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -33,6 +33,7 @@ set(public_header_files
+@@ -46,6 +46,7 @@ set(public_header_files
    config.h
    context_menu.h
    corner.h
@@ -104,7 +104,7 @@ index c8cef35..cc0310c 100644
    dockapps.h
    icon_manager.h
    idle.h
-@@ -59,6 +60,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -73,6 +74,7 @@ target_sources(wlmaker_lib PRIVATE
    config.c
    context_menu.c
    corner.c
@@ -926,7 +926,7 @@ index b0b2c24..fb3cb77 100644
  extern const bs_test_set_t wlmdock_launcher_test_set;
  
 diff --git a/src/dock/subcompositor.c b/src/dock/subcompositor.c
-index 3274c75..f932775 100644
+index 1ff2367..d869dda 100644
 --- a/src/dock/subcompositor.c
 +++ b/src/dock/subcompositor.c
 @@ -55,6 +55,8 @@ struct _wlmdock_subcompositor_t {
@@ -1841,10 +1841,10 @@ index 2030f95..6a96d04 100644
  /** Implements wlmtk_panel_vmt_t::request_size. */
  uint32_t _wlmaker_layer_panel_request_size(
 diff --git a/src/server.c b/src/server.c
-index e73eb76..c72fb2e 100644
+index 3ac2edc..698d725 100644
 --- a/src/server.c
 +++ b/src/server.c
-@@ -391,6 +391,10 @@ wlmaker_server_t *wlmaker_server_create(
+@@ -401,6 +401,10 @@ wlmaker_server_t *wlmaker_server_create(
  void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
  {
      wlmaker_context_menu_cancel(server_ptr, NULL);
@@ -1856,7 +1856,7 @@ index e73eb76..c72fb2e 100644
          wlmaker_root_menu_destroy(server_ptr->root_menu_ptr);
          server_ptr->root_menu_ptr = NULL;
 diff --git a/src/server.h b/src/server.h
-index 246d6ed..28d25d0 100644
+index 8a31ab5..bf0b795 100644
 --- a/src/server.h
 +++ b/src/server.h
 @@ -83,6 +83,8 @@ typedef struct {
@@ -2026,10 +2026,10 @@ index 674acd5..abdfeac 100644
  int wlmcl_client_signal_fd(wlmcl_client_t *wlmcl_client_ptr);
  
 diff --git a/src/wlmaker.c b/src/wlmaker.c
-index 45ff829..3bf0329 100644
+index 4bfe8da..c03177f 100644
 --- a/src/wlmaker.c
 +++ b/src/wlmaker.c
-@@ -271,7 +271,6 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+@@ -215,7 +215,6 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
  
      bspl_dict_t *state_dict_ptr = wlmaker_state_load(
          files_ptr, wlmaker_arg_state_file_ptr);
@@ -2037,7 +2037,7 @@ index 45ff829..3bf0329 100644
      if (NULL == state_dict_ptr) {
          fprintf(stderr, "Failed to load & initialize state.\n");
          return EXIT_FAILURE;
-@@ -291,6 +290,9 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+@@ -235,6 +234,9 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
      wlmaker_server_t *server_ptr = wlmaker_server_create(
          config_dict_ptr, files_ptr, &style, &wlmaker_server_options);
      if (NULL == server_ptr) return EXIT_FAILURE;
@@ -2781,7 +2781,7 @@ index c5c74b8..f85224a 100644
 +
  /* == End of wlmdock.c ===================================================== */
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index 5f96120..f7b96a7 100644
+index 4beecbd..323a5a8 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -28,6 +28,7 @@
@@ -2792,7 +2792,7 @@ index 5f96120..f7b96a7 100644
  #include "dockapps.h"
  #include "layer_panel.h"
  #include "lock_mgr.h"
-@@ -58,6 +59,7 @@ int main(int argc, const char **argv)
+@@ -59,6 +60,7 @@ int main(int argc, const char **argv)
          &wlmaker_config_test_set,
          &wlmaker_context_menu_test_set,
          &wlmaker_corner_test_set,
@@ -2801,5 +2801,5 @@ index 5f96120..f7b96a7 100644
          &wlmaker_layer_panel_test_set,
          &wlmaker_lock_mgr_test_set,
 -- 
-2.55.0
+2.56.0
 

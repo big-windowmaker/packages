@@ -1,8 +1,8 @@
-From efc3069ea759b9bc6d1a25716e29683c5c8c65df Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Thu, 5 Nov 2026 09:44:28 -0300
-Subject: [PATCH 116/116] share: Icon style of the big-wm-tray dock-app
- (symbolic, monochrome)
+Subject: [PATCH] share: Icon style of the big-wm-tray dock-app (symbolic,
+ monochrome)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---

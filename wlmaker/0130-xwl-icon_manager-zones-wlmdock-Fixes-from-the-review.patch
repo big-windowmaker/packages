@@ -1,4 +1,4 @@
-From cbe798efa2c4aedf4f9a78b5c558d251b9aff396 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 04:22:35 -0300
 Subject: [PATCH] xwl, icon_manager, zones, wlmdock: Fixes from the review of

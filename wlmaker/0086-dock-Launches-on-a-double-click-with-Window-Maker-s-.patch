@@ -1,4 +1,4 @@
-From 9bd76806f0b4b1a45413982f1e9075d6a00ff262 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 16:50:32 -0300
 Subject: [PATCH] dock: Launches on a double-click, with Window Maker's dots
@@ -601,5 +601,5 @@ index 14448dc..ed25177 100644
      if (0 > wl_display_roundtrip(dock_ptr->remote_display_ptr)) {
          bs_log(BS_ERROR, "Failed parent wl_display_roundtrip.");
 -- 
-2.55.0
+2.56.0
 

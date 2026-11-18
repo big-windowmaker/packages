@@ -1,4 +1,4 @@
-From 6a35507117b9fa33629cde60cb2a301f23151cc8 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 16:38:02 -0300
 Subject: [PATCH] toolkit: Gives an overlay wlmtk_dock no exclusive zone.
@@ -31,5 +31,5 @@ index 449ca18..ccec45c 100644
  }
  
 -- 
-2.55.0
+2.56.0
 

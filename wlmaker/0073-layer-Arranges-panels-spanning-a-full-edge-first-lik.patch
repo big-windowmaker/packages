@@ -1,7 +1,7 @@
-From 186ba3c875e2acba4df9ea808da36f9719388493 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 03:07:11 -0300
-Subject: [PATCH 73/73] layer: Arranges panels spanning a full edge first, like
+Subject: [PATCH] layer: Arranges panels spanning a full edge first, like
  Window Maker.
 
 A panel anchored to a whole edge of the output, with an exclusive zone (eg.
@@ -20,9 +20,9 @@ the top and the bottom edge. Before, one of them was enough.
 ---
  include/toolkit/panel.h |  13 ++++
  src/layer_panel.c       |  53 +++++++++++++--
- src/toolkit/layer.c     | 145 +++++++++++++++++++++++++++++++++-------
+ src/toolkit/layer.c     | 144 +++++++++++++++++++++++++++++++++-------
  src/toolkit/panel.c     |  15 +++++
- 4 files changed, 198 insertions(+), 28 deletions(-)
+ 4 files changed, 198 insertions(+), 27 deletions(-)
 
 diff --git a/include/toolkit/panel.h b/include/toolkit/panel.h
 index 70dc410..bd61233 100644
@@ -136,24 +136,23 @@ index b3bae7b..385eab8 100644
 +
  /* == End of layer_panel.c ================================================== */
 diff --git a/src/toolkit/layer.c b/src/toolkit/layer.c
-index 9278492..a572e58 100644
+index 18546ca..2dcca7d 100644
 --- a/src/toolkit/layer.c
 +++ b/src/toolkit/layer.c
-@@ -170,27 +170,37 @@ void wlmtk_layer_output_reconfigure(
- {
-     struct wlr_box usable_area = layer_output_ptr->extents;
+@@ -208,26 +208,37 @@ void wlmtk_layer_reconfigure_output(
+         wlr_output_ptr,
+         &full_extents);
  
 -    for (bs_dllist_node_t *dlnode_ptr = layer_output_ptr->panels.head_ptr;
 -         dlnode_ptr != NULL;
 -         dlnode_ptr = dlnode_ptr->next_ptr) {
 -        wlmtk_panel_t *panel_ptr = wlmtk_panel_from_dlnode(dlnode_ptr);
 -
--        struct wlr_box new_usable_area = usable_area;
+-        struct wlr_box new_usable_area = *usable_area_ptr;
 -        struct wlr_box panel_dimensions = wlmtk_panel_compute_dimensions(
--            panel_ptr, &layer_output_ptr->extents, &new_usable_area);
--
+-            panel_ptr, &full_extents, &new_usable_area);
 -        if (wlmtk_panel_element(panel_ptr)->visible) {
--            usable_area = new_usable_area;
+-            *usable_area_ptr = new_usable_area;
 +    // Two passes, like Window Maker: First the panels spanning a full edge
 +    // of the output with an exclusive zone (eg. a shelf across the bottom),
 +    // then the others (eg. the Clip and Dock), within what remains. In the
@@ -168,12 +167,12 @@ index 9278492..a572e58 100644
 +                continue;
 +            }
 +
-+            struct wlr_box new_usable_area = usable_area;
++            struct wlr_box new_usable_area = *usable_area_ptr;
 +            struct wlr_box panel_dimensions = wlmtk_panel_compute_dimensions(
-+                panel_ptr, &layer_output_ptr->extents, &new_usable_area);
++                panel_ptr, &full_extents, &new_usable_area);
 +
 +            if (wlmtk_panel_element(panel_ptr)->visible) {
-+                usable_area = new_usable_area;
++                *usable_area_ptr = new_usable_area;
 +            }
 +
 +            wlmtk_panel_request_size(
@@ -195,9 +194,9 @@ index 9278492..a572e58 100644
 -            panel_dimensions.x,
 -            panel_dimensions.y);
      }
-     layer_output_ptr->usable_area = usable_area;
  }
-@@ -311,11 +321,13 @@ void _wlmtk_layer_output_destroy(
+ 
+@@ -346,11 +357,13 @@ void _wlmtk_layer_output_destroy(
  
  static void test_multi_output(bs_test_t *test_ptr);
  static void test_layout(bs_test_t *test_ptr);
@@ -211,9 +210,9 @@ index 9278492..a572e58 100644
      BS_TEST_CASE_SENTINEL()
  };
  
-@@ -433,28 +445,31 @@ void test_layout(bs_test_t *test_ptr)
-     BS_TEST_VERIFY_EQ(test_ptr, 100, fp1_ptr->requested_width);
-     BS_TEST_VERIFY_EQ(test_ptr, 50, fp1_ptr->requested_height);
+@@ -493,15 +506,16 @@ void test_layout(bs_test_t *test_ptr)
+     wlmtk_layer_reconfigure_output(layer_ptr, &output, &area);
+     WLMTK_TEST_VERIFY_WLRBOX_EQ(test_ptr, 40, 0, 984, 768, area);
  
 -    // Next panel is to respect the exclusive zone. It is invisible => later
 -    // panels won't shift, but it still will be positioned.
@@ -231,6 +230,8 @@ index 9278492..a572e58 100644
      BS_TEST_VERIFY_EQ(test_ptr, 0, wlmtk_panel_element(&fp2_ptr->panel)->y);
      BS_TEST_VERIFY_EQ(test_ptr, 100, fp2_ptr->requested_width);
      BS_TEST_VERIFY_EQ(test_ptr, 768, fp2_ptr->requested_height);
+@@ -511,11 +525,12 @@ void test_layout(bs_test_t *test_ptr)
+     WLMTK_TEST_VERIFY_WLRBOX_EQ(test_ptr, 40, 0, 984, 768, area);
  
      // Next panel: Same size and position, since the former is invisible.
 +    // Visible, it takes the edge: The first panel moves out of its zone.
@@ -243,11 +244,15 @@ index 9278492..a572e58 100644
      BS_TEST_VERIFY_EQ(test_ptr, 0, wlmtk_panel_element(&fp3_ptr->panel)->y);
      BS_TEST_VERIFY_EQ(test_ptr, 100, fp3_ptr->requested_width);
      BS_TEST_VERIFY_EQ(test_ptr, 768, fp3_ptr->requested_height);
+@@ -523,6 +538,7 @@ void test_layout(bs_test_t *test_ptr)
+         wlr_output_layout_ptr, &output, &area);
+     wlmtk_layer_reconfigure_output(layer_ptr, &output, &area);
+     WLMTK_TEST_VERIFY_WLRBOX_EQ(test_ptr, 80, 0, 944, 768, area);
 +    BS_TEST_VERIFY_EQ(test_ptr, 40, wlmtk_panel_element(&fp1_ptr->panel)->x);
  
      wlmtk_layer_remove_panel(layer_ptr, &fp3_ptr->panel);
      wlmtk_fake_panel_destroy(fp3_ptr);
-@@ -472,4 +487,86 @@ void test_layout(bs_test_t *test_ptr)
+@@ -540,4 +556,86 @@ void test_layout(bs_test_t *test_ptr)
      wl_display_destroy(display_ptr);
  }
  
@@ -335,10 +340,10 @@ index 9278492..a572e58 100644
 +
  /* == End of layer.c ======================================================= */
 diff --git a/src/toolkit/panel.c b/src/toolkit/panel.c
-index a29d3a2..20e0936 100644
+index fd6b577..c6e8d24 100644
 --- a/src/toolkit/panel.c
 +++ b/src/toolkit/panel.c
-@@ -155,6 +155,21 @@ void wlmtk_panel_commit(
+@@ -156,6 +156,21 @@ void wlmtk_panel_commit(
      }
  }
  
@@ -361,5 +366,5 @@ index a29d3a2..20e0936 100644
  struct wlr_box wlmtk_panel_compute_dimensions(
      const wlmtk_panel_t *panel_ptr,
 -- 
-2.55.0
+2.56.0
 

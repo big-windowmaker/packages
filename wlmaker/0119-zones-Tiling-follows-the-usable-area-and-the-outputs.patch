@@ -1,4 +1,4 @@
-From 0a1f499f67ce452e500100f4222f6210fb932c55 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Fri, 6 Nov 2026 10:28:10 -0300
 Subject: [PATCH] zones: Tiling follows the usable area and the outputs
@@ -20,12 +20,11 @@ without this change the panel case fails). ctest 29/29.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- include/toolkit/desktop.h |   5 ++
- include/toolkit/layer.h   |  12 +++++
- src/toolkit/desktop.c     |   4 ++
- src/toolkit/layer.c       | 102 ++++++++++++++++++++++++++++++++++++--
- src/zones.c               |  34 +++++++++++++
- 5 files changed, 153 insertions(+), 4 deletions(-)
+ include/toolkit/desktop.h |  5 +++
+ src/toolkit/desktop.c     | 15 +++++++++
+ src/toolkit/layer.c       | 71 +++++++++++++++++++++++++++++++++++++++
+ src/zones.c               | 34 +++++++++++++++++++
+ 4 files changed, 125 insertions(+)
 
 diff --git a/include/toolkit/desktop.h b/include/toolkit/desktop.h
 index 2ff2dcc..2995e54 100644
@@ -43,34 +42,11 @@ index 2ff2dcc..2995e54 100644
  } wlmtk_desktop_events_t;
  
  /** Data of the window move signals. Coordinates in layout space. */
-diff --git a/include/toolkit/layer.h b/include/toolkit/layer.h
-index 1887e0d..a888239 100644
---- a/include/toolkit/layer.h
-+++ b/include/toolkit/layer.h
-@@ -107,6 +107,18 @@ void wlmtk_layer_reconfigure(wlmtk_layer_t *layer_ptr);
-  *
-  * @param layer_output_ptr
-  */
-+/**
-+ * Sets the signal raised (data: NULL) whenever the usable area of an output
-+ * changes: a panel with an exclusive zone (Dock, Clip, tray) was added,
-+ * moved, resized or removed. For window organizers that follow it.
-+ *
-+ * @param layer_ptr
-+ * @param signal_ptr          May be NULL.
-+ */
-+void wlmtk_layer_set_usable_area_signal(
-+    wlmtk_layer_t *layer_ptr,
-+    struct wl_signal *signal_ptr);
-+
- void wlmtk_layer_output_reconfigure(wlmtk_layer_output_t *layer_output_ptr);
- 
- /**
 diff --git a/src/toolkit/desktop.c b/src/toolkit/desktop.c
-index 0ab429f..2bc6e12 100644
+index f2f986d..5ba084f 100644
 --- a/src/toolkit/desktop.c
 +++ b/src/toolkit/desktop.c
-@@ -170,6 +170,8 @@ wlmtk_desktop_t *wlmtk_desktop_create(
+@@ -176,6 +176,8 @@ wlmtk_desktop_t *wlmtk_desktop_create(
          &desktop_ptr->container.super_element,
          &_wlmtk_desktop_element_vmt);
  
@@ -79,99 +55,53 @@ index 0ab429f..2bc6e12 100644
      for (int i = 0; i <= WLMTK_DESKTOP_LAYER_OVERLAY; ++i) {
          wlmtk_layer_t *layer_ptr = wlmtk_layer_create(wlr_output_layout_ptr);
          if (NULL == layer_ptr) {
-@@ -180,6 +182,8 @@ wlmtk_desktop_t *wlmtk_desktop_create(
-         wlmtk_container_add_element(
-             &desktop_ptr->container, wlmtk_layer_element(layer_ptr));
-         desktop_ptr->layer_ptrs[i] = layer_ptr;
-+        wlmtk_layer_set_usable_area_signal(
-+            layer_ptr, &desktop_ptr->events.usable_area_changed);
-     }
+@@ -679,6 +681,7 @@ void _wlmtk_desktop_element_layout(wlmtk_element_t *element_ptr)
+         element_ptr, wlmtk_desktop_t, container.super_element);
  
-     if (!wlmtk_container_init(&desktop_ptr->workspace_window_container)) {
+     // Process each output.
++    bool changed = false;
+     struct wlr_output_layout_output *wlr_output_layout_output_ptr;
+     wl_list_for_each(
+         wlr_output_layout_output_ptr,
+@@ -698,6 +701,15 @@ void _wlmtk_desktop_element_layout(wlmtk_element_t *element_ptr)
+                 &usable_area);
+         }
+ 
++        // Signals usable_area_changed only when the area changed (a panel
++        // without exclusive zone does not change it).
++        if (NULL != desktop_ptr->current_workspace_ptr) {
++            struct wlr_box old_area = wlmtk_workspace_get_maximize_extents(
++                desktop_ptr->current_workspace_ptr,
++                wlr_output_layout_output_ptr->output);
++            if (!wlr_box_equal(&old_area, &usable_area)) changed = true;
++        }
++
+         for (bs_dllist_node_t *node_ptr = desktop_ptr->workspaces.head_ptr;
+              node_ptr != NULL;
+              node_ptr = bs_dllist_node_iterator_forward(node_ptr)) {
+@@ -709,6 +721,9 @@ void _wlmtk_desktop_element_layout(wlmtk_element_t *element_ptr)
+         }
+     }
+     desktop_ptr->orig_super_element_vmt.layout(element_ptr);
++    if (changed) {
++        wl_signal_emit(&desktop_ptr->events.usable_area_changed, NULL);
++    }
+ }
+ 
+ /* ------------------------------------------------------------------------- */
 diff --git a/src/toolkit/layer.c b/src/toolkit/layer.c
-index a572e58..c55acbe 100644
+index 2dcca7d..d152604 100644
 --- a/src/toolkit/layer.c
 +++ b/src/toolkit/layer.c
-@@ -44,6 +44,10 @@ struct _wlmtk_layer_t {
-     wlmtk_container_t         super_container;
-     /** Tracks the outputs. */
-     wlmtk_output_tracker_t    *output_tracker_ptr;
-+    /** The output layout. */
-+    struct wlr_output_layout  *wlr_output_layout_ptr;
-+    /** Raised when the usable area of an output changes. May be NULL. */
-+    struct wl_signal          *usable_area_changed_ptr;
- };
- 
- /** State of the layer on the given output. */
-@@ -54,6 +58,8 @@ struct _wlmtk_layer_output_t {
-     struct wlr_box            usable_area;
-     /** Panels. Holds nodes at @ref wlmtk_panel_t::dlnode. */
-     bs_dllist_t               panels;
-+    /** The layer this belongs to. */
-+    wlmtk_layer_t             *layer_ptr;
- };
- 
- static void _wlmtk_layer_output_remove_dlnode_panel(
-@@ -92,9 +98,10 @@ wlmtk_layer_t *wlmtk_layer_create(
+@@ -97,6 +97,7 @@ wlmtk_layer_t *wlmtk_layer_create(
          return NULL;
      }
  
 +    layer_ptr->wlr_output_layout_ptr = wlr_output_layout_ptr;
      layer_ptr->output_tracker_ptr = wlmtk_output_tracker_create(
          wlr_output_layout_ptr,
--        wlr_output_layout_ptr,
-+        layer_ptr,
-         _wlmtk_layer_output_create,
-         _wlmtk_layer_output_update,
-         _wlmtk_layer_output_destroy);
-@@ -202,7 +209,21 @@ void wlmtk_layer_output_reconfigure(
-                 panel_dimensions.y);
-         }
-     }
--    layer_output_ptr->usable_area = usable_area;
-+    if (!wlr_box_equal(&usable_area, &layer_output_ptr->usable_area)) {
-+        layer_output_ptr->usable_area = usable_area;
-+        if (NULL != layer_output_ptr->layer_ptr &&
-+            NULL != layer_output_ptr->layer_ptr->usable_area_changed_ptr) {
-+            wl_signal_emit(layer_output_ptr->layer_ptr->usable_area_changed_ptr, NULL);
-+        }
-+    }
-+}
-+
-+/* ------------------------------------------------------------------------- */
-+void wlmtk_layer_set_usable_area_signal(
-+    wlmtk_layer_t *layer_ptr,
-+    struct wl_signal *signal_ptr)
-+{
-+    layer_ptr->usable_area_changed_ptr = signal_ptr;
- }
- 
- /* ------------------------------------------------------------------------- */
-@@ -266,10 +287,12 @@ void *_wlmtk_layer_output_create(
-     struct wlr_output *wlr_output_ptr,
-     void *ud_ptr)
- {
--    struct wlr_output_layout *wlr_output_layout_ptr = ud_ptr;
-+    wlmtk_layer_t *layer_ptr = ud_ptr;
-+    struct wlr_output_layout *wlr_output_layout_ptr = layer_ptr->wlr_output_layout_ptr;
-     wlmtk_layer_output_t *layer_output_ptr = logged_calloc(
-         1, sizeof(wlmtk_layer_output_t));
-     if (NULL == layer_output_ptr) return NULL;
-+    layer_output_ptr->layer_ptr = layer_ptr;
- 
-     wlr_output_layout_get_box(
-         wlr_output_layout_ptr,
-@@ -287,7 +310,8 @@ void _wlmtk_layer_output_update(
-     void *ud_ptr,
-     void *output_ptr)
- {
--    struct wlr_output_layout *wlr_output_layout_ptr = ud_ptr;
-+    wlmtk_layer_t *layer_ptr = ud_ptr;
-+    struct wlr_output_layout *wlr_output_layout_ptr = layer_ptr->wlr_output_layout_ptr;
-     wlmtk_layer_output_t *layer_output_ptr = output_ptr;
- 
-     struct wlr_box new_extents;
-@@ -322,12 +346,14 @@ void _wlmtk_layer_output_destroy(
+         layer_ptr,
+@@ -358,12 +359,14 @@ void _wlmtk_layer_output_destroy(
  static void test_multi_output(bs_test_t *test_ptr);
  static void test_layout(bs_test_t *test_ptr);
  static void test_full_edge(bs_test_t *test_ptr);
@@ -186,7 +116,7 @@ index a572e58..c55acbe 100644
      BS_TEST_CASE_SENTINEL()
  };
  
-@@ -569,4 +595,72 @@ void test_full_edge(bs_test_t *test_ptr)
+@@ -638,4 +641,72 @@ void test_full_edge(bs_test_t *test_ptr)
      wl_display_destroy(display_ptr);
  }
  

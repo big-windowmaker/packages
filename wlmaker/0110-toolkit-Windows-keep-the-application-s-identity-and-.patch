@@ -1,8 +1,8 @@
-From c4d814099d924b0007661d78b9d7ad2933e15798 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Thu, 5 Nov 2026 09:06:39 -0300
-Subject: [PATCH 110/116] toolkit: Windows keep the application's identity and
- dialog state
+Subject: [PATCH] toolkit: Windows keep the application's identity and dialog
+ state
 
 wlmtk_window_set_app_id() keeps the xdg-shell app ID, or for X11 clients
 the class and instance of WM_CLASS (updated on set_class), and
@@ -61,7 +61,7 @@ index ef1a1c9..6e2bdab 100644
   * Sets the window as activated, depending on the argument's value.
   *
 diff --git a/src/toolkit/window.c b/src/toolkit/window.c
-index 47720d4..2d7d128 100644
+index 1de0a6e..e1d3588 100644
 --- a/src/toolkit/window.c
 +++ b/src/toolkit/window.c
 @@ -92,6 +92,12 @@ struct _wlmtk_window_t {

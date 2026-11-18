@@ -1,4 +1,4 @@
-From 0dfb5af6367247da54c82d1334bbbe1c198dd72d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 11:58:41 -0300
 Subject: [PATCH] xwl: Review fixes: leader stays off-screen, attributes

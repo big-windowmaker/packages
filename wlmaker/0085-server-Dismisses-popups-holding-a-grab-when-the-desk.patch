@@ -1,4 +1,4 @@
-From 26eb7e401521ec36aaa4af44ca9098433cfcc2b6 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 16:47:28 -0300
 Subject: [PATCH] server: Dismisses popups holding a grab when the desktop is
@@ -15,10 +15,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 18 insertions(+)
 
 diff --git a/src/server.c b/src/server.c
-index 312741d..8075596 100644
+index 9928e99..302125b 100644
 --- a/src/server.c
 +++ b/src/server.c
-@@ -660,6 +660,24 @@ void _wlmaker_server_unclaimed_button_event_handler(
+@@ -675,6 +675,24 @@ void _wlmaker_server_unclaimed_button_event_handler(
          listener_ptr, wlmaker_server_t, unclaimed_button_event_listener);
      wlmtk_button_event_t *button_event_ptr = data_ptr;
  
@@ -44,5 +44,5 @@ index 312741d..8075596 100644
          WLMTK_BUTTON_DOWN == button_event_ptr->type &&
          NULL != server_ptr->root_menu_ptr &&
 -- 
-2.55.0
+2.56.0
 

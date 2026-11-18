@@ -583,10 +583,10 @@ index 6f5b889..2924292 100644
  }  // extern "C"
  #endif  // __cplusplus
 diff --git a/include/toolkit/workspace.h b/include/toolkit/workspace.h
-index 6e7c854..fd02549 100644
+index 9423c1c..a1b1cca 100644
 --- a/include/toolkit/workspace.h
 +++ b/include/toolkit/workspace.h
-@@ -273,6 +273,12 @@ typedef struct {
+@@ -298,6 +298,12 @@ typedef struct {
      int                       y;
      /** For transient windows (eg. dialogs): Parent to center on. Or NULL. */
      wlmtk_window_t            *parent_ptr;
@@ -3065,10 +3065,10 @@ index 0000000..eae400c
 +msgid "Applications"
 +msgstr ""
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index d2dd724..d093915 100644
+index 3114426..c089786 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -41,6 +41,7 @@ set(public_header_files
+@@ -54,6 +54,7 @@ set(public_header_files
    dnd.h
    drawer.h
    dock_fx.h
@@ -3076,7 +3076,7 @@ index d2dd724..d093915 100644
    dock_launchers.h
    dock_menu.h
    app_icon.h
-@@ -81,6 +82,7 @@ target_sources(wlmaker_lib PRIVATE
+@@ -95,6 +96,7 @@ target_sources(wlmaker_lib PRIVATE
    dnd.c
    drawer.c
    dock_fx.c
@@ -3084,7 +3084,7 @@ index d2dd724..d093915 100644
    dock_launchers.c
    dock_menu.c
    app_icon.c
-@@ -90,10 +92,12 @@ target_sources(wlmaker_lib PRIVATE
+@@ -104,10 +106,12 @@ target_sources(wlmaker_lib PRIVATE
    i18n.c
    dockapps.c
    icon_manager.c
@@ -3097,7 +3097,7 @@ index d2dd724..d093915 100644
    lock_mgr.c
    menu_scroll.c
    root_menu.c
-@@ -168,6 +172,12 @@ target_compile_definitions(
+@@ -183,6 +187,12 @@ target_compile_definitions(
    wlmaker_lib PRIVATE "WLMAKER_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")
  target_compile_definitions(
    wlmaker_lib PRIVATE "WLMAKER_BINARY_DIR=\"${PROJECT_BINARY_DIR}\"")
@@ -13517,10 +13517,10 @@ index 7006e16..93fa32b 100644
                      (char*)(generator_ptr->stdout_dynbuf_ptr->data_ptr));
                  bs_log(BS_ERROR,
 diff --git a/src/server.c b/src/server.c
-index 1874d5a..996bcda 100644
+index 9b0ac2c..54256e2 100644
 --- a/src/server.c
 +++ b/src/server.c
-@@ -59,6 +59,10 @@
+@@ -60,6 +60,10 @@
  /** Name of the "seat". */
  static const char             *seat_name_ptr = "seat0";
  
@@ -13531,7 +13531,7 @@ index 1874d5a..996bcda 100644
  static void _wlmaker_server_unclaimed_axis_event_handler(
      struct wl_listener *listener_ptr,
      void *data_ptr);
-@@ -258,6 +262,14 @@ wlmaker_server_t *wlmaker_server_create(
+@@ -268,6 +272,14 @@ wlmaker_server_t *wlmaker_server_create(
          wlmaker_server_destroy(server_ptr);
          return NULL;
      }
@@ -13546,7 +13546,7 @@ index 1874d5a..996bcda 100644
      wlmtk_util_connect_listener_signal(
          &wlmim_events(server_ptr->input_manager_ptr)->deactivate_task_list,
          &server_ptr->deactivate_task_list_listener,
-@@ -407,6 +419,24 @@ wlmaker_server_t *wlmaker_server_create(
+@@ -417,6 +429,24 @@ wlmaker_server_t *wlmaker_server_create(
          return NULL;
      }
  
@@ -13571,7 +13571,7 @@ index 1874d5a..996bcda 100644
      server_ptr->corner_ptr = wlmaker_corner_create(
          bspl_dict_get_dict(server_ptr->config_dict_ptr, "HotCorner"),
          wl_display_get_event_loop(server_ptr->wl_display_ptr),
-@@ -465,12 +495,27 @@ bool wlmaker_server_reload(wlmaker_server_t *server_ptr)
+@@ -475,12 +505,27 @@ bool wlmaker_server_reload(wlmaker_server_t *server_ptr)
  
      if (!wlmim_input_manager_reconfigure(
              server_ptr->input_manager_ptr, config_dict_ptr)) rv = false;
@@ -13599,7 +13599,7 @@ index 1874d5a..996bcda 100644
      bspl_dict_t *corner_dict_ptr = bspl_dict_get_dict(
          config_dict_ptr, "HotCorner");
      if (NULL != server_ptr->corner_ptr && NULL != corner_dict_ptr &&
-@@ -570,6 +615,14 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
+@@ -580,6 +625,14 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
          wlmaker_corner_destroy(server_ptr->corner_ptr);
          server_ptr->corner_ptr = NULL;
      }
@@ -13614,7 +13614,7 @@ index 1874d5a..996bcda 100644
  
      if (NULL != server_ptr->monitor_ptr) {
          wlm_util_subprocess_monitor_destroy(server_ptr->monitor_ptr);
-@@ -901,6 +954,24 @@ const char *wlmaker_server_root_button_action(
+@@ -916,6 +969,24 @@ const char *wlmaker_server_root_button_action(
      }
  }
  
@@ -13640,7 +13640,7 @@ index 1874d5a..996bcda 100644
  /**
   * Handles unclaimed axis events: The wheel on the root window, as Window
 diff --git a/src/server.h b/src/server.h
-index 780637a..aac67df 100644
+index 87758be..da7de30 100644
 --- a/src/server.h
 +++ b/src/server.h
 @@ -50,6 +50,8 @@ typedef struct _wlmaker_server_t wlmaker_server_t;
@@ -13652,7 +13652,7 @@ index 780637a..aac67df 100644
  #include "root_menu.h"  // IWYU pragma: keep
  #include "context_menu.h"  // IWYU pragma: keep
  #include "toolkit/toolkit.h"
-@@ -194,6 +196,10 @@ struct _wlmaker_server_t {
+@@ -196,6 +198,10 @@ struct _wlmaker_server_t {
  
      /** Montor & handler of 'hot corners'. */
      wlmaker_corner_t          *corner_ptr;
@@ -14670,7 +14670,7 @@ index 859c2f2..a3994ef 100644
      cairo_text_extents_t extents = {};
      cairo_save(cairo_ptr);
 diff --git a/src/toolkit/window.c b/src/toolkit/window.c
-index 96ce0ff..4afdc95 100644
+index 23aa2d3..34a9e81 100644
 --- a/src/toolkit/window.c
 +++ b/src/toolkit/window.c
 @@ -23,6 +23,7 @@
@@ -14693,7 +14693,7 @@ index 96ce0ff..4afdc95 100644
      }
      if (NULL == new_title_ptr) return false;
 diff --git a/src/toolkit/workspace.c b/src/toolkit/workspace.c
-index 0c4fc7f..be47a33 100644
+index 8b4d9a7..e19aacb 100644
 --- a/src/toolkit/workspace.c
 +++ b/src/toolkit/workspace.c
 @@ -23,6 +23,7 @@
@@ -14704,7 +14704,7 @@ index 0c4fc7f..be47a33 100644
  #include <stdlib.h>
  #include <wayland-server-core.h>
  #include <wayland-util.h>
-@@ -161,6 +162,10 @@ static void _wlmtk_window_reposition_window(
+@@ -169,6 +170,10 @@ static void _wlmtk_window_reposition_window(
  static bool _wlmtk_workspace_window_overlaps(
      bs_dllist_node_t *dlnode_ptr,
      void *ud_ptr);
@@ -14715,7 +14715,7 @@ index 0c4fc7f..be47a33 100644
  static void _wlmtk_workspace_place_window(
      wlmtk_workspace_t *workspace_ptr,
      wlmtk_window_t *window_ptr,
-@@ -1139,6 +1144,35 @@ static struct wlr_box _wlmtk_workspace_place_smart(
+@@ -1158,6 +1163,35 @@ static struct wlr_box _wlmtk_workspace_place_smart(
      return wbox;
  }
  
@@ -14751,7 +14751,7 @@ index 0c4fc7f..be47a33 100644
  /* ------------------------------------------------------------------------- */
  /**
   * Window placement: Sets the initial position of a window being mapped.
-@@ -1179,8 +1213,8 @@ void _wlmtk_workspace_place_window(wlmtk_workspace_t *workspace_ptr,
+@@ -1198,8 +1232,8 @@ void _wlmtk_workspace_place_window(wlmtk_workspace_t *workspace_ptr,
      int dx = wbox.x - ex, dy = wbox.y - ey;
  
      // The output: Of the parent, the requested position, or the pointer.
@@ -14762,7 +14762,7 @@ index 0c4fc7f..be47a33 100644
      struct wlr_box parent_box = {};
      if (NULL != hint_ptr && NULL != hint_ptr->parent_ptr) {
          parent_box = wlmtk_window_get_bounding_box(hint_ptr->parent_ptr);
-@@ -1223,8 +1257,10 @@ void _wlmtk_workspace_place_window(wlmtk_workspace_t *workspace_ptr,
+@@ -1242,8 +1276,10 @@ void _wlmtk_workspace_place_window(wlmtk_workspace_t *workspace_ptr,
      }
  
      // Keep it within the usable area. If larger, align at the top-left.
@@ -14775,7 +14775,7 @@ index 0c4fc7f..be47a33 100644
  
      wlmtk_element_set_position(
          wlmtk_window_element(window_ptr), wbox.x - dx, wbox.y - dy);
-@@ -1412,6 +1448,7 @@ static void test_activate(bs_test_t *test_ptr);
+@@ -1485,6 +1521,7 @@ static void test_activate(bs_test_t *test_ptr);
  static void test_activate_cycling(bs_test_t *test_ptr);
  static void test_minimize(bs_test_t *test_ptr);
  static void test_placement_center(bs_test_t *test_ptr);
@@ -14783,7 +14783,7 @@ index 0c4fc7f..be47a33 100644
  static void test_multi_output_extents(bs_test_t *test_ptr);
  static void test_multi_output_reposition(bs_test_t *test_ptr);
  static void test_window_position(bs_test_t *test_ptr);
-@@ -1433,6 +1470,7 @@ static const bs_test_case_t _wlmtk_workspace_test_cases[] = {
+@@ -1507,6 +1544,7 @@ static const bs_test_case_t _wlmtk_workspace_test_cases[] = {
      { 1, "activate_cycling", test_activate_cycling },
      { 1, "minimize", test_minimize },
      { 1, "placement_center", test_placement_center },
@@ -14791,7 +14791,7 @@ index 0c4fc7f..be47a33 100644
      { 1, "multi_output_extents", test_multi_output_extents },
      { 1, "multi_output_reposition", test_multi_output_reposition },
      { 1, "window_position", test_window_position },
-@@ -2486,9 +2524,26 @@ void test_placement_center(bs_test_t *test_ptr)
+@@ -2624,9 +2662,26 @@ void test_placement_center(bs_test_t *test_ptr)
      WLMTK_TEST_VERIFY_WLRBOX_EQ(
          test_ptr, 500, 275, 100, 50, wlmtk_window_get_bounding_box(w4));
      wlmtk_workspace_unmap_window(ws_ptr, w4);
@@ -14818,7 +14818,7 @@ index 0c4fc7f..be47a33 100644
      for (int i = 0; i < 3; ++i) wlmtk_workspace_unmap_window(ws_ptr, w[i]);
      for (int i = 0; i < 4; ++i) {
          wlmtk_window_destroy(w[i]);
-@@ -2504,4 +2559,116 @@ void test_placement_center(bs_test_t *test_ptr)
+@@ -2642,4 +2697,116 @@ void test_placement_center(bs_test_t *test_ptr)
      wl_display_destroy(display_ptr);
  }
  
@@ -15201,7 +15201,7 @@ index 298ff86..5fbdb47 100644
  extern const bs_test_set_t wlmaker_window_attributes_test_set;
  
 diff --git a/src/wlmaker.c b/src/wlmaker.c
-index 96bd4a3..6fe8a9c 100644
+index 5fa1081..c506233 100644
 --- a/src/wlmaker.c
 +++ b/src/wlmaker.c
 @@ -43,6 +43,7 @@
@@ -15211,8 +15211,8 @@ index 96bd4a3..6fe8a9c 100644
 +#include "i18n.h"
  #include "root_menu.h"
  #include "server.h"
- #include "zones.h"
-@@ -248,6 +249,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
+ #include "workspace_manager.h"
+@@ -192,6 +193,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
      wlmaker_task_list_t       *task_list_ptr = NULL;
      int                       rv = EXIT_SUCCESS;
  
@@ -15442,10 +15442,10 @@ index 6a7fa48..954fd92 100644
              dock_ptr->tilebox_ptr,
              wlmdock_launcher_tile(launcher_ptr));
 diff --git a/src/xdg_decoration.c b/src/xdg_decoration.c
-index 75e6eaf..a534fa0 100644
+index d153c07..17d5ecf 100644
 --- a/src/xdg_decoration.c
 +++ b/src/xdg_decoration.c
-@@ -424,13 +424,22 @@ void handle_decoration_request_mode(
+@@ -432,13 +432,22 @@ void handle_decoration_request_mode(
          BS_ABORT();
      }
  
@@ -15470,7 +15470,7 @@ index 75e6eaf..a534fa0 100644
      if (NULL == wlmaker_xdg_toplevel_ptr) {
          bs_log(BS_WARNING,
                 "Decoration request for XDG toplevel %p w/o handle?",
-@@ -449,9 +458,10 @@ void handle_decoration_request_mode(
+@@ -457,9 +466,10 @@ void handle_decoration_request_mode(
             decoration_ptr->wlr_xdg_toplevel_decoration_v1_ptr->requested_mode,
             mode);
  
@@ -16301,7 +16301,7 @@ index 6253aea..2810d5e 100644
  };
  
 diff --git a/tests/wlmaker_test.c b/tests/wlmaker_test.c
-index f8af544..ae2135d 100644
+index 2f4dbc1..92aa74e 100644
 --- a/tests/wlmaker_test.c
 +++ b/tests/wlmaker_test.c
 @@ -30,11 +30,14 @@
@@ -16319,7 +16319,7 @@ index f8af544..ae2135d 100644
  #include "dock_position.h"
  #include "window_attributes.h"
  #include "dockapp_prefs.h"
-@@ -69,10 +72,13 @@ int main(int argc, const char **argv)
+@@ -70,10 +73,13 @@ int main(int argc, const char **argv)
          &wlmaker_action_test_set,
          &wlmaker_clip_test_set,
          &wlmaker_app_icon_test_set,
@@ -16334,10 +16334,10 @@ index f8af544..ae2135d 100644
          &wlmaker_drawer_test_set,
          &wlmaker_dock_fx_test_set,
 diff --git a/tool/CMakeLists.txt b/tool/CMakeLists.txt
-index 739eb94..76aab3b 100644
+index c4a4a59..4856b76 100644
 --- a/tool/CMakeLists.txt
 +++ b/tool/CMakeLists.txt
-@@ -50,12 +50,14 @@ add_executable(
+@@ -55,12 +55,14 @@ add_executable(
  target_link_libraries(
    wlmtool
    libwlmtool
@@ -16488,7 +16488,7 @@ index c651839..77fdd86 100644
  
  /* == Unit Tests =========================================================== */
 diff --git a/tool/wlmtool.c b/tool/wlmtool.c
-index 64aa176..01b515f 100644
+index b7de254..903f65e 100644
 --- a/tool/wlmtool.c
 +++ b/tool/wlmtool.c
 @@ -23,6 +23,8 @@
@@ -16500,7 +16500,7 @@ index 64aa176..01b515f 100644
  #include <stdbool.h>
  #include <stdint.h>
  #include <stdio.h>
-@@ -34,6 +36,11 @@
+@@ -35,6 +37,11 @@
  
  /* == Declarations ========================================================= */
  
@@ -16512,7 +16512,7 @@ index 64aa176..01b515f 100644
  static bool print_version(int argc, const char **argv);
  static bool print_help(int argc, const char **argv);
  static bool generate_applications_menu(int argc, const char **argv);
-@@ -199,6 +206,15 @@ bool generate_themes_menu(__UNUSED__ int argc, __UNUSED__ const char **argv)
+@@ -208,6 +215,15 @@ bool generate_themes_menu(__UNUSED__ int argc, __UNUSED__ const char **argv)
  /** The main program. */
  int main(int argc, const char **argv)
  {

@@ -1,4 +1,4 @@
-From 24781c5a18577bcdb9317d395c79c961a05c9997 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Fri, 6 Nov 2026 17:11:43 -0300
 Subject: [PATCH] zones: Tiling checks the client's minimum size
@@ -70,7 +70,7 @@ index 6e2bdab..509bfb9 100644
  void wlmtk_window_position_changed(wlmtk_window_t *window_ptr);
  
 diff --git a/src/toolkit/window.c b/src/toolkit/window.c
-index 2d7d128..552c986 100644
+index e1d3588..1bfef3b 100644
 --- a/src/toolkit/window.c
 +++ b/src/toolkit/window.c
 @@ -53,6 +53,10 @@

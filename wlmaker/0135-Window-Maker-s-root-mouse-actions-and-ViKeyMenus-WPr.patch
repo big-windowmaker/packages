@@ -1,8 +1,8 @@
-From 0cc5e18d1688fc7e328a8376333ba8c7e4bbc2f3 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 10:19:37 -0300
-Subject: [PATCH 135/136] Window Maker's root mouse actions and ViKeyMenus
- (WPrefs parity)
+Subject: [PATCH] Window Maker's root mouse actions and ViKeyMenus (WPrefs
+ parity)
 
 - RootMouse (Config.plist): each button opens the applications menu or
   nothing, the wheel and tilt switch workspaces or windows (up = next, as
@@ -150,10 +150,10 @@ index 28a8861..234ec9a 100644
  extern const bs_test_set_t wlmaker_root_menu_test_set;
  
 diff --git a/src/server.c b/src/server.c
-index 3c24938..1387b9f 100644
+index de3e204..f0c65a9 100644
 --- a/src/server.c
 +++ b/src/server.c
-@@ -59,6 +59,9 @@
+@@ -60,6 +60,9 @@
  /** Name of the "seat". */
  static const char             *seat_name_ptr = "seat0";
  
@@ -163,7 +163,7 @@ index 3c24938..1387b9f 100644
  static void _wlmaker_server_unclaimed_button_event_handler(
      struct wl_listener *listener_ptr,
      void *data_ptr);
-@@ -210,6 +213,10 @@ wlmaker_server_t *wlmaker_server_create(
+@@ -220,6 +223,10 @@ wlmaker_server_t *wlmaker_server_create(
          &wlmtk_root_events(server_ptr->root_ptr)->unclaimed_button_event,
          &server_ptr->unclaimed_button_event_listener,
          _wlmaker_server_unclaimed_button_event_handler);
@@ -174,7 +174,7 @@ index 3c24938..1387b9f 100644
  
      // Effects of Dock and Clip: Above the desktop.
      server_ptr->dock_fx_ptr = wlmaker_dock_fx_create(
-@@ -499,6 +506,13 @@ void wlmaker_server_configure_desktop(
+@@ -509,6 +516,13 @@ void wlmaker_server_configure_desktop(
      }
      wlmtk_desktop_set_window_placement(server_ptr->desktop_ptr, placement);
  
@@ -188,7 +188,7 @@ index 3c24938..1387b9f 100644
      const char *focus_ptr = bspl_dict_get_string_value(
          config_dict_ptr, "FocusMode");
      bool follows = false;
-@@ -626,6 +640,8 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
+@@ -636,6 +650,8 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
      if (NULL != server_ptr->root_ptr) {
          wlmtk_util_disconnect_listener(
              &server_ptr->unclaimed_button_event_listener);
@@ -197,7 +197,7 @@ index 3c24938..1387b9f 100644
          wlmtk_root_destroy(server_ptr->root_ptr);
          server_ptr->root_ptr = NULL;
      }
-@@ -705,14 +721,126 @@ void _wlmaker_server_unclaimed_button_event_handler(
+@@ -720,14 +736,126 @@ void _wlmaker_server_unclaimed_button_event_handler(
              button_event_ptr->button, WL_POINTER_BUTTON_STATE_RELEASED);
      }
  
@@ -329,10 +329,10 @@ index 3c24938..1387b9f 100644
  }
  
 diff --git a/src/server.h b/src/server.h
-index c6ffebb..75aac37 100644
+index 3da8eb4..62fa58a 100644
 --- a/src/server.h
 +++ b/src/server.h
-@@ -225,6 +225,10 @@ struct _wlmaker_server_t {
+@@ -227,6 +227,10 @@ struct _wlmaker_server_t {
      bspl_array_t            *root_menu_array_ptr;
      /** Listener for `unclaimed_button_event` signal raised by `wlmtk_root`. */
      struct wl_listener        unclaimed_button_event_listener;
@@ -343,7 +343,7 @@ index c6ffebb..75aac37 100644
  
      /** The current configuration style. */
      wlmaker_config_style_t    *style_ptr;
-@@ -272,6 +276,31 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr);
+@@ -274,6 +278,31 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr);
   */
  bool wlmaker_server_reload(wlmaker_server_t *server_ptr);
  

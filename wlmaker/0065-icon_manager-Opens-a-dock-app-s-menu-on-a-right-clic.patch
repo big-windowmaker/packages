@@ -1,7 +1,7 @@
-From 715b4ffe87071631545e8fb26fe1dff20aa572c4 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 02:38:32 -0300
-Subject: [PATCH 65/73] icon_manager: Opens a dock-app's menu on a right-click
+Subject: [PATCH] icon_manager: Opens a dock-app's menu on a right-click
  anywhere on its tile.
 
 Like on Window Maker: The right button on a dock-app opens the tile's menu,
@@ -169,5 +169,5 @@ index 223f1f8..beb7ab4 100644
      }
  
 -- 
-2.55.0
+2.56.0
 

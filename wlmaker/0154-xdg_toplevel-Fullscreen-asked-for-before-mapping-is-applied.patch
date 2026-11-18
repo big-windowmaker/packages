@@ -1,4 +1,4 @@
-From 59114e6fef54495163bb7849c229f68e295e5966 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sun, 15 Nov 2026 07:15:03 -0300
 Subject: [PATCH] xdg_toplevel: Fullscreen asked for before mapping is applied

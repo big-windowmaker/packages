@@ -1,8 +1,8 @@
-From 61c0dfdd7909b7b9d5055f077dfe772ed0c29928 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 03:19:56 -0300
-Subject: [PATCH 127/128] =?UTF-8?q?i18n:=20"Dock=20position"=20as=20in=20t?=
- =?UTF-8?q?he=20X11=20session=20(Posi=C3=A7=C3=A3o=20do=20Dock)?=
+Subject: [PATCH] =?UTF-8?q?i18n:=20"Dock=20position"=20as=20in=20the=20X11?=
+ =?UTF-8?q?=20session=20(Posi=C3=A7=C3=A3o=20do=20Dock)?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

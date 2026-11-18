@@ -1,4 +1,4 @@
-From 05e75d33687af21655d944d1b80f8f295a6b0c27 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sun, 15 Nov 2026 21:22:42 -0300
 Subject: [PATCH] xwl: A press on an X11 surface keeps the pointer until all
@@ -19,13 +19,14 @@ Wayland clients are as before.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- src/xwl_surface.c | 128 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ src/xwl_surface.c | 128 ++++++++++++++++++++++++++++++++++++++++++++++
  1 file changed, 128 insertions(+)
 
 diff --git a/src/xwl_surface.c b/src/xwl_surface.c
+index c8fbd84..7e28442 100644
 --- a/src/xwl_surface.c
 +++ b/src/xwl_surface.c
-@@ -193,6 +193,18 @@
+@@ -193,6 +193,18 @@ struct _wlmaker_xwl_surface_t {
      struct wlr_output         *overlay_output_ptr;
      /** Original virtual methods of the overlay panel's element. */
      wlmtk_element_vmt_t       overlay_orig_vmt;
@@ -44,7 +45,7 @@ diff --git a/src/xwl_surface.c b/src/xwl_surface.c
      /** A menu holds the pointer, as with its grab on X11. */
      bool                      overlay_grab;
      /**
-@@ -263,6 +275,17 @@
+@@ -263,6 +275,17 @@ static bool _xwl_surface_overlay_pointer_button(
      const wlmtk_button_event_t *button_event_ptr);
  /** All XWL surfaces, see @ref wlmaker_xwl_surface_t::link. */
  static struct wl_list _xwl_surfaces = { &_xwl_surfaces, &_xwl_surfaces };
@@ -62,7 +63,7 @@ diff --git a/src/xwl_surface.c b/src/xwl_surface.c
  static bool _xwl_surface_handle_dockapp(wlmaker_xwl_surface_t *xs_ptr);
  static bool _xwl_surface_dockapp_leader(wlmaker_xwl_surface_t *xs_ptr);
  static void _xwl_surface_update_window_properties(
-@@ -1127,6 +1150,14 @@
+@@ -1127,6 +1150,14 @@ void _xwl_surface_handle_associate(
          bs_log(BS_FATAL, "Failed wlmtk_surface_create.");
          return;
      }
@@ -77,10 +78,11 @@ diff --git a/src/xwl_surface.c b/src/xwl_surface.c
  
      wlmtk_surface_connect_map_listener_signal(
          xwl_surface_ptr->surface_ptr,
-@@ -1362,6 +1393,103 @@
+@@ -1361,6 +1392,103 @@ void _xwl_surface_handle_wlr_surface_destroy(
+     xwl_surface_ptr->dissociated_on_surface_destroy = true;
  }
  
- /* ------------------------------------------------------------------------- */
++/* ------------------------------------------------------------------------- */
 +/** @return The XWL surface whose @ref surface_ptr has `element_ptr`. */
 +wlmaker_xwl_surface_t *_xwl_surface_from_content_element(
 +    wlmtk_element_t *element_ptr)
@@ -177,10 +179,9 @@ diff --git a/src/xwl_surface.c b/src/xwl_surface.c
 +    }
 +}
 +
-+/* ------------------------------------------------------------------------- */
+ /* ------------------------------------------------------------------------- */
  /** Copies WM_CLASS and the dialog state of the X11 window to the window. */
  void _xwl_surface_apply_identity(wlmaker_xwl_surface_t *xs_ptr)
- {
 -- 
-2.51.0
+2.56.0
 

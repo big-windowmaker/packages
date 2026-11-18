@@ -1,7 +1,7 @@
-From 56fc8315d1070294c37fef4bc1e41e2413a19cdd Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 19:31:01 -0300
-Subject: [PATCH 95/99] toolkit: Places windows above the bottom layer.
+Subject: [PATCH] toolkit: Places windows above the bottom layer.
 
 As layer-shell has it, surfaces of the bottom layer are below the
 windows, and above the background. The windows were placed right above
@@ -14,10 +14,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 5 insertions(+), 3 deletions(-)
 
 diff --git a/src/toolkit/desktop.c b/src/toolkit/desktop.c
-index 37f3865..341ef14 100644
+index 5703a41..d959477 100644
 --- a/src/toolkit/desktop.c
 +++ b/src/toolkit/desktop.c
-@@ -189,11 +189,13 @@ wlmtk_desktop_t *wlmtk_desktop_create(
+@@ -195,11 +195,13 @@ wlmtk_desktop_t *wlmtk_desktop_create(
      wlmtk_element_set_visible(
          &desktop_ptr->workspace_window_container.super_element,
          true);
@@ -35,5 +35,5 @@ index 37f3865..341ef14 100644
  
      if (!wlmtk_container_init(&desktop_ptr->workspace_fullscreen_container)) {
 -- 
-2.55.0
+2.56.0
 

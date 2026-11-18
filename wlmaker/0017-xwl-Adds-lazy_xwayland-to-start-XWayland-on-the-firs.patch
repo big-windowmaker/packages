@@ -1,8 +1,8 @@
-From 2978222cf817b845c3beff71621c15abcd1047dd Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 18:11:56 -0300
-Subject: [PATCH 17/17] xwl: Adds --lazy_xwayland, to start XWayland on the
- first X11 client.
+Subject: [PATCH] xwl: Adds --lazy_xwayland, to start XWayland on the first X11
+ client.
 
 With --start_xwayland, the XWayland server is started right away, which
 costs about 30-40 MB of memory also in sessions that never run an X11
@@ -52,7 +52,7 @@ index 1f0c462..119defb 100644
    If not provided, wlmaker will attempt to load the file from default
    locations, or fall back to use a compiled-in default.
 diff --git a/src/server.h b/src/server.h
-index 94eb63a..b2f33f3 100644
+index 693cb61..7cb80ab 100644
 --- a/src/server.h
 +++ b/src/server.h
 @@ -65,6 +65,11 @@ extern "C" {
@@ -68,10 +68,10 @@ index 94eb63a..b2f33f3 100644
      uint32_t                  width;
      /** Desired output height, for windowed mode. 0 for no preference. */
 diff --git a/src/wlmaker.c b/src/wlmaker.c
-index 548d3ee..45ff829 100644
+index 2aea8be..4bfe8da 100644
 --- a/src/wlmaker.c
 +++ b/src/wlmaker.c
-@@ -62,6 +62,7 @@ static char *wlmaker_arg_root_menu_file_ptr = NULL;
+@@ -63,6 +63,7 @@ static char *wlmaker_arg_root_menu_file_ptr = NULL;
  /** Startup options for the server. */
  static wlmaker_server_options_t wlmaker_server_options = {
      .start_xwayland = false,
@@ -79,7 +79,7 @@ index 548d3ee..45ff829 100644
      .width = 0,
      .height = 0,
      .bind_with_logo = false,
-@@ -75,6 +76,12 @@ static const bs_arg_t wlmaker_args[] = {
+@@ -76,6 +77,12 @@ static const bs_arg_t wlmaker_args[] = {
          "Optional: Whether to start XWayland. Disabled by default.",
          false,
          &wlmaker_server_options.start_xwayland),
@@ -118,3 +118,6 @@ index d2b502a..26a67b4 100644
          wlmaker_xwl_destroy(xwl_ptr);
          return NULL;
      }
+-- 
+2.56.0
+

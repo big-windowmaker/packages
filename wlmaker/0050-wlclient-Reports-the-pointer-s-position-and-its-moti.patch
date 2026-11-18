@@ -1,8 +1,7 @@
-From 89db10edf96bd35e983b8856327f63786c3816f3 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <teste@hemofilia.org.br>
 Date: Tue, 27 Oct 2026 01:36:55 -0300
-Subject: [PATCH 50/51] wlclient: Reports the pointer's position, and its
- motion.
+Subject: [PATCH] wlclient: Reports the pointer's position, and its motion.
 
 Button events carry the pointer's position on the surface, and the new
 'pointer_motion' event reports motion: Eg. for a DockApp to act on where
@@ -126,5 +125,5 @@ index abdfeac..5afb005 100644
  
  /** Event argument for @ref wlmcl_client_events::pointer_axis. */
 -- 
-2.55.0
+2.56.0
 

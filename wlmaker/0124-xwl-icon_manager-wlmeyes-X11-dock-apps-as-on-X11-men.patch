@@ -1,8 +1,8 @@
-From 0156fc50ba1851229925f5878a033b4046e6f538 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 01:57:48 -0300
-Subject: [PATCH 124/128] xwl, icon_manager, wlmeyes: X11 dock-apps as on X11:
- menus, shape, order
+Subject: [PATCH] xwl, icon_manager, wlmeyes: X11 dock-apps as on X11: menus,
+ shape, order
 
 - A parent-less override-redirect X11 window (the menu of a dock-app,
   eg. wmcliphist's; a tooltip) is no window anymore: It goes on top of
@@ -195,19 +195,19 @@ index f55f54f..d5d8b0a 100644
              wlclient_ptr,
              "wlmaker Toplevel Example",
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 6a2c86c..b88916b 100644
+index 2b6d64c..9dbda05 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -18,6 +18,8 @@ pkg_check_modules(WAYLAND_SERVER REQUIRED IMPORTED_TARGET wayland-server>=1.22.0
- # We build for wlroots 0.20.
- pkg_check_modules(WLROOTS REQUIRED IMPORTED_TARGET wlroots-0.20>=0.20)
+@@ -31,6 +31,8 @@ if(NOT WLROOTS_FOUND)
+ endif()
+ 
  pkg_check_modules(XCB REQUIRED IMPORTED_TARGET xcb>=1.15)
 +# The shape of X11 dock-apps' icon windows (part of libxcb).
 +pkg_check_modules(XCB_SHAPE REQUIRED IMPORTED_TARGET xcb-shape)
  # XWayland considered optional.
  pkg_check_modules(XWAYLAND xwayland>=22.1.9)
  # Optional: wmake-zones (window zones and tiling), shared engine and config.
-@@ -144,7 +146,8 @@ target_link_libraries(
+@@ -159,7 +161,8 @@ target_link_libraries(
    PkgConfig::CAIRO
    PkgConfig::WAYLAND_SERVER
    PkgConfig::WLROOTS

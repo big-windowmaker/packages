@@ -1,4 +1,4 @@
-From c2760a2bec48bc73cfd7877a1c610d21533a1c34 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 18:31:41 -0300
 Subject: [PATCH] dock: Makes AppID optional for launchers.
@@ -113,3 +113,6 @@ index 01934a6..9810469 100644
 +}
 +
  /* == End of launcher.c ==================================================== */
+-- 
+2.56.0
+

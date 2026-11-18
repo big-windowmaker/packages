@@ -1,8 +1,8 @@
-From 116eb76d227a3239ead3943637afdef77f4c240b Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Thu, 5 Nov 2026 09:06:39 -0300
-Subject: [PATCH 113/116] zones: Picker, spatial focus, undo/redo, rules and
- the layout panel
+Subject: [PATCH] zones: Picker, spatial focus, undo/redo, rules and the layout
+ panel
 
 Brings the zones in the compositor on par with wmake-zones on X11:
 - Super+Z picker: The keyboard goes to the picker (1-9, arrows, Enter,

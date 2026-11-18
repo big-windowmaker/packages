@@ -1,8 +1,8 @@
-From 42c60a0430e4e41329fa42381384adf9753c6213 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 27 Oct 2026 03:03:51 -0300
-Subject: [PATCH 72/73] context_menu: Gives the menu keyboard focus, so Escape
- closes it.
+Subject: [PATCH] context_menu: Gives the menu keyboard focus, so Escape closes
+ it.
 
 A context menu's window is activated when opened, and its menu gets the
 keyboard focus, like the root menu: The arrow keys move through the items,
@@ -88,5 +88,5 @@ index 92ac2da..ec15e8e 100644
  /** Destroys the closed menu, from the event loop. */
  void _wlmaker_context_menu_idle_destroy(void *data_ptr)
 -- 
-2.55.0
+2.56.0
 

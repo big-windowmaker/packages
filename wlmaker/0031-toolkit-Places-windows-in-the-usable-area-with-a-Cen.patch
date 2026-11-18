@@ -1,8 +1,8 @@
-From 9be5eb7bb104de95f2db19c97403fd37ed03897f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 19:08:23 -0300
-Subject: [PATCH 31/34] toolkit: Places windows in the usable area, with a
- 'Center' policy.
+Subject: [PATCH] toolkit: Places windows in the usable area, with a 'Center'
+ policy.
 
 New windows were placed starting at the output's top-left (0, 0), below
 the Clip, docks and other panels. Maximized windows also covered them:
@@ -29,30 +29,15 @@ Adds a unit test for center placement, hints and maximize extents.
 
 Signed-off-by: ruscher <rruscher@gmail.com>
 ---
- doc/ROADMAP.md              |   2 +-
  include/toolkit/desktop.h   |  32 ++++
- include/toolkit/layer.h     |  15 ++
- include/toolkit/window.h    |   9 +
+ include/toolkit/window.h    |   9 ++
  include/toolkit/workspace.h |  25 +++
- src/toolkit/desktop.c       |  56 ++++++-
- src/toolkit/layer.c         |  17 ++
+ src/toolkit/desktop.c       |  29 ++++
+ src/toolkit/layer.c         |   1 +
  src/toolkit/window.c        |  14 ++
- src/toolkit/workspace.c     | 320 ++++++++++++++++++++++++++++++++----
- 9 files changed, 459 insertions(+), 31 deletions(-)
+ src/toolkit/workspace.c     | 313 ++++++++++++++++++++++++++++++++----
+ 7 files changed, 394 insertions(+), 29 deletions(-)
 
-diff --git a/doc/ROADMAP.md b/doc/ROADMAP.md
-index 3373d5e..e488225 100644
---- a/doc/ROADMAP.md
-+++ b/doc/ROADMAP.md
-@@ -34,7 +34,7 @@ See the [Detailed Feature List](FEATURES.md) for details.
-   * Behaviour
-     * [done] Fix issue of `wlmdock` not updating contents initially and automatically.
-     * [done] Use exclusive zone + width to not overlap with other layer elements.
--  * `wlmaker` respects exclusive zone from dock(s) when determining maximizing extents.
-+  * [done] `wlmaker` respects exclusive zone from dock(s) when determining maximizing extents.
-   * Fixes
-     * [done] Resolve leaks, as reported by valgrind.
-     * [done] Fix crash on shutdown observed on `wlroots-0.20`.
 diff --git a/include/toolkit/desktop.h b/include/toolkit/desktop.h
 index 6fca210..ef29381 100644
 --- a/include/toolkit/desktop.h
@@ -96,32 +81,6 @@ index 6fca210..ef29381 100644
  /** Unit test cases. */
  extern const bs_test_set_t wlmtk_desktop_test_set;
  
-diff --git a/include/toolkit/layer.h b/include/toolkit/layer.h
-index b0e7b86..1887e0d 100644
---- a/include/toolkit/layer.h
-+++ b/include/toolkit/layer.h
-@@ -109,6 +109,21 @@ void wlmtk_layer_reconfigure(wlmtk_layer_t *layer_ptr);
-  */
- void wlmtk_layer_output_reconfigure(wlmtk_layer_output_t *layer_output_ptr);
- 
-+/**
-+ * Retrieves the usable area of `wlr_output_ptr` in this layer: The output's
-+ * extents, minus the exclusive zones of the layer's panels on that output.
-+ *
-+ * @param layer_ptr
-+ * @param wlr_output_ptr
-+ * @param usable_area_ptr
-+ *
-+ * @return false if the layer does not track `wlr_output_ptr`.
-+ */
-+bool wlmtk_layer_get_usable_area(
-+    wlmtk_layer_t *layer_ptr,
-+    struct wlr_output *wlr_output_ptr,
-+    struct wlr_box *usable_area_ptr);
-+
- /** Layer unit test. */
- extern const bs_test_set_t wlmtk_layer_test_set;
- 
 diff --git a/include/toolkit/window.h b/include/toolkit/window.h
 index c92654a..c684ffa 100644
 --- a/include/toolkit/window.h
@@ -143,10 +102,10 @@ index c92654a..c684ffa 100644
  bool wlmtk_window_is_minimized(wlmtk_window_t *window_ptr);
  
 diff --git a/include/toolkit/workspace.h b/include/toolkit/workspace.h
-index d208530..6e7c854 100644
+index 4eb087d..9423c1c 100644
 --- a/include/toolkit/workspace.h
 +++ b/include/toolkit/workspace.h
-@@ -263,6 +263,31 @@ void wlmtk_workspace_raise_window(
+@@ -288,6 +288,31 @@ void wlmtk_workspace_raise_window(
      wlmtk_workspace_t *workspace_ptr,
      wlmtk_window_t *window_ptr);
  
@@ -179,20 +138,19 @@ index d208530..6e7c854 100644
   * Minimizes `window_ptr`: Hides it, but keeps it on the workspace. If it was
   * activated, the topmost visible window gets activated instead. Restore it
 diff --git a/src/toolkit/desktop.c b/src/toolkit/desktop.c
-index 6881687..79abf53 100644
+index 16d239c..e9594d6 100644
 --- a/src/toolkit/desktop.c
 +++ b/src/toolkit/desktop.c
-@@ -87,7 +87,8 @@ struct _wlmtk_desktop_t {
+@@ -90,6 +90,8 @@ struct _wlmtk_desktop_t {
      // Elements below not owned by wlmtk_desktop_t.
      /** wlroots output layout. */
      struct wlr_output_layout  *wlr_output_layout_ptr;
--
 +    /** Policy for placing new windows. */
 +    wlmtk_window_placement_t  window_placement;
  };
  
- static void _wlmtk_desktop_switch_to_workspace(
-@@ -532,6 +533,59 @@ void wlmtk_desktop_lock_unreference(
+ static void _wlmtk_desktop_element_layout(wlmtk_element_t *element_ptr);
+@@ -537,6 +539,33 @@ void wlmtk_desktop_lock_unreference(
      desktop_ptr->lock_element_ptr = NULL;
  }
  
@@ -201,37 +159,11 @@ index 6881687..79abf53 100644
 +    wlmtk_desktop_t *desktop_ptr,
 +    struct wlr_output *wlr_output_ptr)
 +{
-+    struct wlr_box area = {};
-+    if (NULL == desktop_ptr->wlr_output_layout_ptr) return area;
-+    if (NULL == wlr_output_ptr) {
-+        if (wl_list_empty(&desktop_ptr->wlr_output_layout_ptr->outputs)) {
-+            return area;
-+        }
-+        struct wlr_output_layout_output *wolo_ptr = BS_CONTAINER_OF(
-+            desktop_ptr->wlr_output_layout_ptr->outputs.next,
-+            struct wlr_output_layout_output,
-+            link);
-+        wlr_output_ptr = wolo_ptr->output;
-+    }
-+    wlr_output_layout_get_box(
-+        desktop_ptr->wlr_output_layout_ptr, wlr_output_ptr, &area);
-+
-+    // Each layer arranges its panels independently: The usable area is what
-+    // remains from all of them.
-+    for (int i = 0; i <= WLMTK_DESKTOP_LAYER_OVERLAY; ++i) {
-+        struct wlr_box layer_area;
-+        if (NULL == desktop_ptr->layer_ptrs[i] ||
-+            !wlmtk_layer_get_usable_area(
-+                desktop_ptr->layer_ptrs[i], wlr_output_ptr, &layer_area)) {
-+            continue;
-+        }
-+        struct wlr_box intersection;
-+        if (!wlr_box_intersection(&intersection, &area, &layer_area)) {
-+            return (struct wlr_box){};
-+        }
-+        area = intersection;
-+    }
-+    return area;
++    // The desktop's layout computes it, across all layers, and stores it as
++    // the workspaces' maximization extents.
++    if (NULL == desktop_ptr->current_workspace_ptr) return (struct wlr_box){};
++    return wlmtk_workspace_get_maximize_extents(
++        desktop_ptr->current_workspace_ptr, wlr_output_ptr);
 +}
 +
 +/* ------------------------------------------------------------------------- */
@@ -253,49 +185,19 @@ index 6881687..79abf53 100644
  wlmtk_element_t *wlmtk_desktop_element(wlmtk_desktop_t *desktop_ptr)
  {
 diff --git a/src/toolkit/layer.c b/src/toolkit/layer.c
-index e15bb7a..9278492 100644
+index 0789873..18546ca 100644
 --- a/src/toolkit/layer.c
 +++ b/src/toolkit/layer.c
-@@ -50,6 +50,8 @@ struct _wlmtk_layer_t {
- struct _wlmtk_layer_output_t {
-     /** Extents and position of the output in the layout. */
-     struct wlr_box            extents;
-+    /** Extents minus the exclusive zones of the panels on this output. */
-+    struct wlr_box            usable_area;
-     /** Panels. Holds nodes at @ref wlmtk_panel_t::dlnode. */
-     bs_dllist_t               panels;
- };
-@@ -190,6 +192,20 @@ void wlmtk_layer_output_reconfigure(
-             panel_dimensions.x,
-             panel_dimensions.y);
+@@ -231,6 +231,7 @@ void wlmtk_layer_reconfigure_output(
      }
-+    layer_output_ptr->usable_area = usable_area;
-+}
+ }
+ 
 +
-+/* ------------------------------------------------------------------------- */
-+bool wlmtk_layer_get_usable_area(
-+    wlmtk_layer_t *layer_ptr,
-+    struct wlr_output *wlr_output_ptr,
-+    struct wlr_box *usable_area_ptr)
-+{
-+    wlmtk_layer_output_t *layer_output_ptr = wlmtk_output_tracker_get_output(
-+        layer_ptr->output_tracker_ptr, wlr_output_ptr);
-+    if (NULL == layer_output_ptr) return false;
-+    *usable_area_ptr = layer_output_ptr->usable_area;
-+    return true;
- }
- 
- /* == Local (static) methods =============================================== */
-@@ -249,6 +265,7 @@ void *_wlmtk_layer_output_create(
-         wlr_output_layout_ptr,
-         wlr_output_ptr,
-         &layer_output_ptr->extents);
-+    layer_output_ptr->usable_area = layer_output_ptr->extents;
- 
-     return layer_output_ptr;
- }
+ /* ------------------------------------------------------------------------- */
+ // TODO(kaeser@gubbe.ch): Remove.
+ void wlmtk_layer_output_reconfigure(
 diff --git a/src/toolkit/window.c b/src/toolkit/window.c
-index dfeb9a7..6741e2d 100644
+index 1f3d3cb..f809f5a 100644
 --- a/src/toolkit/window.c
 +++ b/src/toolkit/window.c
 @@ -138,6 +138,8 @@ struct _wlmtk_window_t {
@@ -307,7 +209,7 @@ index dfeb9a7..6741e2d 100644
      /** Whether this window is currently activated (has keyboard focus). */
      bool                      activated;
  };
-@@ -580,6 +582,18 @@ void wlmtk_window_request_minimize(wlmtk_window_t *window_ptr)
+@@ -581,6 +583,18 @@ void wlmtk_window_request_minimize(wlmtk_window_t *window_ptr)
      wlmtk_workspace_minimize_window(workspace_ptr, window_ptr);
  }
  
@@ -327,10 +229,10 @@ index dfeb9a7..6741e2d 100644
  bool wlmtk_window_is_minimized(wlmtk_window_t *window_ptr)
  {
 diff --git a/src/toolkit/workspace.c b/src/toolkit/workspace.c
-index f673f20..7b1b565 100644
+index ab46c78..75e1f9c 100644
 --- a/src/toolkit/workspace.c
 +++ b/src/toolkit/workspace.c
-@@ -149,7 +149,11 @@ static bool _wlmtk_workspace_window_overlaps(
+@@ -167,7 +167,11 @@ static bool _wlmtk_workspace_window_overlaps(
      void *ud_ptr);
  static void _wlmtk_workspace_place_window(
      wlmtk_workspace_t *workspace_ptr,
@@ -343,21 +245,7 @@ index f673f20..7b1b565 100644
  
  static bool pfsm_move_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
  static bool pfsm_move_motion(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
-@@ -304,6 +308,13 @@ struct wlr_box wlmtk_workspace_get_maximize_extents(
- {
-     struct wlr_box extents = {};
- 
-+    // With a desktop: Respect the exclusive zones of panels (docks, clip,
-+    // layer shells).
-+    if (NULL != workspace_ptr->desktop_ptr) {
-+        return wlmtk_desktop_get_usable_area(
-+            workspace_ptr->desktop_ptr, wlr_output_ptr);
-+    }
-+
-     // No output provided. Pick the primary (first one in layout).
-     if (NULL == wlr_output_ptr) {
-         if (wl_list_empty(&workspace_ptr->wlr_output_layout_ptr->outputs)) {
-@@ -420,10 +431,19 @@ bool wlmtk_workspace_enabled(wlmtk_workspace_t *workspace_ptr)
+@@ -504,10 +508,19 @@ bool wlmtk_workspace_enabled(wlmtk_workspace_t *workspace_ptr)
  /* ------------------------------------------------------------------------- */
  void wlmtk_workspace_map_window(wlmtk_workspace_t *workspace_ptr,
                                  wlmtk_window_t *window_ptr)
@@ -378,23 +266,23 @@ index f673f20..7b1b565 100644
  
      wlmtk_element_set_visible(wlmtk_window_element(window_ptr), true);
      wlmtk_container_add_element(
-@@ -958,47 +978,174 @@ bool _wlmtk_workspace_window_overlaps(
+@@ -1058,47 +1071,174 @@ bool _wlmtk_workspace_window_overlaps(
  
  /* ------------------------------------------------------------------------- */
  /**
 - * Window placement: Finds a place for the window.
-+ * Returns the area usable for windows on `wlr_output_ptr`: The desktop's
-+ * usable area, if the workspace has a desktop. Otherwise, the output's box.
++ * Returns the area usable for windows on `wlr_output_ptr`: The maximization
++ * extents, or the output's box before the first layout.
 + */
 +struct wlr_box _wlmtk_workspace_usable_area(
 +    wlmtk_workspace_t *workspace_ptr,
 +    struct wlr_output *wlr_output_ptr)
 +{
-+    if (NULL != workspace_ptr->desktop_ptr) {
-+        return wlmtk_desktop_get_usable_area(
-+            workspace_ptr->desktop_ptr, wlr_output_ptr);
-+    }
-+    struct wlr_box box = {};
++    // The desktop's layout keeps it up to date: Output extents minus the
++    // exclusive zones of panels in all layers.
++    struct wlr_box box = wlmtk_workspace_get_maximize_extents(
++        workspace_ptr, wlr_output_ptr);
++    if (!wlr_box_empty(&box)) return box;
 +    if (NULL == wlr_output_ptr) {
 +        if (wl_list_empty(&workspace_ptr->wlr_output_layout_ptr->outputs)) {
 +            return box;
@@ -428,10 +316,7 @@ index f673f20..7b1b565 100644
 + * not overlap others, scanning row by row in steps of the window's size. If
 + * none is found, stacks windows at @ref _wlmtk_workspace_placement_step
 + * pixels apart.
-  *
-- * Looks for a non-overlapping space at the current position of `window_ptr`,
-- * and then for tiles right or below it. If none is found, build a stacking
-- * order, at @ref _wlmtk_workspace_placement_step pixels apart.
++ *
 + * @param workspace_ptr
 + * @param usable_ptr
 + * @param wbox                The window's bounding box. Position is updated.
@@ -470,7 +355,10 @@ index f673f20..7b1b565 100644
 + *
 + * A window is placed only once: When mapped again (eg. moved to another
 + * workspace), it keeps its position, just confined to the workspace.
-+ *
+  *
+- * Looks for a non-overlapping space at the current position of `window_ptr`,
+- * and then for tiles right or below it. If none is found, build a stacking
+- * order, at @ref _wlmtk_workspace_placement_step pixels apart.
 + * The window goes to the requested position (eg. X11 clients' geometry), or
 + * is centered on its parent (for transients), or is placed according to the
 + * desktop's policy (@ref wlmtk_window_placement_t): Centered in the usable
@@ -580,7 +468,7 @@ index f673f20..7b1b565 100644
  }
  
  /* ------------------------------------------------------------------------- */
-@@ -1144,6 +1291,7 @@ static void test_enable(bs_test_t *test_ptr);
+@@ -1301,6 +1441,7 @@ static void test_enable(bs_test_t *test_ptr);
  static void test_activate(bs_test_t *test_ptr);
  static void test_activate_cycling(bs_test_t *test_ptr);
  static void test_minimize(bs_test_t *test_ptr);
@@ -588,7 +476,7 @@ index f673f20..7b1b565 100644
  static void test_multi_output_extents(bs_test_t *test_ptr);
  static void test_multi_output_reposition(bs_test_t *test_ptr);
  static void test_window_position(bs_test_t *test_ptr);
-@@ -1164,6 +1312,7 @@ static const bs_test_case_t _wlmtk_workspace_test_cases[] = {
+@@ -1322,6 +1463,7 @@ static const bs_test_case_t _wlmtk_workspace_test_cases[] = {
      { 1, "activate", test_activate },
      { 1, "activate_cycling", test_activate_cycling },
      { 1, "minimize", test_minimize },
@@ -596,7 +484,7 @@ index f673f20..7b1b565 100644
      { 1, "multi_output_extents", test_multi_output_extents },
      { 1, "multi_output_reposition", test_multi_output_reposition },
      { 1, "window_position", test_window_position },
-@@ -2122,4 +2271,117 @@ void test_minimize(bs_test_t *test_ptr)
+@@ -2344,4 +2486,117 @@ void test_minimize(bs_test_t *test_ptr)
      wl_display_destroy(display_ptr);
  }
  
@@ -714,3 +602,6 @@ index f673f20..7b1b565 100644
 +}
 +
  /* == End of workspace.c =================================================== */
+-- 
+2.56.0
+

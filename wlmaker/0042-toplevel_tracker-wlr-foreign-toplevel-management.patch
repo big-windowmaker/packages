@@ -1,7 +1,7 @@
-From e30d7f0cbe279cc8de4f995d749137dff2d62d14 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Big Tabbed Dock <big-wm-tabbed-dock@users.noreply.github.com>
 Date: Mon, 26 Oct 2026 19:51:24 -0300
-Subject: [PATCH 42/48] toplevel_tracker: wlr-foreign-toplevel-management
+Subject: [PATCH] toplevel_tracker: wlr-foreign-toplevel-management
 
 ---
  src/toplevel_tracker.c | 145 +++++++++++++++++++++++++++++++++++++++++
@@ -222,5 +222,5 @@ index b2c6f6d..20f5de9 100644
  /** Destroys the toplevel tracker. */
  void _wlmaker_toplevel_tracker_destroy(
 -- 
-2.55.0
+2.56.0
 

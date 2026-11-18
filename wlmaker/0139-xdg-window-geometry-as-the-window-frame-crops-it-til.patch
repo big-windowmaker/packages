@@ -1,8 +1,8 @@
-From 3a2ef6303c716c68aa44bdebf94b650d295bf3bc Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 18:46:56 -0300
-Subject: [PATCH 139/139] xdg: window geometry as the window; frame crops it;
- tiled states; decoration mode reloads
+Subject: [PATCH] xdg: window geometry as the window; frame crops it; tiled
+ states; decoration mode reloads
 
 Clients with client-side shadows and resize margins (Chrome: geometry
 16,10 on a buffer 32 x 42 px larger; GTK) were counted at their buffer
@@ -89,10 +89,10 @@ index 2927b6b..bfb911d 100644
   * Sets properties for the window.
   *
 diff --git a/src/server.c b/src/server.c
-index 1387b9f..87841fc 100644
+index f0c65a9..4e20a98 100644
 --- a/src/server.c
 +++ b/src/server.c
-@@ -461,6 +461,11 @@ bool wlmaker_server_reload(wlmaker_server_t *server_ptr)
+@@ -471,6 +471,11 @@ bool wlmaker_server_reload(wlmaker_server_t *server_ptr)
      if (!wlmim_input_manager_reconfigure(
              server_ptr->input_manager_ptr, config_dict_ptr)) rv = false;
      wlmaker_server_configure_desktop(server_ptr, config_dict_ptr);
@@ -178,7 +178,7 @@ index 80a26bd..25a2eae 100644
  
  /* ------------------------------------------------------------------------- */
 diff --git a/src/toolkit/window.c b/src/toolkit/window.c
-index 36629c3..96ce0ff 100644
+index 37d0e56..23aa2d3 100644
 --- a/src/toolkit/window.c
 +++ b/src/toolkit/window.c
 @@ -105,6 +105,8 @@ struct _wlmtk_window_t {
@@ -214,10 +214,10 @@ index 36629c3..96ce0ff 100644
  void wlmtk_window_set_properties(
      wlmtk_window_t *window_ptr,
 diff --git a/src/xdg_decoration.c b/src/xdg_decoration.c
-index 0c68c07..75e6eaf 100644
+index d8fa125..d153c07 100644
 --- a/src/xdg_decoration.c
 +++ b/src/xdg_decoration.c
-@@ -171,6 +171,27 @@ static const char *_wlmaker_xdg_decoration_dict_name = "Decoration";
+@@ -172,6 +172,27 @@ static const char *_wlmaker_xdg_decoration_dict_name = "Decoration";
  
  /* == Exported methods ===================================================== */
  

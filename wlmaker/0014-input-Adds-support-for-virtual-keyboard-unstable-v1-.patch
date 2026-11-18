@@ -1,7 +1,7 @@
-From 2d3009dc4bb8bd480d15ee86abd770118cf9834c Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 17:36:41 -0300
-Subject: [PATCH 14/17] input: Adds support for virtual-keyboard-unstable-v1
+Subject: [PATCH] input: Adds support for virtual-keyboard-unstable-v1
  protocol.
 
 Creates the virtual keyboard manager in the input manager, and adds new
@@ -29,10 +29,10 @@ Signed-off-by: ruscher <rruscher@gmail.com>
  5 files changed, 75 insertions(+), 2 deletions(-)
 
 diff --git a/doc/FEATURES.md b/doc/FEATURES.md
-index ccd047b..54a02d3 100644
+index 1bdb795..8243c46 100644
 --- a/doc/FEATURES.md
 +++ b/doc/FEATURES.md
-@@ -248,6 +248,10 @@ TBD: Raise/Lower.
+@@ -254,6 +254,10 @@ TBD: Raise/Lower.
  
  * [x] :white_check_mark: Implemented.
  
@@ -216,3 +216,6 @@ index 48c8c63..b28574e 100644
  /* ------------------------------------------------------------------------- */
  /**
   * Handler for `new_virtual_pointer` of `wlr_virtual_pointer_manager_v1`.
+-- 
+2.56.0
+

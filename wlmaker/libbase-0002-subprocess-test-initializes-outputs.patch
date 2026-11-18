@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Wed, 18 Nov 2026 14:02:15 -0300
+Subject: [PATCH] subprocess: Initializes the outputs in test_hang.
+
+bs_subprocess_terminated() sets them only when the subprocess terminated;
+the first call (still running) left them uninitialized, which GCC flags
+with -O2 (-Wmaybe-uninitialized).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/subprocess.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/subprocess.c b/src/subprocess.c
+index cab45aa..7979412 100644
+--- a/src/subprocess.c
++++ b/src/subprocess.c
+@@ -940,7 +940,7 @@ void test_hang(bs_test_t *test_ptr)
+     BS_TEST_VERIFY_NEQ(test_ptr, NULL, sp_ptr);
+     BS_TEST_VERIFY_TRUE(test_ptr, bs_subprocess_start(sp_ptr));
+ 
+-    int exit_status, signal_number;
++    int exit_status = 0, signal_number = 0;
+     BS_TEST_VERIFY_FALSE(
+         test_ptr,
+         bs_subprocess_terminated(sp_ptr, &exit_status, &signal_number));
+-- 
+2.56.0
+

@@ -1,8 +1,8 @@
-From e9e73d9720cc06daa0dbea2f5bed7535a1ae70c0 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 19:00:01 -0300
-Subject: [PATCH 28/30] primitives: Adds wlm_cairo_7segment_display_segments,
- for any segment pattern.
+Subject: [PATCH] primitives: Adds wlm_cairo_7segment_display_segments, for any
+ segment pattern.
 
 wlm_cairo_7segment_display_digit() draws only the digits 0-9. DockApps
 also want to show a blank position (all segments off, as on a VFD) or a
@@ -148,5 +148,5 @@ index b2d06b4..4e3eeff 100644
  extern const bs_test_set_t wlm_cairo_segment_display_test_set;
  
 -- 
-2.55.0
+2.56.0
 

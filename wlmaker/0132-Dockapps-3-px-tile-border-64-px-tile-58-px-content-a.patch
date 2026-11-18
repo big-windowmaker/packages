@@ -1,8 +1,8 @@
-From c4b6a80c266f9c2ab0cba33e0162ed58410b313f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 10:08:29 -0300
-Subject: [PATCH 132/136] Dockapps: 3 px tile border (64-px tile, 58-px
- content) and hidden leaders off-screen
+Subject: [PATCH] Dockapps: 3 px tile border (64-px tile, 58-px content) and
+ hidden leaders off-screen
 
 Native dockapps were configured to the tile minus a thick margin; Window
 Maker draws them 58 px wide in a 64 px tile. A hidden wmgeneral leader is

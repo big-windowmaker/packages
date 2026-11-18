@@ -1,8 +1,8 @@
-From 525abb61d15c69b3058af8dca1b7cb4921292009 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 10:08:29 -0300
-Subject: [PATCH 133/136] Spectacle support: xdg toplevel tag + wm dialog,
- control socket 'active'
+Subject: [PATCH] Spectacle support: xdg toplevel tag + wm dialog, control
+ socket 'active'
 
 KF6's KWayland plugin dereferences both globals unconditionally. The 'active'
 command prints the activated window's box (big-wm-kwin-screenshot).
@@ -14,7 +14,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 29 insertions(+)
 
 diff --git a/src/server.c b/src/server.c
-index a6ba239..3c24938 100644
+index 795267a..de3e204 100644
 --- a/src/server.c
 +++ b/src/server.c
 @@ -42,6 +42,8 @@
@@ -26,7 +26,7 @@ index a6ba239..3c24938 100644
  #undef WLR_USE_UNSTABLE
  
  #include "action.h"
-@@ -323,6 +325,17 @@ wlmaker_server_t *wlmaker_server_create(
+@@ -333,6 +335,17 @@ wlmaker_server_t *wlmaker_server_create(
          return NULL;
      }
  

@@ -1,4 +1,4 @@
-From aae38c55db15ff4e8f9a17c54d19e600b4da6692 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sun, 15 Nov 2026 22:08:18 -0300
 Subject: [PATCH] layer: Panels without destroy move to an output still in the
@@ -21,23 +21,59 @@ again, or left out, when its output went away.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- src/task_list.c     | 17 +++++------
- src/toolkit/layer.c | 83 ++++++++++++++++++++++++++++++++++++++++++++++++++---
+ src/task_list.c     | 17 +++++-----
+ src/toolkit/layer.c | 83 ++++++++++++++++++++++++++++++++++++++++++---
  2 files changed, 88 insertions(+), 12 deletions(-)
 
+diff --git a/src/task_list.c b/src/task_list.c
+index 263f145..2b503f3 100644
+--- a/src/task_list.c
++++ b/src/task_list.c
+@@ -530,10 +530,10 @@ void _wlmaker_task_list_handle_task_list_enabled(
+ 
+     _wlmaker_task_list_refresh(task_list_ptr, &task_list_ptr->style);
+ 
+-    if (task_list_ptr->enabled) {
+-        BS_ASSERT(NULL != wlmtk_panel_get_layer(&task_list_ptr->super_panel));
+-        return;
+-    }
++    // Enabled, and in a layer. Not in one, if its output went away while it
++    // was shown and none remained (@ref wlmtk_layer_t): Added again.
++    if (task_list_ptr->enabled &&
++        NULL != wlmtk_panel_get_layer(&task_list_ptr->super_panel)) return;
+ 
+     wlmtk_layer_t *layer_ptr = wlmtk_desktop_get_layer(
+         task_list_ptr->server_ptr->desktop_ptr,
+@@ -559,10 +559,11 @@ void _wlmaker_task_list_handle_task_list_disabled(
+     wlmaker_task_list_t *task_list_ptr = BS_CONTAINER_OF(
+         listener_ptr, wlmaker_task_list_t, task_list_disabled_listener);
+ 
+-    BS_ASSERT(NULL != wlmtk_panel_get_layer(&task_list_ptr->super_panel));
+-    wlmtk_layer_remove_panel(
+-        wlmtk_panel_get_layer(&task_list_ptr->super_panel),
+-        &task_list_ptr->super_panel);
++    // Out of the layer already, if its output went away and none remained.
++    wlmtk_layer_t *layer_ptr = wlmtk_panel_get_layer(&task_list_ptr->super_panel);
++    if (NULL != layer_ptr) {
++        wlmtk_layer_remove_panel(layer_ptr, &task_list_ptr->super_panel);
++    }
+     task_list_ptr->enabled = false;
+ }
+ 
 diff --git a/src/toolkit/layer.c b/src/toolkit/layer.c
+index 74ae8f7..0a5a089 100644
 --- a/src/toolkit/layer.c
 +++ b/src/toolkit/layer.c
-@@ -52,6 +52,8 @@
-     wlmtk_layer_area_func_t   area_func;
-     /** Argument of @ref wlmtk_layer_t::area_func. */
-     void                      *area_func_ud_ptr;
+@@ -47,6 +47,8 @@ struct _wlmtk_layer_t {
+ 
+     /** The output layout. */
+     struct wlr_output_layout  *wlr_output_layout_ptr;
 +    /** Set in @ref wlmtk_layer_destroy: Panels are not moved to an output. */
 +    bool                      destroying;
  };
  
  /** State of the layer on the given output. */
-@@ -123,6 +125,7 @@
+@@ -111,6 +113,7 @@ wlmtk_layer_t *wlmtk_layer_create(
  /* ------------------------------------------------------------------------- */
  void wlmtk_layer_destroy(wlmtk_layer_t *layer_ptr)
  {
@@ -45,7 +81,7 @@ diff --git a/src/toolkit/layer.c b/src/toolkit/layer.c
      if (NULL != layer_ptr->output_tracker_ptr) {
          wlmtk_output_tracker_destroy(layer_ptr->output_tracker_ptr);
          layer_ptr->output_tracker_ptr = NULL;
-@@ -316,15 +319,33 @@
+@@ -276,15 +279,33 @@ void wlmtk_layer_output_reconfigure(
  /** Removes `dlnode_ptr`'s panel from the layer output and destroys it. */
  void _wlmtk_layer_output_remove_dlnode_panel(
      bs_dllist_node_t *dlnode_ptr,
@@ -81,7 +117,7 @@ diff --git a/src/toolkit/layer.c b/src/toolkit/layer.c
  }
  
  /* ------------------------------------------------------------------------- */
-@@ -402,7 +423,7 @@
+@@ -350,7 +371,7 @@ void _wlmtk_layer_output_update(
  /** Output is removed. Unlink all panels, and destroy the layer output. */
  void _wlmtk_layer_output_destroy(
      __UNUSED__ struct wlr_output *wlr_output_ptr,
@@ -90,7 +126,7 @@ diff --git a/src/toolkit/layer.c b/src/toolkit/layer.c
      void *output_ptr)
  {
      wlmtk_layer_output_t *layer_output_ptr = output_ptr;
-@@ -410,7 +431,7 @@
+@@ -358,7 +379,7 @@ void _wlmtk_layer_output_destroy(
      bs_dllist_for_each(
          &layer_output_ptr->panels,
          _wlmtk_layer_output_remove_dlnode_panel,
@@ -99,27 +135,26 @@ diff --git a/src/toolkit/layer.c b/src/toolkit/layer.c
      free(layer_output_ptr);
  }
  
-@@ -421,6 +442,7 @@
+@@ -368,6 +389,7 @@ static void test_multi_output(bs_test_t *test_ptr);
+ static void test_layout(bs_test_t *test_ptr);
  static void test_full_edge(bs_test_t *test_ptr);
  static void test_usable_area_signal(bs_test_t *test_ptr);
- static void test_other_layers(bs_test_t *test_ptr);
 +static void test_panel_without_destroy(bs_test_t *test_ptr);
  
  /** Test cases */
  static const bs_test_case_t _wlmtk_layer_test_cases[] = {
-@@ -429,6 +451,7 @@
+@@ -375,6 +397,7 @@ static const bs_test_case_t _wlmtk_layer_test_cases[] = {
+     { 1, "layout", test_layout },
      { 1, "full_edge", test_full_edge },
      { 1, "usable_area_signal", test_usable_area_signal },
-     { 1, "other_layers", test_other_layers },
 +    { 1, "panel_without_destroy", test_panel_without_destroy },
      BS_TEST_CASE_SENTINEL()
  };
  
-@@ -512,6 +535,58 @@
-     wlr_output_layout_destroy(wlr_output_layout_ptr);
+@@ -479,6 +502,58 @@ void test_multi_output(bs_test_t *test_ptr)
      wl_display_destroy(display_ptr);
  }
-+
+ 
 +/* ------------------------------------------------------------------------- */
 +/**
 + * A panel without destroy (a dock's, the zones') belongs to who made it: When
@@ -171,43 +206,10 @@ diff --git a/src/toolkit/layer.c b/src/toolkit/layer.c
 +    wlr_output_layout_destroy(wlr_output_layout_ptr);
 +    wl_display_destroy(display_ptr);
 +}
- 
++
  /* ------------------------------------------------------------------------- */
  /** Tests panel layout with multiple panels. */
-diff --git a/src/task_list.c b/src/task_list.c
---- a/src/task_list.c
-+++ b/src/task_list.c
-@@ -530,10 +530,10 @@
- 
-     _wlmaker_task_list_refresh(task_list_ptr, &task_list_ptr->style);
- 
--    if (task_list_ptr->enabled) {
--        BS_ASSERT(NULL != wlmtk_panel_get_layer(&task_list_ptr->super_panel));
--        return;
--    }
-+    // Enabled, and in a layer. Not in one, if its output went away while it
-+    // was shown and none remained (@ref wlmtk_layer_t): Added again.
-+    if (task_list_ptr->enabled &&
-+        NULL != wlmtk_panel_get_layer(&task_list_ptr->super_panel)) return;
- 
-     wlmtk_layer_t *layer_ptr = wlmtk_desktop_get_layer(
-         task_list_ptr->server_ptr->desktop_ptr,
-@@ -559,10 +559,11 @@
-     wlmaker_task_list_t *task_list_ptr = BS_CONTAINER_OF(
-         listener_ptr, wlmaker_task_list_t, task_list_disabled_listener);
- 
--    BS_ASSERT(NULL != wlmtk_panel_get_layer(&task_list_ptr->super_panel));
--    wlmtk_layer_remove_panel(
--        wlmtk_panel_get_layer(&task_list_ptr->super_panel),
--        &task_list_ptr->super_panel);
-+    // Out of the layer already, if its output went away and none remained.
-+    wlmtk_layer_t *layer_ptr = wlmtk_panel_get_layer(&task_list_ptr->super_panel);
-+    if (NULL != layer_ptr) {
-+        wlmtk_layer_remove_panel(layer_ptr, &task_list_ptr->super_panel);
-+    }
-     task_list_ptr->enabled = false;
- }
- 
+ void test_layout(bs_test_t *test_ptr)
 -- 
-2.51.0
+2.56.0
 

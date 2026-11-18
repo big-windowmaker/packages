@@ -1,4 +1,4 @@
-From 812e936d0daf3fd34cce0f03b5b2259de1b30789 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Wed, 11 Nov 2026 12:20:16 -0300
 Subject: [PATCH] zones: "pointer" control command, the pointer's position and
@@ -13,7 +13,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 14 insertions(+)
 
 diff --git a/src/zones.c b/src/zones.c
-index a09ca363..923f5ce9 100644
+index a09ca36..923f5ce 100644
 --- a/src/zones.c
 +++ b/src/zones.c
 @@ -2697,6 +2697,20 @@ void wlmaker_zones_command(wlmaker_zones_t *zones_ptr,

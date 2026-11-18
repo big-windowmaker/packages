@@ -1,8 +1,7 @@
-From d27541d84fa55abaadd6e763aa42b0371a224ca3 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Wed, 28 Oct 2026 08:01:41 -0300
-Subject: [PATCH 102/103] menu: Releases the item buffers while the menu is
- closed.
+Subject: [PATCH] menu: Releases the item buffers while the menu is closed.
 
 Items of a closed menu are not shown, but still held the buffer of
 their state. For the root menu, with its submenus, that is one buffer
@@ -249,5 +248,5 @@ index 7ce7583..6801c0f 100644
      BS_TEST_VERIFY_EQ(test_ptr, NULL, item_ptr->menu_ptr);
      wlmtk_menu_item_destroy(item_ptr);
 -- 
-2.55.0
+2.56.0
 

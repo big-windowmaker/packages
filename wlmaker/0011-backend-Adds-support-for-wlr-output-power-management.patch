@@ -1,7 +1,7 @@
-From 63b7115e964e4bd317a92b29b422237a842bd76d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Mon, 26 Oct 2026 17:27:27 -0300
-Subject: [PATCH 11/17] backend: Adds support for
+Subject: [PATCH] backend: Adds support for
  wlr-output-power-management-unstable-v1 protocol.
 
 Creates the output power manager and handles `set_mode` by disabling,
@@ -28,10 +28,10 @@ Signed-off-by: ruscher <rruscher@gmail.com>
  create mode 100644 third_party/protocols/wlr-output-power-management-unstable-v1.xml
 
 diff --git a/doc/FEATURES.md b/doc/FEATURES.md
-index d49bf05..a76b487 100644
+index d343aee..0bec52f 100644
 --- a/doc/FEATURES.md
 +++ b/doc/FEATURES.md
-@@ -262,6 +262,10 @@ TBD: Raise/Lower.
+@@ -268,6 +268,10 @@ TBD: Raise/Lower.
  * [x] :white_check_mark: Scale, transformation and mode of output is configurable
    in *config* file, by matching output attributes.
  
@@ -353,3 +353,6 @@ index 0000000..20dbb77
 +    </request>
 +  </interface>
 +</protocol>
+-- 
+2.56.0
+

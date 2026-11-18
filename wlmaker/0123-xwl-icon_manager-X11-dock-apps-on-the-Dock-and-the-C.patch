@@ -1,8 +1,7 @@
-From 387a407be43a592e6eb9f70832c81516a1c8d1e9 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Sat, 7 Nov 2026 01:24:09 -0300
-Subject: [PATCH 123/128] xwl, icon_manager: X11 dock-apps on the Dock and the
- Clip
+Subject: [PATCH] xwl, icon_manager: X11 dock-apps on the Dock and the Clip
 
 X11 dock-apps (wmcpuload, wmclock, wmix, wmcliphist, wmshutdown...)
 showed as nothing, or as small decorated windows, under XWayland. They

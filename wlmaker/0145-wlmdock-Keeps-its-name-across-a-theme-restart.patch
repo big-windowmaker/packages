@@ -1,4 +1,4 @@
-From 9c40353f86e83b91dd4683c6db1069b34e3e7570 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 10 Nov 2026 22:19:36 -0300
 Subject: [PATCH] wlmdock: Keeps its name across a theme restart; the Clip
@@ -22,7 +22,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 50 insertions(+), 10 deletions(-)
 
 diff --git a/src/clip.c b/src/clip.c
-index b50e3451..90d9897a 100644
+index b50e345..90d9897 100644
 --- a/src/clip.c
 +++ b/src/clip.c
 @@ -34,6 +34,8 @@
@@ -105,7 +105,7 @@ index b50e3451..90d9897a 100644
  void wlmaker_clip_move_dock(
      wlmaker_server_t *server_ptr,
 diff --git a/src/wlmdock.c b/src/wlmdock.c
-index 954fd920..6912847b 100644
+index 954fd92..6912847 100644
 --- a/src/wlmdock.c
 +++ b/src/wlmdock.c
 @@ -33,6 +33,7 @@
