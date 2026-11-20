@@ -1,0 +1,148 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Fri, 20 Nov 2026 20:07:22 -0300
+Subject: [PATCH 2/3] layer: The Dock and the Clip's launchers get a configure
+ only for a new size, on the Clip's output.
+
+The desktop's layout requests the size of every panel at each output
+frame, and every request sent a configure: wlmdock acked and committed,
+which needed another frame. The Dock and the Clip's launchers looped at
+the output's refresh rate even when nothing changed (62 configures per
+second each, in a headless lab). A configure now goes out only when the
+size differs from the newest one sent, or the acknowledged one; wlroots
+forgets both when the surface unmaps, so a remap still gets one.
+
+A layer surface without an output went to the output at the cursor. A
+restarted wlmdock --clip showed the launchers on another monitor, and
+the room the Clip keeps for them stayed black. The Clip's launchers now
+go to the Clip's output, the Dock to the primary output, where the
+compositor already places them and their dock-apps.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/clip.c        | 15 +++++++++++++++
+ src/clip.h        | 10 ++++++++++
+ src/layer_panel.c | 23 +++++++++++++++++++++--
+ src/layer_shell.c | 17 +++++++++++++++++
+ 4 files changed, 63 insertions(+), 2 deletions(-)
+
+diff --git a/src/clip.c b/src/clip.c
+index 90d9897..8901b97 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -796,6 +796,21 @@ void wlmaker_clip_move_dock(
+     _wlmaker_clip_signal_wlmdock(server_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++struct wlr_output *wlmaker_clip_output(wlmaker_server_t *server_ptr)
++{
++    struct wlr_output *wlr_output_ptr = NULL;
++    if (NULL != server_ptr->clip_ptr) {
++        wlr_output_ptr = wlmbe_output_description_first_fnmatch(
++            &server_ptr->clip_ptr->output_description,
++            server_ptr->wlr_output_layout_ptr);
++    }
++    if (NULL == wlr_output_ptr) {
++        wlr_output_ptr = wlmbe_primary_output(server_ptr->wlr_output_layout_ptr);
++    }
++    return wlr_output_ptr;
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmaker_clip_launchers_changed(wlmaker_server_t *server_ptr)
+ {
+diff --git a/src/clip.h b/src/clip.h
+index 8a2b603..2dabe4e 100644
+--- a/src/clip.h
++++ b/src/clip.h
+@@ -159,6 +159,16 @@ bool wlmaker_clip_add_move_items(
+  */
+ void wlmaker_clip_launchers_changed(wlmaker_server_t *server_ptr);
+ 
++/**
++ * The output the Clip is on: The Dock and the Clip's launchers (`wlmdock`)
++ * belong there, too.
++ *
++ * @param server_ptr
++ *
++ * @return The output, or NULL if there is none.
++ */
++struct wlr_output *wlmaker_clip_output(wlmaker_server_t *server_ptr);
++
+ /**
+  * The Dock's surface (`wlmdock`) moved or changed: Places the dock-apps
+  * attached to the Dock after its launchers.
+diff --git a/src/layer_panel.c b/src/layer_panel.c
+index 779d1c7..6083415 100644
+--- a/src/layer_panel.c
++++ b/src/layer_panel.c
+@@ -1450,9 +1450,28 @@ uint32_t _wlmaker_layer_panel_request_size(
+ {
+     wlmaker_layer_panel_t *layer_panel_ptr = BS_CONTAINER_OF(
+         panel_ptr, wlmaker_layer_panel_t, super_panel);
++    struct wlr_layer_surface_v1 *ls_ptr =
++        layer_panel_ptr->wlr_layer_surface_v1_ptr;
++
++    // Only a new size gets a configure. The desktop's layout, at each output
++    // frame, requests the size of every panel: Re-sending the same size
++    // makes the client commit, which needs another frame, and so on. That
++    // was an endless configure/commit loop for the Dock and the Clip's
++    // launchers (wlmdock), even when nothing changed. The size last sent is
++    // that of the newest unacknowledged configure, or the acknowledged one.
++    // wlroots forgets both when the surface unmaps: It gets a configure again.
++    if (!wl_list_empty(&ls_ptr->configure_list)) {
++        struct wlr_layer_surface_v1_configure *c_ptr = wl_container_of(
++            ls_ptr->configure_list.prev, c_ptr, link);
++        if (c_ptr->width == (uint32_t)width &&
++            c_ptr->height == (uint32_t)height) return c_ptr->serial;
++    } else if (ls_ptr->configured &&
++               ls_ptr->pending.actual_width == (uint32_t)width &&
++               ls_ptr->pending.actual_height == (uint32_t)height) {
++        return ls_ptr->pending.configure_serial;
++    }
+ 
+-    return wlr_layer_surface_v1_configure(
+-        layer_panel_ptr->wlr_layer_surface_v1_ptr, width, height);
++    return wlr_layer_surface_v1_configure(ls_ptr, width, height);
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/layer_shell.c b/src/layer_shell.c
+index ae12d7b..438b4d5 100644
+--- a/src/layer_shell.c
++++ b/src/layer_shell.c
+@@ -30,6 +30,8 @@
+ #include <wlr/types/wlr_layer_shell_v1.h>
+ #undef WLR_USE_UNSTABLE
+ 
++#include "backend/backend.h"
++#include "clip.h"
+ #include "layer_panel.h"
+ #include "toolkit/toolkit.h"
+ #include "server.h"
+@@ -128,6 +130,21 @@ void handle_new_surface(
+         listener_ptr, wlmaker_layer_shell_t, new_surface_listener);
+     struct wlr_layer_surface_v1 *wlr_layer_surface_v1_ptr = data_ptr;
+ 
++    // The Clip's launchers (wlmdock --clip) go where the Clip is, the Dock
++    // (wlmdock) on the primary output: The compositor places them, and
++    // their dock-apps, there. On the output at the cursor, a restarted
++    // wlmdock showed the launchers on another monitor, and left the room by
++    // the Clip black.
++    const char *ns_ptr = wlr_layer_surface_v1_ptr->namespace;
++    if (NULL == wlr_layer_surface_v1_ptr->output && NULL != ns_ptr) {
++        if (0 == strcmp(ns_ptr, "wlmdock-clip")) {
++            wlr_layer_surface_v1_ptr->output = wlmaker_clip_output(
++                layer_shell_ptr->server_ptr);
++        } else if (0 == strcmp(ns_ptr, "wlmdock")) {
++            wlr_layer_surface_v1_ptr->output = wlmbe_primary_output(
++                layer_shell_ptr->server_ptr->wlr_output_layout_ptr);
++        }
++    }
+     if (NULL == wlr_layer_surface_v1_ptr->output) {
+         wlr_layer_surface_v1_ptr->output = wlmaker_server_get_output_at_cursor(
+             layer_shell_ptr->server_ptr);
+-- 
+2.56.0
+
