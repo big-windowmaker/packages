@@ -354,9 +354,12 @@
 #         um que saía cedo virava zumbi pela sessão inteira (no OptiPlex:
 #         big-wm-session-ctl e big-wm-wallpaper) e um que escrevia mais de
 #         64 KiB na saída travava, porque ninguém lia
+#   0165  SIGTERM e SIGINT encerram o wlmaker como a ação Quit (antes, o
+#         sinal o matava com status 143): o "Sair" com confirmação
+#         (big-wm-exit) encerra a sessão por ele
 pkgname=wlmaker
 pkgver=0.8.r96.g5576886
-pkgrel=1
+pkgrel=2
 epoch=1
 _commit=557688606d048acad951b1d6df02529f25bea7cf
 _libbase_commit=c64929f728804af44b1a06d6492efd5122465461
@@ -551,6 +554,7 @@ _patches=(
   0162-Fixes-compiler-warnings.patch
   0163-wlmaker-Blocks-SIGCHLD-and-SIGHUP-in-all-threads.patch
   0164-wlmaker-Autostarted-programs-are-monitored.patch
+  0165-wlmaker-Ends-on-SIGTERM-and-SIGINT-as-the-Quit-action.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -717,6 +721,7 @@ sha256sums=('7b05e9cf7d18e1e32ea915ba1c8f171069d61c5adc2f9f295c28bc051d5f201a'
             '98b61e0d786160f840bb33c4b323455b03718af894be16958d8a084a69f25412'
             'fe4a9ddbc9ad70a6f9b3d356328720ebb86818d63e540e93d1c9fb2fc59bc48c'
             'f4f091c6ecd3a210080438e9527967136f1109b61bc3dcf0b23510356abf3f1e'
+            '2a8fcc7404b34feedec757f57bfe4ae078b798894d53e984bb5910e7e025cb14'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb'
             '14af6e01a2fd6f593e815d917a2185da0337d1e82070597abdb3938f8890b698')
 
