@@ -376,6 +376,8 @@
 #         wlmdock-clip.log separados, o anterior guardado em *.log.old
 #         (antes um wlmdock.<pid>.log por login e o log do que caiu era
 #         apagado ao religar)
+#   0169  a troca do log só renomeia o arquivo que continua com o nome
+#         (dois wlmdock iguais iniciando juntos não trocam os logs)
 pkgname=wlmaker
 pkgver=0.8.r96.g5576886
 pkgrel=3
@@ -577,6 +579,7 @@ _patches=(
   0166-xwl-Tells-X-when-a-window-is-restored-and-keeps-a-fullscreen-size.patch
   0167-layer-Dock-and-Clip-launchers-configure-only-for-a-new-size-on-the-Clip-output.patch
   0168-server-wlmdock-Logs-protocol-errors-each-wlmdock-keeps-its-previous-log.patch
+  0169-wlmdock-Keeps-the-previous-log-only-if-the-locked-file-still-has-the-name.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -747,6 +750,7 @@ sha256sums=('7b05e9cf7d18e1e32ea915ba1c8f171069d61c5adc2f9f295c28bc051d5f201a'
             '53c298a97f8ee0896cfcc30c03e3024047d5b01ad1772bf6dbfb0b8081414269'
             '57e07204b93d71853b66234894fb675f9388c0e540668557df0b37c2522684fb'
             '1a75fe4a56312766289f028f770293df36c664f48d182d893a029d2fffe2f873'
+            'ee3db7f8289117355082b9a933a8aca53e5e6d5789b73bdd906c4b86720f93e8'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb'
             '14af6e01a2fd6f593e815d917a2185da0337d1e82070597abdb3938f8890b698')
 
