@@ -1,0 +1,188 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Fri, 20 Nov 2026 20:50:11 -0300
+Subject: [PATCH 3/3] server, wlmdock: Logs the protocol errors sent to
+ clients; each wlmdock keeps its previous log.
+
+A protocol error disconnects the client, and libwayland only logs "error
+in client communication (pid N)". On 2026-11-20 the Dock and the Clip's
+launchers went away like that, and which error stayed unknown. The
+compositor now logs every wl_display.error it sends: Code, client, object
+and message.
+
+The Dock and the Clip's launchers both wrote ~/.cache/wlmdock.log: the
+second fell back to wlmdock.<pid>.log (one more file per login), and a
+restart truncated the log of the wlmdock that had gone away. Now
+wlmdock.log and wlmdock-clip.log, and the previous one is kept as
+*.log.old (also when starting over for a new theme).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/server.c  | 43 +++++++++++++++++++++++++++++++++++++++++++
+ src/server.h  |  2 ++
+ src/wlmdock.c | 34 +++++++++++++++++++++++++++++++++-
+ 3 files changed, 78 insertions(+), 1 deletion(-)
+
+diff --git a/src/server.c b/src/server.c
+index 49e9288..917af2a 100644
+--- a/src/server.c
++++ b/src/server.c
+@@ -23,11 +23,14 @@
+ 
+ #include "dnd.h"
+ 
++#include <inttypes.h>
+ #include <libbase/libbase.h>
+ #include <libbase/plist.h>
+ #include <linux/input-event-codes.h>
+ #include <stdlib.h>
++#include <string.h>
+ #include <strings.h>
++#include <wayland-server-core.h>
+ #define WLR_USE_UNSTABLE
+ #include <wlr/backend.h>
+ #include <wlr/types/wlr_viewporter.h>
+@@ -96,6 +99,10 @@ static void _wlmaker_server_handle_xdg_activation_request_activate(
+ static void _wlmaker_server_handle_xdg_activation_new_token(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
++static void _wlmaker_server_log_protocol_error(
++    void *ud_ptr,
++    enum wl_protocol_logger_type direction,
++    const struct wl_protocol_logger_message *message_ptr);
+ 
+ /** Listener for `new_token` of `wlr_xdg_activation_v1` (one server). */
+ static struct wl_listener _xdg_activation_new_token_listener;
+@@ -137,6 +144,11 @@ wlmaker_server_t *wlmaker_server_create(
+         wlmaker_server_destroy(server_ptr);
+         return NULL;
+     }
++    // A protocol error disconnects the client, and libwayland only logs
++    // "error in client communication": Log the error itself. (2026-11-20:
++    // the Dock and the Clip's launchers went away like that, cause unknown.)
++    server_ptr->protocol_logger_ptr = wl_display_add_protocol_logger(
++        server_ptr->wl_display_ptr, _wlmaker_server_log_protocol_error, NULL);
+     server_ptr->wl_socket_name_ptr = wl_display_add_socket_auto(
+         server_ptr->wl_display_ptr);
+     if (NULL == server_ptr->wl_socket_name_ptr) {
+@@ -688,6 +700,10 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
+         server_ptr->xdg_shell_ptr = NULL;
+     }
+ 
++    if (NULL != server_ptr->protocol_logger_ptr) {
++        wl_protocol_logger_destroy(server_ptr->protocol_logger_ptr);
++        server_ptr->protocol_logger_ptr = NULL;
++    }
+     if (NULL != server_ptr->wl_display_ptr) {
+         wl_display_destroy_clients(server_ptr->wl_display_ptr);
+         server_ptr->wl_display_ptr = NULL;
+@@ -1203,4 +1219,31 @@ void _wlmaker_server_handle_xdg_activation_new_token(
+     }
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/** Logs the `wl_display.error` events: The protocol errors sent to clients. */
++void _wlmaker_server_log_protocol_error(
++    __UNUSED__ void *ud_ptr,
++    enum wl_protocol_logger_type direction,
++    const struct wl_protocol_logger_message *message_ptr)
++{
++    if (WL_PROTOCOL_LOGGER_EVENT != direction ||
++        0 != strcmp(message_ptr->message->name, "error") ||
++        0 != strcmp(wl_resource_get_class(message_ptr->resource),
++                    "wl_display") ||
++        3 > message_ptr->arguments_count) return;
++    pid_t pid = 0;
++    wl_client_get_credentials(
++        wl_resource_get_client(message_ptr->resource), &pid, NULL, NULL);
++    // The object argument of an event is the resource's object.
++    struct wl_resource *object_ptr =
++        (struct wl_resource *)message_ptr->arguments[0].o;
++    const char *text_ptr = message_ptr->arguments[2].s;
++    bs_log(BS_WARNING, "Protocol error %"PRIu32" for client (pid %"PRIdMAX
++           ") on %s#%"PRIu32": %s",
++           message_ptr->arguments[1].u, (intmax_t)pid,
++           NULL != object_ptr ? wl_resource_get_class(object_ptr) : "?",
++           NULL != object_ptr ? wl_resource_get_id(object_ptr) : 0,
++           NULL != text_ptr ? text_ptr : "");
++}
++
+ /* == End of server.c ====================================================== */
+diff --git a/src/server.h b/src/server.h
+index da7de30..a2a9577 100644
+--- a/src/server.h
++++ b/src/server.h
+@@ -103,6 +103,8 @@ struct _wlmaker_server_t {
+ 
+     /** Wayland display. */
+     struct wl_display         *wl_display_ptr;
++    /** Logs the protocol errors sent to clients. */
++    struct wl_protocol_logger *protocol_logger_ptr;
+     /** Name of the socket for clients to connect. */
+     const char                *wl_socket_name_ptr;
+ 
+diff --git a/src/wlmdock.c b/src/wlmdock.c
+index 6912847..3b1e214 100644
+--- a/src/wlmdock.c
++++ b/src/wlmdock.c
+@@ -29,6 +29,8 @@
+ #include <stdbool.h>
+ #include <stdint.h>
+ #include <stdio.h>
++#include <fcntl.h>
++#include <limits.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <strings.h>
+@@ -344,6 +346,27 @@ const bspl_desc_t _wlmdock_plist_desc[] = {
+     BSPL_DESC_SENTINEL(),
+ };
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Renames `<dir>/<name>.log` to `<dir>/<name>.log.old`, unless another
++ * running wlmdock has it locked. Starting over for a new theme keeps the
++ * process (and its lock): Its log becomes the old one, too.
++ */
++static void _wlmdock_keep_previous_log(const char *dir_ptr, const char *name_ptr)
++{
++    if (NULL == dir_ptr) return;
++    char path[PATH_MAX], old_path[PATH_MAX];
++    if ((int)sizeof(path) <= snprintf(
++            path, sizeof(path), "%s/%s.log", dir_ptr, name_ptr) ||
++        (int)sizeof(old_path) <= snprintf(
++            old_path, sizeof(old_path), "%s.old", path)) return;
++    int fd = open(path, O_WRONLY | O_CLOEXEC);
++    if (0 > fd) return;
++    struct flock file_lock = { .l_type = F_WRLCK, .l_whence = SEEK_SET };
++    if (0 == fcntl(fd, F_SETLK, &file_lock)) rename(path, old_path);
++    close(fd);
++}
++
+ /* == Main program ========================================================= */
+ /** The dock's main program. */
+ int main(int argc, const char **argv)
+@@ -359,10 +382,19 @@ int main(int argc, const char **argv)
+         _wlmdock_argv[i] = strdup(argv[i]);
+     }
+     wlmaker_i18n_init();
++    // The Dock and the Clip's launchers each have their log; the previous
++    // one is kept as *.log.old. (Both wrote wlmdock.log: the second one
++    // started fell back to wlmdock.<pid>.log, and a restart truncated the
++    // log of the wlmdock that had gone away.)
++    const char *log_name_ptr = "wlmdock";
++    for (int i = 1; i < argc; ++i) {
++        if (0 == strcmp(argv[i], "--clip")) log_name_ptr = "wlmdock-clip";
++    }
++    _wlmdock_keep_previous_log(xdgCacheHome(NULL), log_name_ptr);
+     if (!wlm_util_backtrace_setup(argv[0]) ||
+         // Ideally: xdgStateHome. But: libxdg-basedir is using FreeDesktop
+         // specification v0.7, and XDG_STATE_HOME was added with v0.8 only.
+-        !bs_log_init(xdgCacheHome(NULL), "wlmdock")) {
++        !bs_log_init(xdgCacheHome(NULL), log_name_ptr)) {
+         return EXIT_FAILURE;
+     }
+ 
+-- 
+2.56.0
+

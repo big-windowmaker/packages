@@ -1,0 +1,154 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Thu, 19 Nov 2026 03:31:11 -0300
+Subject: [PATCH 1/3] xwl: Tells X when a window is restored; fullscreen keeps
+ the output's size.
+
+A game in fullscreen (Wine/Proton, SDL: Streets of Rage 4) minimizes
+itself when it loses the focus. Restored by the compositor (activation,
+Dock, task list), X was never told: WM_STATE stayed Iconic and
+_NET_WM_STATE_HIDDEN, so Wine drew nothing: A black window, until the
+game was killed.
+
+Once restored, the game often came back windowed, and only went
+fullscreen again after toggling it several times:
+- Minimizing, Wine asks for its windowed size while still fullscreen.
+  Granted, the restored game no longer covered its output. As on X11
+  window managers, a fullscreen window now keeps its output's size until
+  it leaves fullscreen.
+- Entering or leaving fullscreen, the toolkit moves the window, then
+  sizes it: X got the new position with the old size first (the output's
+  size at the windowed position), and Wine kept that as its place. X now
+  gets one configure with both.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/xwl_surface.c | 55 +++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 55 insertions(+)
+
+diff --git a/src/xwl_surface.c b/src/xwl_surface.c
+index 7e28442..a899134 100644
+--- a/src/xwl_surface.c
++++ b/src/xwl_surface.c
+@@ -151,6 +151,8 @@ struct _wlmaker_xwl_surface_t {
+     struct wl_listener        window_request_fullscreen_listener;
+     /** Listener for @ref wlmtk_window_events_t::request_maximized. */
+     struct wl_listener        window_request_maximized_listener;
++    /** Listener for @ref wlmtk_window_events_t::state_changed. */
++    struct wl_listener        window_state_changed_listener;
+ 
+     /** The toolkit surface. Only available once 'associated'. */
+     wlmtk_surface_t           *surface_ptr;
+@@ -175,6 +177,13 @@ struct _wlmaker_xwl_surface_t {
+      * refused and the game stayed a framed window. Applied once mapped.
+      */
+     bool                      fullscreen_pending;
++    /**
++     * While the window goes to or leaves fullscreen: The toolkit moves it
++     * first, then sizes it. X gets one configure with both: The move with
++     * the old size (the output's, at the windowed position) was taken by
++     * Wine as the window's new place, and it stayed there, not fullscreen.
++     */
++    bool                      fullscreen_changing;
+     /** Or, the parent surface. In that case, window_ptr is NULL. */
+     wlmaker_xwl_surface_t     *parent_surface_ptr;
+ 
+@@ -358,6 +367,9 @@ static void _wlmaker_xwl_surface_handle_window_request_size(
+ static void _wlmaker_xwl_surface_handle_window_request_fullscreen(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
++static void _wlmaker_xwl_surface_handle_window_state_changed(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
+ static void _wlmaker_xwl_surface_handle_window_request_maximized(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
+@@ -1066,6 +1078,18 @@ void _xwl_surface_handle_request_configure(
+     // on the workspace stays where it is: X learns its real position.
+     int x = cfg_event_ptr->x, y = cfg_event_ptr->y;
+     _xwl_surface_content_position(xwl_surface_ptr, &x, &y);
++    // A fullscreen window keeps its output's size until it leaves
++    // fullscreen, as on X11 window managers: Wine, minimizing a game that
++    // lost the focus, asks for the windowed size (also just before it asks
++    // to be minimized). Granted, the restored game no longer covered its
++    // output, and Wine dropped fullscreen: Windowed, or only after toggling.
++    if (NULL != xwl_surface_ptr->window_ptr &&
++        wlmtk_window_is_fullscreen(xwl_surface_ptr->window_ptr) &&
++        0 < xwl_surface_ptr->configured_width &&
++        0 < xwl_surface_ptr->configured_height) {
++        _xwl_surface_configure_position(xwl_surface_ptr, x, y);
++        return;
++    }
+     _xwl_surface_configure(
+         xwl_surface_ptr, x, y, cfg_event_ptr->width, cfg_event_ptr->height);
+ }
+@@ -1260,6 +1284,10 @@ void _xwl_surface_handle_associate(
+             &wlmtk_window_events(xwl_surface_ptr->window_ptr)->request_fullscreen,
+             &xwl_surface_ptr->window_request_fullscreen_listener,
+             _wlmaker_xwl_surface_handle_window_request_fullscreen);
++        wlmtk_util_connect_listener_signal(
++            &wlmtk_window_events(xwl_surface_ptr->window_ptr)->state_changed,
++            &xwl_surface_ptr->window_state_changed_listener,
++            _wlmaker_xwl_surface_handle_window_state_changed);
+         wlmtk_util_connect_listener_signal(
+             &wlmtk_window_events(xwl_surface_ptr->window_ptr)->request_maximized,
+             &xwl_surface_ptr->window_request_maximized_listener,
+@@ -1328,6 +1356,8 @@ void _xwl_surface_handle_dissociate(
+             &xwl_surface_ptr->window_request_fullscreen_listener);
+         wlmtk_util_disconnect_listener(
+             &xwl_surface_ptr->window_request_maximized_listener);
++        wlmtk_util_disconnect_listener(
++            &xwl_surface_ptr->window_state_changed_listener);
+ 
+         wl_signal_emit(
+             &xwl_surface_ptr->server_ptr->window_destroyed_event,
+@@ -1919,6 +1949,7 @@ void _xwl_surface_sync_x_position(wlmaker_xwl_surface_t *xs_ptr)
+ {
+     struct wlr_xwayland_surface *s = xs_ptr->wlr_xwayland_surface_ptr;
+     int x, y;
++    if (xs_ptr->fullscreen_changing) return;
+     if (!_xwl_surface_content_position(xs_ptr, &x, &y)) return;
+     if (x == s->x && y == s->y) return;
+     _xwl_surface_configure_position(xs_ptr, x, y);
+@@ -1983,14 +2014,38 @@ void _wlmaker_xwl_surface_handle_window_request_fullscreen(
+     wlr_xwayland_surface_set_fullscreen(
+         xwl_surface_ptr->wlr_xwayland_surface_ptr,
+          *fullscreen_ptr);
++    xwl_surface_ptr->fullscreen_changing = true;
+     wlmtk_window_commit_fullscreen(
+         xwl_surface_ptr->window_ptr,
+         *fullscreen_ptr);
++    xwl_surface_ptr->fullscreen_changing = false;
++    // In case no size followed the move.
++    _xwl_surface_sync_x_position(xwl_surface_ptr);
+ 
+     // TODO(kaeser@gubbe.ch): In windowed mode, there appears something off
+     // with XWL drawing fullscreen surfaces. See to report to wlroots.
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * The window was minimized or restored here (its menu, the Dock, a task
++ * list, an activation): X learns it (WM_STATE, _NET_WM_STATE_HIDDEN). A game
++ * that minimized itself on losing focus (Wine, SDL in fullscreen) otherwise
++ * stayed iconic for X once restored, and drew nothing: A black window.
++ */
++void _wlmaker_xwl_surface_handle_window_state_changed(
++    struct wl_listener *listener_ptr,
++    __UNUSED__ void *data_ptr)
++{
++    wlmaker_xwl_surface_t *xwl_surface_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmaker_xwl_surface_t, window_state_changed_listener);
++    struct wlr_xwayland_surface *xws_ptr =
++        xwl_surface_ptr->wlr_xwayland_surface_ptr;
++    bool minimized = wlmtk_window_is_minimized(xwl_surface_ptr->window_ptr);
++    if (xws_ptr->minimized == minimized) return;
++    wlr_xwayland_surface_set_minimized(xws_ptr, minimized);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** The window is requested to go maximized. Forward and commit that. */
+ void _wlmaker_xwl_surface_handle_window_request_maximized(
+-- 
+2.56.0
+
