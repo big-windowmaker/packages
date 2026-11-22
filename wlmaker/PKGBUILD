@@ -382,9 +382,13 @@
 #         Clip ela ficava na área útil, deslocada 64 px para a direita: a
 #         faixa de layouts, as zonas e o Super+Z apareciam longe de onde o
 #         ponteiro acerta)
+#   0171  menu raiz: F12 (RootMenu) e o clique direito na área de trabalho
+#         sempre abrem o menu no ponteiro, também quando ele ficou aberto em
+#         outra área de trabalho, atrás das janelas ou num monitor desligado
+#         (antes os dois não faziam nada até o menu ser achado e fechado)
 pkgname=wlmaker
 pkgver=0.8.r96.g5576886
-pkgrel=4
+pkgrel=5
 epoch=1
 _commit=557688606d048acad951b1d6df02529f25bea7cf
 _libbase_commit=c64929f728804af44b1a06d6492efd5122465461
@@ -585,6 +589,7 @@ _patches=(
   0168-server-wlmdock-Logs-protocol-errors-each-wlmdock-keeps-its-previous-log.patch
   0169-wlmdock-Keeps-the-previous-log-only-if-the-locked-file-still-has-the-name.patch
   0170-zones-The-overlay-spans-the-whole-output-not-the-usable-area.patch
+  0171-root_menu-The-RootMenu-key-and-the-root-window-s-button-always-give-a-menu.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -757,6 +762,7 @@ sha256sums=('7b05e9cf7d18e1e32ea915ba1c8f171069d61c5adc2f9f295c28bc051d5f201a'
             '1a75fe4a56312766289f028f770293df36c664f48d182d893a029d2fffe2f873'
             'ee3db7f8289117355082b9a933a8aca53e5e6d5789b73bdd906c4b86720f93e8'
             '0a9c5c119e6e62c4e50655f9edd646e7fba7c214d1bcf9e9b19a13e12d675501'
+            '50ad080baf674a482fc18ea546c71de881a6ca68084e094f3358eba604866a4c'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb'
             '14af6e01a2fd6f593e815d917a2185da0337d1e82070597abdb3938f8890b698')
 
