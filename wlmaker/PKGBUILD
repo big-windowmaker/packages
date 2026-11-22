@@ -386,9 +386,16 @@
 #         sempre abrem o menu no ponteiro, também quando ele ficou aberto em
 #         outra área de trabalho, atrás das janelas ou num monitor desligado
 #         (antes os dois não faziam nada até o menu ser achado e fechado)
+#   0172  wlmtool: um .desktop quebrado (ex.: o do guvcview, com a chave
+#         "_Comment") fica fora do menu de aplicativos, em vez de esvaziar o
+#         menu inteiro
+#   libbase-0003  plist: uma string só é escrita sem aspas com bytes de
+#         identificador ASCII (no pt_BR.UTF-8 a regex [a-z] casava "á": o menu
+#         do wlmtool e qualquer plist com acento escrito nesse idioma não eram
+#         lidos de volta; o check() falhava com LANG=pt_BR)
 pkgname=wlmaker
 pkgver=0.8.r96.g5576886
-pkgrel=5
+pkgrel=6
 epoch=1
 _commit=557688606d048acad951b1d6df02529f25bea7cf
 _libbase_commit=c64929f728804af44b1a06d6492efd5122465461
@@ -590,6 +597,7 @@ _patches=(
   0169-wlmdock-Keeps-the-previous-log-only-if-the-locked-file-still-has-the-name.patch
   0170-zones-The-overlay-spans-the-whole-output-not-the-usable-area.patch
   0171-root_menu-The-RootMenu-key-and-the-root-window-s-button-always-give-a-menu.patch
+  0172-wlmtool-A-broken-desktop-file-is-left-out-of-the-applications-menu.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -598,6 +606,7 @@ source=(
   "${_patches[@]}"
   libbase-0001-subprocess-close-pipes.patch
   libbase-0002-subprocess-test-initializes-outputs.patch
+  libbase-0003-plist-writes-unquoted-only-ascii-identifiers.patch
 )
 sha256sums=('7b05e9cf7d18e1e32ea915ba1c8f171069d61c5adc2f9f295c28bc051d5f201a'
             '88572c2010681c59fb7079c454d0a95184c1b44d499aa13266b6d95f5da45643'
@@ -763,8 +772,10 @@ sha256sums=('7b05e9cf7d18e1e32ea915ba1c8f171069d61c5adc2f9f295c28bc051d5f201a'
             'ee3db7f8289117355082b9a933a8aca53e5e6d5789b73bdd906c4b86720f93e8'
             '0a9c5c119e6e62c4e50655f9edd646e7fba7c214d1bcf9e9b19a13e12d675501'
             '50ad080baf674a482fc18ea546c71de881a6ca68084e094f3358eba604866a4c'
+            'eb5385e207739514ce16a317c4545ad7d355a3fcbd2605e58b9c99b0cfa97f1d'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb'
-            '14af6e01a2fd6f593e815d917a2185da0337d1e82070597abdb3938f8890b698')
+            '14af6e01a2fd6f593e815d917a2185da0337d1e82070597abdb3938f8890b698'
+            'bd064e59e0608a9af1e70b95fb49697331d58088f09125d19023a1f48eabb7b5')
 
 prepare() {
   cd wlmaker
@@ -789,6 +800,9 @@ prepare() {
   git -C submodules/libbase apply "${srcdir}/libbase-0001-subprocess-close-pipes.patch"
   # libbase: o teste test_hang inicializa as saídas (aviso do GCC com -O2).
   git -C submodules/libbase apply "${srcdir}/libbase-0002-subprocess-test-initializes-outputs.patch"
+  # libbase: uma string só vai sem aspas com bytes de identificador ASCII
+  # (a regex [a-z] casava "á" no pt_BR.UTF-8 e o menu do wlmtool não lia).
+  git -C submodules/libbase apply "${srcdir}/libbase-0003-plist-writes-unquoted-only-ascii-identifiers.patch"
 
   local _patch
   for _patch in "${_patches[@]}"; do
