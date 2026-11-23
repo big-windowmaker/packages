@@ -1,0 +1,249 @@
+From 4a46af514231ef4181ccd8c3f8d8f73833efe8fc Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 23 Nov 2026 00:13:51 -0300
+Subject: [PATCH] Outputs: The Dock and the Clip return to the primary output
+ when it comes back.
+
+A monitor that dropped off for a moment (unplugged, or waking up) joined
+the output layout again at its end: The next output became the primary
+one for good, and the Dock, the Clip and the Dock's dock-apps stayed on
+it. The Dock's dock-apps were not moved at all: They were left on the
+output closest to the layout's center, often behind windows.
+
+The backend now remembers the first output of the layout as the primary
+one, and puts it first again when it rejoins. On a layout change, the
+Clip also moves the Dock's dock-apps and the wlmdock layer surfaces (the
+Dock, the Clip's launchers) to the output they belong on.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/backend/backend.c | 69 +++++++++++++++++++++++++++++++++++++++++++
+ src/clip.c            | 30 +++++++++++++++++++
+ src/layer_panel.c     | 19 ++++++++++++
+ src/layer_panel.h     | 10 +++++++
+ 4 files changed, 128 insertions(+)
+
+diff --git a/src/backend/backend.c b/src/backend/backend.c
+index 7b9e2bc..a17e739 100644
+--- a/src/backend/backend.c
++++ b/src/backend/backend.c
+@@ -114,6 +114,14 @@ struct _wlmbe_backend_t {
+ 
+     /** Listener for wlr_backend::events::new_output. */
+     struct wl_listener        new_output_listener;
++    /** Listener for `add` of `wlr_output_layout::events`. */
++    struct wl_listener        layout_add_listener;
++    /**
++     * Name of the primary output: The first one in the layout. When it
++     * leaves the layout (unplugged, or a monitor that drops off for a
++     * moment) and comes back, it is the primary output again.
++     */
++    char                      *primary_name_ptr;
+ 
+     /** Desired output width, for windowed mode. 0 for no preference. */
+     uint32_t                  width;
+@@ -163,6 +171,9 @@ static void _wlmbe_backend_handle_new_output(
+ static void _wlmbe_backend_handle_output_power_set_mode(
+     struct wl_listener *listener_ptr,
+     void *data_ptr);
++static void _wlmbe_backend_handle_layout_add(
++    struct wl_listener *listener_ptr,
++    void *data_ptr);
+ 
+ static bool _wlmbe_backend_decode_item(
+     bspl_object_t *obj_ptr,
+@@ -315,6 +326,11 @@ wlmbe_backend_t *wlmbe_backend_create(
+         return NULL;
+     }
+ 
++    wlmtk_util_connect_listener_signal(
++        &backend_ptr->wlr_output_layout_ptr->events.add,
++        &backend_ptr->layout_add_listener,
++        _wlmbe_backend_handle_layout_add);
++
+     backend_ptr->wlr_scene_output_layout_ptr =
+         wlr_scene_attach_output_layout(
+             wlr_scene_ptr,
+@@ -442,6 +458,7 @@ void wlmbe_backend_destroy(wlmbe_backend_t *backend_ptr)
+ {
+     wlmtk_util_disconnect_listener(&backend_ptr->output_power_set_mode_listener);
+     wlmtk_util_disconnect_listener(&backend_ptr->new_output_listener);
++    wlmtk_util_disconnect_listener(&backend_ptr->layout_add_listener);
+ 
+     if (NULL != backend_ptr->output_manager_ptr) {
+         wlmbe_output_manager_destroy(backend_ptr->output_manager_ptr);
+@@ -480,6 +497,10 @@ void wlmbe_backend_destroy(wlmbe_backend_t *backend_ptr)
+         free(backend_ptr->state_fname_ptr);
+         backend_ptr->state_fname_ptr = NULL;
+     }
++    if (NULL != backend_ptr->primary_name_ptr) {
++        free(backend_ptr->primary_name_ptr);
++        backend_ptr->primary_name_ptr = NULL;
++    }
+ 
+     free(backend_ptr);
+ }
+@@ -716,6 +737,41 @@ void _wlmbe_backend_handle_new_output(
+     wlr_output_destroy(wlr_output_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * Handles `add` of `wlr_output_layout`: The first output to join the layout
++ * is the primary one (the Dock, the Clip, ...). wlroots appends an output
++ * that joins again (re-plugged, a monitor waking up, enabled through output
++ * management) at the end of the layout: Then the primary output is put
++ * first again, and the layout's change is told once more, for those that
++ * follow the primary output.
++ *
++ * @param listener_ptr
++ * @param data_ptr            Points to struct wlr_output_layout_output.
++ */
++void _wlmbe_backend_handle_layout_add(
++    struct wl_listener *listener_ptr,
++    void *data_ptr)
++{
++    wlmbe_backend_t *backend_ptr = BS_CONTAINER_OF(
++        listener_ptr, wlmbe_backend_t, layout_add_listener);
++    struct wlr_output_layout_output *wolo_ptr = data_ptr;
++    struct wlr_output_layout *layout_ptr = backend_ptr->wlr_output_layout_ptr;
++
++    if (NULL == backend_ptr->primary_name_ptr) {
++        backend_ptr->primary_name_ptr = logged_strdup(wolo_ptr->output->name);
++        return;
++    }
++    if (0 != strcmp(backend_ptr->primary_name_ptr, wolo_ptr->output->name) ||
++        layout_ptr->outputs.next == &wolo_ptr->link) return;
++
++    wl_list_remove(&wolo_ptr->link);
++    wl_list_insert(&layout_ptr->outputs, &wolo_ptr->link);
++    bs_log(BS_INFO, "Output \"%s\" is the primary output again.",
++           wolo_ptr->output->name);
++    wl_signal_emit_mutable(&layout_ptr->events.change, layout_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ /**
+  * Handles `set_mode` of `wlr_output_power_manager_v1`: Powers the output
+@@ -1232,6 +1288,19 @@ void _wlmbe_backend_test_disabled_output(bs_test_t *test_ptr)
+     BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, so);
+     BS_TEST_VERIFY_EQ(test_ptr, 3000, so->x);
+ 
++    // The primary output (the headless backend's own, the first) leaves
++    // the layout and comes back: It is the primary output again.
++    struct wlr_output *p = wlmbe_primary_output(wlr_output_layout_ptr);
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, p);
++    BS_TEST_VERIFY_TRUE(test_ptr, _wlmbe_backend_test_configure(be, p, false, 0));
++    BS_TEST_VERIFY_NEQ(test_ptr, p, wlmbe_primary_output(wlr_output_layout_ptr));
++    BS_TEST_VERIFY_TRUE(test_ptr, _wlmbe_backend_test_configure(be, p, true, 0));
++    BS_TEST_VERIFY_EQ(test_ptr, p, wlmbe_primary_output(wlr_output_layout_ptr));
++    // Another output coming back stays behind it.
++    BS_TEST_VERIFY_TRUE(test_ptr, _wlmbe_backend_test_configure(be, b, false, 0));
++    BS_TEST_VERIFY_TRUE(test_ptr, _wlmbe_backend_test_configure(be, b, true, 2000));
++    BS_TEST_VERIFY_EQ(test_ptr, p, wlmbe_primary_output(wlr_output_layout_ptr));
++
+     // Unplugging an output removes it from the list and from the heads.
+     wlr_output_destroy(a);
+     BS_TEST_VERIFY_EQ(test_ptr, 3, bs_dllist_size(&be->outputs));
+diff --git a/src/clip.c b/src/clip.c
+index 8901b97..009975e 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -2161,6 +2161,36 @@ void _wlmaker_clip_handle_output_layout_change(
+             wlmtk_dock_panel(clip_ptr->wlmtk_dock_ptr),
+             wlr_output_ptr);
+     }
++
++    // The Dock is on the primary output, its dock-apps go along. When the
++    // output they were on went away, they were left on another output; and
++    // when the primary output comes back, they return to it.
++    wlmaker_server_t *server_ptr = clip_ptr->server_ptr;
++    struct wlr_output *primary_ptr = wlmbe_primary_output(
++        server_ptr->wlr_output_layout_ptr);
++    if (NULL != clip_ptr->dock_side_ptr && NULL != primary_ptr) {
++        wlmtk_panel_t *panel_ptr = wlmtk_dock_panel(clip_ptr->dock_side_ptr);
++        layer_ptr = wlmtk_panel_get_layer(panel_ptr);
++        if (NULL != layer_ptr) {
++            wlmtk_layer_remove_panel(layer_ptr, panel_ptr);
++        } else {
++            layer_ptr = wlmtk_desktop_get_layer(
++                server_ptr->desktop_ptr, WLMTK_DESKTOP_LAYER_TOP);
++        }
++        wlmtk_layer_add_panel(layer_ptr, panel_ptr, primary_ptr);
++        _wlmaker_clip_update_dock_side(clip_ptr);
++    }
++
++    // The Dock's and the Clip's launchers (wlmdock) are layer surfaces, put
++    // on an output when created: They go along, too.
++    if (NULL != server_ptr->dock_layer_panel_ptr) {
++        wlmaker_layer_panel_set_output(
++            server_ptr->dock_layer_panel_ptr, primary_ptr);
++    }
++    if (NULL != server_ptr->clip_layer_panel_ptr) {
++        wlmaker_layer_panel_set_output(
++            server_ptr->clip_layer_panel_ptr, wlr_output_ptr);
++    }
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/layer_panel.c b/src/layer_panel.c
+index 6083415..07c8270 100644
+--- a/src/layer_panel.c
++++ b/src/layer_panel.c
+@@ -289,6 +289,25 @@ struct wlr_surface *wlmaker_layer_panel_wlr_surface(
+     return layer_panel_ptr->wlr_layer_surface_v1_ptr->surface;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmaker_layer_panel_set_output(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    struct wlr_output *wlr_output_ptr)
++{
++    struct wlr_layer_surface_v1 *wlr_layer_surface_v1_ptr =
++        layer_panel_ptr->wlr_layer_surface_v1_ptr;
++    if (NULL == wlr_layer_surface_v1_ptr || NULL == wlr_output_ptr ||
++        wlr_layer_surface_v1_ptr->output == wlr_output_ptr) return;
++
++    wlr_layer_surface_v1_ptr->output = wlr_output_ptr;
++    wlmtk_layer_t *layer_ptr = wlmtk_panel_get_layer(
++        &layer_panel_ptr->super_panel);
++    if (NULL == layer_ptr) return;
++    wlmtk_layer_remove_panel(layer_ptr, &layer_panel_ptr->super_panel);
++    wlmtk_layer_add_panel(
++        layer_ptr, &layer_panel_ptr->super_panel, wlr_output_ptr);
++}
++
+ /* ------------------------------------------------------------------------- */
+ void wlmaker_layer_panel_update_layer(wlmaker_layer_panel_t *layer_panel_ptr)
+ {
+diff --git a/src/layer_panel.h b/src/layer_panel.h
+index c9b3c8b..6908b1c 100644
+--- a/src/layer_panel.h
++++ b/src/layer_panel.h
+@@ -35,6 +35,7 @@ extern "C" {
+ /** Forward declaration for wlroots layer surface. */
+ struct wlr_layer_surface_v1;
+ struct wlr_surface;
++struct wlr_output;
+ 
+ /**
+  * Creates a layer panel for the given layer surface.
+@@ -70,6 +71,15 @@ bool wlmaker_layer_panel_get_box(
+  */
+ void wlmaker_layer_panel_update_layer(wlmaker_layer_panel_t *layer_panel_ptr);
+ 
++/**
++ * Moves the panel to the output, in the layer it is in. For the Dock and the
++ * Clip's launchers (`wlmdock`), placed on an output when created: They go
++ * where the docks are, after the outputs changed.
++ */
++void wlmaker_layer_panel_set_output(
++    wlmaker_layer_panel_t *layer_panel_ptr,
++    struct wlr_output *wlr_output_ptr);
++
+ /** @return The panel's surface. */
+ struct wlr_surface *wlmaker_layer_panel_wlr_surface(
+     wlmaker_layer_panel_t *layer_panel_ptr);
+-- 
+2.56.0
+

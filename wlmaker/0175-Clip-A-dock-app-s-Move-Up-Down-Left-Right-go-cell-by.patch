@@ -1,0 +1,242 @@
+From eb9f00e5e1f835e123fa20b7fb5d1c8712735f8b Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 23 Nov 2026 08:26:13 -0300
+Subject: [PATCH 175/178] Clip: A dock-app's Move Up/Down/Left/Right go cell by
+ cell on the grid.
+
+Into a free cell next to another icon, or swapping with the icon there.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/clip.c         | 95 ++++++++++++++++++++++++++++++++++++++++++++++
+ src/clip.h         | 10 +++++
+ src/clip_grid.c    | 34 +++++++++++++++++
+ src/clip_grid.h    |  9 +++++
+ src/icon_manager.c |  5 ++-
+ 5 files changed, 152 insertions(+), 1 deletion(-)
+
+diff --git a/src/clip.c b/src/clip.c
+index 08cd665..29adf40 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -1340,6 +1340,93 @@ static bool _wlmaker_clip_dockapp_place(
+     return true;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++/**
++ * For a dock-app of the Clip: Its icon on the grid, and the cell next to it
++ * towards `direction`, with the icon there (or SIZE_MAX).
++ * @return Whether it can move there: The cell is on the output, and free
++ *     next to another icon (than itself), or holds another icon (they swap).
++ */
++static bool _wlmaker_clip_grid_move_target(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr,
++    uint32_t direction,
++    size_t *icon_ptr,
++    wlmaker_clip_cell_t *cell_ptr,
++    size_t *other_ptr)
++{
++    wlmaker_clip_t *clip_ptr = server_ptr->clip_ptr;
++    if (NULL == clip_ptr ||
++        wlmaker_clip_dockapps_of(server_ptr, tile_ptr) != clip_ptr->dockapps_ptr) {
++        return false;
++    }
++    int index = wlmaker_dockapps_index(clip_ptr->dockapps_ptr, tile_ptr);
++    size_t icon = clip_ptr->clip_launchers + (size_t)index;
++    if (0 > index || icon >= clip_ptr->grid.n) return false;
++    const wlmtk_dock_positioning_t *pos_ptr = wlmtk_dock_get_positioning(
++        clip_ptr->wlmtk_dock_ptr);
++    wlmaker_clip_cell_t c = wlmaker_clip_cell_towards(
++        (wlmaker_dock_place_t){ pos_ptr->edge, pos_ptr->anchor },
++        &clip_ptr->grid.cells_ptr[icon], direction);
++    *icon_ptr = icon;
++    *cell_ptr = c;
++    *other_ptr = wlmaker_clip_grid_icon_at(&clip_ptr->grid, &c, icon);
++    if (!wlmaker_clip_grid_contains(&clip_ptr->grid, &c) ||
++        (0 == c.lane && 0 == c.slot)) return false;
++    if (SIZE_MAX != *other_ptr) return true;
++    return WLMAKER_CLIP_GRID_ATTACH ==
++        wlmaker_clip_grid_snap(&clip_ptr->grid, &c, icon);
++}
++
++/* ------------------------------------------------------------------------- */
++bool wlmaker_clip_move_dockapp_towards(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr,
++    uint32_t direction)
++{
++    size_t icon, other;
++    wlmaker_clip_cell_t cell;
++    if (!_wlmaker_clip_grid_move_target(server_ptr, tile_ptr, direction,
++                                        &icon, &cell, &other)) {
++        return false;
++    }
++    wlmaker_clip_t *clip_ptr = server_ptr->clip_ptr;
++    wlmaker_clip_freeze_grid(server_ptr);
++    wlmaker_clip_cell_t from = clip_ptr->grid.cells_ptr[icon];
++    size_t nl = clip_ptr->clip_launchers;
++    if (SIZE_MAX != other && other < nl) {
++        // A launcher: It takes the dock-app's cell.
++        wlmaker_clip_cell_t *cells_ptr = logged_calloc(
++            nl, sizeof(wlmaker_clip_cell_t));
++        bool *set_ptr = logged_calloc(nl, sizeof(bool));
++        if (NULL != cells_ptr && NULL != set_ptr) {
++            memcpy(cells_ptr, clip_ptr->grid.cells_ptr,
++                   nl * sizeof(wlmaker_clip_cell_t));
++            cells_ptr[other] = from;
++            set_ptr[other] = true;
++            wlmaker_dock_launchers_set_cells(server_ptr, cells_ptr, set_ptr, nl);
++        }
++        if (NULL != set_ptr) free(set_ptr);
++        if (NULL != cells_ptr) free(cells_ptr);
++    }
++    wlmaker_dockapps_cell_update_t u[2] = {};
++    size_t n = 0;
++    u[n++] = (wlmaker_dockapps_cell_update_t){
++        .name_ptr = wlmaker_dockapps_name(clip_ptr->dockapps_ptr, tile_ptr),
++        .has_cell = true, .cell = cell };
++    if (SIZE_MAX != other && other >= nl) {
++        // Another dock-app: They swap.
++        u[n++] = (wlmaker_dockapps_cell_update_t){
++            .name_ptr = wlmaker_dockapps_name(
++                clip_ptr->dockapps_ptr,
++                wlmaker_dockapps_tile_at(clip_ptr->dockapps_ptr, other - nl)),
++            .has_cell = true, .cell = from };
++    }
++    wlmaker_dockapps_set_cells(clip_ptr->dockapps_ptr, u, n);
++    _wlmaker_clip_arrange(clip_ptr);
++    return true;
++}
++
+ /* ------------------------------------------------------------------------- */
+ int wlmaker_clip_dockapp_delta_towards(
+     wlmaker_server_t *server_ptr,
+@@ -1348,6 +1435,14 @@ int wlmaker_clip_dockapp_delta_towards(
+ {
+     wlmaker_dockapps_t *d_ptr = wlmaker_clip_dockapps_of(server_ptr, tile_ptr);
+     if (NULL == d_ptr) return 0;
++    // On the Clip's grid: In all four directions, cell by cell.
++    if (NULL != server_ptr->clip_ptr &&
++        d_ptr == server_ptr->clip_ptr->dockapps_ptr) {
++        size_t icon, other;
++        wlmaker_clip_cell_t cell;
++        return _wlmaker_clip_grid_move_target(
++            server_ptr, tile_ptr, direction, &icon, &cell, &other) ? 1 : 0;
++    }
+     wlmaker_dock_column_t column;
+     size_t position;
+     if (!_wlmaker_clip_dockapp_place(server_ptr, tile_ptr, &column,
+diff --git a/src/clip.h b/src/clip.h
+index 08c075c..f0c2af2 100644
+--- a/src/clip.h
++++ b/src/clip.h
+@@ -373,6 +373,16 @@ int wlmaker_clip_dockapp_delta_towards(
+     wlmtk_tile_t *tile_ptr,
+     uint32_t direction);
+ 
++/**
++ * Moves the dock-app of `tile_ptr`, on the Clip's grid, to the cell next to
++ * it towards `direction`: Into a free one, or swapping with the icon there.
++ * @return false if not on the Clip's grid, or it can't move there.
++ */
++bool wlmaker_clip_move_dockapp_towards(
++    wlmaker_server_t *server_ptr,
++    wlmtk_tile_t *tile_ptr,
++    uint32_t direction);
++
+ /** Moves the dock-app of `tile_ptr` by `delta` places, see above. */
+ void wlmaker_clip_move_dockapp_by(
+     wlmaker_server_t *server_ptr,
+diff --git a/src/clip_grid.c b/src/clip_grid.c
+index 9f37d00..9cd2a2b 100644
+--- a/src/clip_grid.c
++++ b/src/clip_grid.c
+@@ -157,6 +157,28 @@ wlmaker_clip_cell_t wlmaker_clip_cell_at(
+     return cell;
+ }
+ 
++/* ------------------------------------------------------------------------- */
++wlmaker_clip_cell_t wlmaker_clip_cell_towards(
++    wlmaker_dock_place_t place,
++    const wlmaker_clip_cell_t *cell_ptr,
++    uint32_t direction)
++{
++    int dx = 0, dy = 0;
++    if (WLR_EDGE_LEFT == direction) dx = -1;
++    if (WLR_EDGE_RIGHT == direction) dx = 1;
++    if (WLR_EDGE_TOP == direction) dy = -1;
++    if (WLR_EDGE_BOTTOM == direction) dy = 1;
++    wlmaker_clip_cell_t c = *cell_ptr;
++    if (wlmaker_dock_place_vertical(place)) {
++        c.lane += (WLR_EDGE_RIGHT == place.edge) ? -dx : dx;
++        c.slot += (WLR_EDGE_BOTTOM == place.anchor) ? -dy : dy;
++    } else {
++        c.lane += (WLR_EDGE_BOTTOM == place.edge) ? -dy : dy;
++        c.slot += (WLR_EDGE_RIGHT == place.anchor) ? -dx : dx;
++    }
++    return c;
++}
++
+ /* ------------------------------------------------------------------------- */
+ bool wlmaker_clip_grid_contains(
+     const wlmaker_clip_grid_t *grid_ptr,
+@@ -476,6 +498,18 @@ void test_geometry(bs_test_t *test_ptr)
+     c = wlmaker_clip_cell_at(tr, cx, 0, 64, 65, cx - 130, 65);
+     BS_TEST_VERIFY_EQ(test_ptr, 1, c.lane);
+     BS_TEST_VERIFY_EQ(test_ptr, 2, c.slot);
++
++    // Neighbours on the screen: Right of a cell at the right edge is a
++    // lane less; above, at the bottom anchor, a slot more.
++    c = (wlmaker_clip_cell_t){ .lane = 1, .slot = 2 };
++    wlmaker_clip_cell_t n = wlmaker_clip_cell_towards(br, &c, WLR_EDGE_RIGHT);
++    BS_TEST_VERIFY_EQ(test_ptr, 0, n.lane);
++    n = wlmaker_clip_cell_towards(br, &c, WLR_EDGE_TOP);
++    BS_TEST_VERIFY_EQ(test_ptr, 3, n.slot);
++    n = wlmaker_clip_cell_towards(tl, &c, WLR_EDGE_RIGHT);
++    BS_TEST_VERIFY_EQ(test_ptr, 2, n.lane);
++    n = wlmaker_clip_cell_towards(tr, &c, WLR_EDGE_BOTTOM);
++    BS_TEST_VERIFY_EQ(test_ptr, 2, n.lane);
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/clip_grid.h b/src/clip_grid.h
+index ac3583a..a359255 100644
+--- a/src/clip_grid.h
++++ b/src/clip_grid.h
+@@ -136,6 +136,15 @@ wlmaker_clip_cell_t wlmaker_clip_cell_at(
+     int tile_x,
+     int tile_y);
+ 
++/**
++ * @return The cell next to `cell_ptr` on the screen, towards `direction`
++ *     (one of WLR_EDGE_TOP, _BOTTOM, _LEFT, _RIGHT), for the Clip at `place`.
++ */
++wlmaker_clip_cell_t wlmaker_clip_cell_towards(
++    wlmaker_dock_place_t place,
++    const wlmaker_clip_cell_t *cell_ptr,
++    uint32_t direction);
++
+ /** @return Whether `cell_ptr` is within the grid's bounds. */
+ bool wlmaker_clip_grid_contains(
+     const wlmaker_clip_grid_t *grid_ptr,
+diff --git a/src/icon_manager.c b/src/icon_manager.c
+index 9ed9fec..3b5c0e1 100644
+--- a/src/icon_manager.c
++++ b/src/icon_manager.c
+@@ -904,7 +904,10 @@ static void _wlmaker_toplevel_icon_move(
+     wlmaker_toplevel_icon_t *toplevel_icon_ptr, uint32_t direction)
+ {
+     wlmaker_server_t *server_ptr = toplevel_icon_ptr->icon_manager_ptr->server_ptr;
+-    // In the Dock and the Clip: Past a launcher, or another dock-app.
++    // On the Clip's grid: To the next cell.
++    if (wlmaker_clip_move_dockapp_towards(
++            server_ptr, &toplevel_icon_ptr->super_tile, direction)) return;
++    // In the Dock: Past a launcher, or another dock-app.
+     wlmaker_clip_move_dockapp_by(
+         server_ptr,
+         &toplevel_icon_ptr->super_tile,
+-- 
+2.56.0
+
