@@ -406,6 +406,8 @@
 #   0178  toolkit: um clique para outra superfície que não a do foco do
 #         ponteiro é descartado, não derruba a sessão
 #   0179  wlmdock: os lançadores do Clip em grade são liberados na saída
+#   0180  painéis do Dock/Clip: o fim de um arraste solta também o grab da
+#         superfície (ficava preso: o próximo clique ia para o Dock)
 #   libbase-0003  plist: uma string só é escrita sem aspas com bytes de
 #         identificador ASCII (no pt_BR.UTF-8 a regex [a-z] casava "á": o menu
 #         do wlmtool e qualquer plist com acento escrito nesse idioma não eram
@@ -622,6 +624,7 @@ _patches=(
   0177-Menus-Not-under-the-icons-of-the-Clip-s-grid-which-a.patch
   0178-toolkit-surface-A-button-for-another-surface-than-th.patch
   0179-wlmdock-The-Clip-s-launchers-on-the-grid-are-destroy.patch
+  0180-layer_panel-A-drag-s-end-cancels-the-surface-s-impli.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -804,6 +807,7 @@ sha256sums=('7b05e9cf7d18e1e32ea915ba1c8f171069d61c5adc2f9f295c28bc051d5f201a'
             '8a19d17f2bfbebe7b942973be798d5d992c7d71c128d5ac72d9ac9466b4faaaf'
             '1d720cb7d9a3159adb6cf38ee98ff0ea1c1c1d86c6c1d830dd97adb8c04013c6'
             '97ae95a5d3c63360860bb522fa1fbc2948fed89316392a86610246fed7db59f6'
+            '42c6772a6bc1e522f022de96adfd1d38ac1a94dcbf2820a2f0f3f24700bd8967'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb'
             '14af6e01a2fd6f593e815d917a2185da0337d1e82070597abdb3938f8890b698'
             'bd064e59e0608a9af1e70b95fb49697331d58088f09125d19023a1f48eabb7b5')
