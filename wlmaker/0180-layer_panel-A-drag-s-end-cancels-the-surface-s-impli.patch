@@ -1,0 +1,40 @@
+From 083742142e21fb01b8b1d564d9f1380adc0e0bd9 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 23 Nov 2026 11:54:49 -0300
+Subject: [PATCH] layer_panel: A drag's end cancels the surface's implicit grab
+ of the press.
+
+The press on the Dock's (or the Clip's) surface started the surface's
+implicit grab; the release went to the drag (a launcher dropped, or the
+Dock moved), never to the surface. The grab stayed: the panel then took
+any motion, and the next click anywhere went to it while the seat's
+pointer focus was elsewhere (the assertion of surface.c, 0178). Lab
+scenario: 4 of 5 runs had such a click before, 0 of 5 now.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/layer_panel.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/layer_panel.c b/src/layer_panel.c
+index 9f08bc4..083a910 100644
+--- a/src/layer_panel.c
++++ b/src/layer_panel.c
+@@ -1474,6 +1474,14 @@ void _wlmaker_layer_panel_end_drag(wlmaker_layer_panel_t *layer_panel_ptr)
+         wlmtk_container_pointer_grab_release(
+             element_ptr->parent_container_ptr, element_ptr);
+     }
++    // The surface's own grab, from the button press: The release went to
++    // the drag, never to the surface. Left, it kept the pointer on the panel
++    // (any motion "accepted"), so the next click anywhere went to this
++    // panel while the seat's focus was elsewhere.
++    if (NULL != layer_panel_ptr->super_panel.super_container.
++        pointer_grab_element_ptr) {
++        layer_panel_ptr->orig_element_vmt.pointer_grab_cancel(element_ptr);
++    }
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+-- 
+2.56.0
+

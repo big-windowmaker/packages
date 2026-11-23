@@ -1,0 +1,53 @@
+From 3f7bdbc9c560c29615a9c9d6386caa0ee75658fd Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Mon, 23 Nov 2026 08:53:49 -0300
+Subject: [PATCH 178/178] toolkit/surface: A button for another surface than
+ the pointer focus is dropped, not fatal.
+
+After dock-apps and launchers moved between the Dock and the Clip, a click
+right then went to the Dock's panel while the seat's pointer focus was on
+a dock-app's XWayland surface: The assertion ended the session (2 of 3
+runs of the lab scenario). Now logged and not forwarded (0 of 5).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/toolkit/surface.c | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/src/toolkit/surface.c b/src/toolkit/surface.c
+index c596a01..5409666 100644
+--- a/src/toolkit/surface.c
++++ b/src/toolkit/surface.c
+@@ -21,6 +21,8 @@
+ 
+ #include "surface.h"
+ 
++#include <inttypes.h>
++
+ #include <libbase/libbase.h>
+ #include <stdlib.h>
+ #include <wayland-server-protocol.h>
+@@ -580,9 +582,17 @@ bool _wlmtk_surface_element_pointer_button(
+     // WLMTK_BUTTON_UP event. Needs a test and fixing.
+     // Additionally, this appears to trigger when creating a new XWL popup and
+     // the UP event goes to the new surface. Also needs test & fixing.
+-    if (WLMTK_BUTTON_UP != button_event_ptr->type) {
+-        BS_ASSERT(surface_ptr->wlr_surface_ptr ==
+-                  wlr_surface_get_root_surface(focused_wlr_surface_ptr));
++    // The seat's pointer focus is another surface (eg. a dock-app's, whose
++    // tile came under the pointer as the Dock changed): Not this surface's
++    // button. It ended the session, from a click on the Dock.
++    if (WLMTK_BUTTON_UP != button_event_ptr->type &&
++        surface_ptr->wlr_surface_ptr !=
++        wlr_surface_get_root_surface(focused_wlr_surface_ptr)) {
++        bs_log(BS_WARNING, "Surface %p: Button %"PRIu32" while the pointer "
++               "focus is on surface %p. Not forwarded.",
++               surface_ptr->wlr_surface_ptr, button_event_ptr->button,
++               focused_wlr_surface_ptr);
++        return false;
+     }
+ 
+     // We're only forwarding PRESSED & RELEASED events.
+-- 
+2.56.0
+
