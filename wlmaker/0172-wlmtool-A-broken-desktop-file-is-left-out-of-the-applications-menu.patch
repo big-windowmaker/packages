@@ -1,0 +1,106 @@
+From c27790dc6cb384f94949e1f72bfee15597fec8d5 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sun, 22 Nov 2026 13:20:08 -0300
+Subject: [PATCH] wlmtool: A broken .desktop file is left out of the
+ applications menu.
+
+One file the parser rejected (eg. guvcview's, with a "_Comment" key), or
+one without Exec, Name or category, ended the walk: GenerateApplicationsMenu
+printed nothing, and the menu generated from it was empty. Such a file is
+now logged and left out; only failures to allocate end the walk. Also
+releases the entry of a file that failed to parse, and destroys the item
+that could not be added.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ tests/data/broken.desktop |  8 ++++++++
+ tests/data/noexec.desktop |  5 +++++
+ tool/menu.c               | 15 ++++++++++-----
+ 3 files changed, 23 insertions(+), 5 deletions(-)
+ create mode 100644 tests/data/broken.desktop
+ create mode 100644 tests/data/noexec.desktop
+
+diff --git a/tests/data/broken.desktop b/tests/data/broken.desktop
+new file mode 100644
+index 0000000..01155ad
+--- /dev/null
++++ b/tests/data/broken.desktop
+@@ -0,0 +1,8 @@
++# Made-up entry, as found in the wild (guvcview): A key the parser rejects.
++# The applications menu leaves it out, and is made from the other files.
++[Desktop Entry]
++Name=Broken
++_Comment=Not a valid key
++Exec=broken
++Type=Application
++Categories=System;
+diff --git a/tests/data/noexec.desktop b/tests/data/noexec.desktop
+new file mode 100644
+index 0000000..2d3ee92
+--- /dev/null
++++ b/tests/data/noexec.desktop
+@@ -0,0 +1,5 @@
++# Made-up entry without Exec or TryExec: Left out of the applications menu.
++[Desktop Entry]
++Name=NoExec
++Type=Application
++Categories=System;
+diff --git a/tool/menu.c b/tool/menu.c
+index 77fdd86..4719d4d 100644
+--- a/tool/menu.c
++++ b/tool/menu.c
+@@ -323,7 +323,9 @@ bool _wlmtool_menu_add_desktop_file(
+                arg_ptr->desktop_parser_ptr,
+                resolved_path_ptr,
+                &de, error_line);
+-        return false;
++        // A broken file is left out; the others still make the menu.
++        desktop_parser_entry_release(&de);
++        return true;
+     }
+ 
+     if (DESKTOP_ENTRY_TYPE_APPLICATION != de.type ||
+@@ -337,7 +339,7 @@ bool _wlmtool_menu_add_desktop_file(
+     if (NULL == c) {
+         bs_log(BS_WARNING, "Failed to lookup category for %s",
+                resolved_path_ptr);
+-        goto error;
++        goto skip;
+     }
+ 
+     struct wlmtool_menu *cat_menu_ptr = wlmtool_menu_get_or_create_submenu(
+@@ -347,7 +349,7 @@ bool _wlmtool_menu_add_desktop_file(
+     if (NULL == de.try_exec_ptr && NULL == de.exec_ptr) {
+         bs_log(BS_WARNING, "Missing 'Exec' and 'TryExec' in desktop file %s",
+                resolved_path_ptr);
+-        goto error;
++        goto skip;
+     }
+     if (de.terminal) {
+         cmd_ptr = bs_strdupf(
+@@ -363,7 +365,7 @@ bool _wlmtool_menu_add_desktop_file(
+     if (NULL == de.name_ptr) {
+         bs_log(BS_WARNING, "Missing 'Name' in desktop file %s",
+                resolved_path_ptr);
+-        goto error;
++        goto skip;
+     }
+ 
+     const char *a[] = { de.name_ptr, "ShellExecute", cmd_ptr, NULL };
+@@ -372,9 +374,12 @@ bool _wlmtool_menu_add_desktop_file(
+     if (!wlmtool_menu_add_item(cat_menu_ptr, item_ptr)) {
+         bs_log(BS_WARNING, "Duplicate? Failed to add entry for %s",
+                resolved_path_ptr);
+-        goto error;
++        wlmtool_item_destroy(item_ptr);
++        goto skip;
+     }
+ 
++skip:
++    // Also a file with missing or duplicate entries: Left out, not an error.
+     free(cmd_ptr);
+     desktop_parser_entry_release(&de);
+     return true;
+-- 
+2.56.0
+

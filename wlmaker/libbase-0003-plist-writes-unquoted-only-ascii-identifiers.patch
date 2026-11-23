@@ -1,0 +1,109 @@
+From 07bf28a8a7c7630b0b43300814bd02dc9bfd8207 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Sun, 22 Nov 2026 13:18:02 -0300
+Subject: [PATCH] plist: Writes a string without quotes only if it is ASCII
+ identifier bytes.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The check used the regex "[a-zA-Z0-9_.$]+". A regex range depends on the
+locale's collation: In pt_BR.UTF-8, [a-z] matched "á", so "Utilitários"
+was written without quotes, and the analyzer (bytes: [a-zA-Z0-9_.$]) then
+failed to read it back ("Unexpected character"). wlmtool's menus, and any
+plist written in such a locale, could not be parsed.
+
+Checks the bytes as the analyzer does. Also drops the thread-local regex.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/plist/model.c | 51 ++++++++++++++++++++++++++---------------------
+ 1 file changed, 28 insertions(+), 23 deletions(-)
+
+diff --git a/src/plist/model.c b/src/plist/model.c
+index 1abcbfa..5187a32 100644
+--- a/src/plist/model.c
++++ b/src/plist/model.c
+@@ -20,8 +20,7 @@
+ 
+ #include <libbase/libbase.h>
+ #include <libbase/plist.h>
+-#include <threads.h>
+-#include <regex.h>
++#include <locale.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -471,22 +470,6 @@ bool _bspl_string_write(
+     const char *str_ptr,
+     bs_dynbuf_t *dynbuf_ptr)
+ {
+-    static const char *identifier_pattern = "[a-zA-Z0-9_.$]+";
+-    static thread_local regex_t identifier_regex;
+-    static thread_local bool regex_initialized = false;
+-
+-    if (!regex_initialized) {
+-        int rv = regcomp(&identifier_regex, identifier_pattern, REG_EXTENDED);
+-        if (0 != rv) {
+-            char err_buf[512];
+-            regerror(rv, &identifier_regex, err_buf, sizeof(err_buf));
+-            bs_log(BS_ERROR, "Failed regcomp(%p, \"%s \", REG_EXTENDED): %s",
+-                   &identifier_regex, identifier_pattern, err_buf);
+-            return false;
+-        }
+-        regex_initialized = true;
+-    }
+-
+     // Space check: At least the unescaped string needs to fit.
+     size_t len = strlen(str_ptr);
+     if (len > dynbuf_ptr->capacity ||
+@@ -494,12 +477,16 @@ bool _bspl_string_write(
+         return false;
+     }
+ 
+-    // If it matches an identifier: Write without quotes.
+-    regmatch_t match = { .rm_eo = len };
+-    if (0 == regexec(&identifier_regex, str_ptr, 1, &match, 0) &&
+-        match.rm_so == 0 && (size_t)match.rm_eo == len) {
+-        return bs_dynbuf_append(dynbuf_ptr, str_ptr, len);
++    // If it matches an identifier: Write without quotes. Byte by byte, as
++    // the analyzer reads it: A regex range ([a-z]) depends on the locale,
++    // and in pt_BR.UTF-8 matched "á", which the analyzer rejects unquoted.
++    bool identifier = 0 < len;
++    for (const char *i = str_ptr; identifier && *i != '\0'; ++i) {
++        identifier = (('a' <= *i && *i <= 'z') || ('A' <= *i && *i <= 'Z') ||
++                      ('0' <= *i && *i <= '9') ||
++                      '_' == *i || '.' == *i || '$' == *i);
+     }
++    if (identifier) return bs_dynbuf_append(dynbuf_ptr, str_ptr, len);
+ 
+     // Otherwise: Write it, and escape any backslash or double quotes.
+     const char *pos = str_ptr;
+@@ -945,6 +932,24 @@ void test_write_string(bs_test_t *test_ptr)
+     BS_TEST_VERIFY_MEMEQ(test_ptr, "\"\"\n", dynbuf.data_ptr, 3);
+     bspl_object_unref(object_ptr);
+ 
++    // Not ASCII: Quoted, in any locale (a regex range matched it in pt_BR).
++    char *locale_ptr = logged_strdup(setlocale(LC_ALL, NULL));
++    if (NULL == setlocale(LC_ALL, "pt_BR.UTF-8")) {
++        setlocale(LC_ALL, "C.UTF-8");
++    }
++    bs_dynbuf_clear(&dynbuf);
++    string_ptr = bspl_string_create("\xc3\xa1");
++    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, string_ptr);
++    object_ptr = bspl_object_from_string(string_ptr);
++    BS_TEST_VERIFY_TRUE(test_ptr, bspl_object_write(object_ptr, &dynbuf));
++    BS_TEST_VERIFY_EQ(test_ptr, 5, dynbuf.length);
++    BS_TEST_VERIFY_MEMEQ(test_ptr, "\"\xc3\xa1\"\n", dynbuf.data_ptr, 5);
++    bspl_object_unref(object_ptr);
++    if (NULL != locale_ptr) {
++        setlocale(LC_ALL, locale_ptr);
++        free(locale_ptr);
++    }
++
+     bs_dynbuf_clear(&dynbuf);
+     string_ptr = bspl_string_create(",1");
+     BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, string_ptr);
+-- 
+2.56.0
+
