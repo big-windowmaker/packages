@@ -1,7 +1,7 @@
 pkgbase = wlmaker
 	pkgdesc = Wayland compositor inspired by Window Maker
 	pkgver = 0.8.r96.g5576886
-	pkgrel = 3
+	pkgrel = 4
 	epoch = 1
 	url = https://github.com/phkaeser/wlmaker
 	arch = x86_64
@@ -194,6 +194,7 @@ pkgbase = wlmaker
 	source = 0167-layer-Dock-and-Clip-launchers-configure-only-for-a-new-size-on-the-Clip-output.patch
 	source = 0168-server-wlmdock-Logs-protocol-errors-each-wlmdock-keeps-its-previous-log.patch
 	source = 0169-wlmdock-Keeps-the-previous-log-only-if-the-locked-file-still-has-the-name.patch
+	source = 0170-zones-The-overlay-spans-the-whole-output-not-the-usable-area.patch
 	source = libbase-0001-subprocess-close-pipes.patch
 	source = libbase-0002-subprocess-test-initializes-outputs.patch
 	sha256sums = 7b05e9cf7d18e1e32ea915ba1c8f171069d61c5adc2f9f295c28bc051d5f201a
@@ -358,6 +359,7 @@ pkgbase = wlmaker
 	sha256sums = 57e07204b93d71853b66234894fb675f9388c0e540668557df0b37c2522684fb
 	sha256sums = 1a75fe4a56312766289f028f770293df36c664f48d182d893a029d2fffe2f873
 	sha256sums = ee3db7f8289117355082b9a933a8aca53e5e6d5789b73bdd906c4b86720f93e8
+	sha256sums = 0a9c5c119e6e62c4e50655f9edd646e7fba7c214d1bcf9e9b19a13e12d675501
 	sha256sums = 64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb
 	sha256sums = 14af6e01a2fd6f593e815d917a2185da0337d1e82070597abdb3938f8890b698
 

@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Fri, 20 Nov 2026 22:30:00 -0300
+Subject: [PATCH] zones: The overlay spans the whole output, not the usable
+ area.
+
+The panel of layouts, the zones and the picker are drawn, and hit, in
+the output's coordinates. With exclusive zone 0 the layout placed the
+overlay in the usable area: On the output with the Clip, everything was
+drawn shifted right by the Clip's width (64 px) from where the pointer
+hits it. Dragging a window onto a layout or zone needed aiming left of
+it; a click in the picker could snap to the neighbouring zone.
+Exclusive zone -1: Not moved by other panels.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/zones.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/src/zones.c b/src/zones.c
+index 923f5ce..1a16584 100644
+--- a/src/zones.c
++++ b/src/zones.c
+@@ -759,11 +759,18 @@ static bool _wlmaker_zones_buffer_pointer_button(
+     return true;
+ }
+ 
+-/** Overlay: Spans the whole output. */
++/**
++ * Overlay: Spans the whole output. The drawing and the pointer go by the
++ * output's box: With exclusive zone 0 the layout put the overlay in the
++ * usable area instead, ie. right of the Clip, and everything drawn was off
++ * by the Clip's width from where it is hit (the panel of layouts, the zones,
++ * the picker). -1: Not moved by other panels.
++ */
+ static const wlmtk_panel_positioning_t _wlmaker_zones_positioning = {
+     .desired_width = 0,
+     .desired_height = 0,
+-    .anchor = WLR_EDGE_BOTTOM | WLR_EDGE_TOP | WLR_EDGE_LEFT | WLR_EDGE_RIGHT
++    .anchor = WLR_EDGE_BOTTOM | WLR_EDGE_TOP | WLR_EDGE_LEFT | WLR_EDGE_RIGHT,
++    .exclusive_zone = -1
+ };
+ 
+ /** Panel's request_size: Remembers the size and redraws. */
+-- 
+2.56.0
+
