@@ -412,13 +412,22 @@
 #         fim da coluna (a grade o tratava como solto fora das docas: a
 #         bandeja arrastada para o fim do Clip era encerrada e ficava
 #         Removed; teste de integração do big-wm)
+#   0182  toolkit: modificador de arrasto (Ctrl+Alt do wmake-zones 0.5): botão
+#         esquerdo move, direito redimensiona pela borda mais perto, de
+#         qualquer ponto da janela, sem o clique chegar ao cliente; o
+#         workspace encerra o movimento também ao soltar o botão direito
+#   0183  zones: Rolagem (scrollable tiling do wmake-zones 0.5), memória do
+#         modo livre (Zonas -> Mosaico -> Zonas devolve cada janela à zona),
+#         janela solta fora das zonas mantém o tamanho e sai da zona,
+#         DragModifier em cada janela
+#   0184  menu do wmake-zones-wl com a Rolagem (pt_BR)
 #   libbase-0003  plist: uma string só é escrita sem aspas com bytes de
 #         identificador ASCII (no pt_BR.UTF-8 a regex [a-z] casava "á": o menu
 #         do wlmtool e qualquer plist com acento escrito nesse idioma não eram
 #         lidos de volta; o check() falhava com LANG=pt_BR)
 pkgname=wlmaker
 pkgver=0.8.r96.g5576886
-pkgrel=9
+pkgrel=10
 epoch=1
 _commit=557688606d048acad951b1d6df02529f25bea7cf
 _libbase_commit=c64929f728804af44b1a06d6492efd5122465461
@@ -451,7 +460,7 @@ makedepends=(
   git
   librsvg  # o wlmaker desenha os ícones SVG do Alt+Tab (0140)
   wayland-protocols
-  'wmake-zones>=0.3.0'  # núcleo das zonas (estático sem LTO, 0104): histórico, foco espacial, modos (0113)
+  'wmake-zones>=0.5.0'  # núcleo das zonas (estático sem LTO, 0104): histórico, foco espacial, modos (0113), Rolagem (0183)
 )
 checkdepends=(desktop-file-utils gettext)
 optdepends=(
@@ -630,6 +639,9 @@ _patches=(
   0179-wlmdock-The-Clip-s-launchers-on-the-grid-are-destroy.patch
   0180-layer_panel-A-drag-s-end-cancels-the-surface-s-impli.patch
   0181-Clip-A-drop-down-its-column-past-its-icons-goes-to-t.patch
+  0182-toolkit-Drag-modifier-moves-left-or-resizes-right-fr.patch
+  0183-zones-Scrolling-scrollable-tiling-memory-per-mode-an.patch
+  0184-share-Scrolling-in-the-menu-of-the-wmake-zones-wl-do.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -814,6 +826,9 @@ sha256sums=('7b05e9cf7d18e1e32ea915ba1c8f171069d61c5adc2f9f295c28bc051d5f201a'
             '97ae95a5d3c63360860bb522fa1fbc2948fed89316392a86610246fed7db59f6'
             '42c6772a6bc1e522f022de96adfd1d38ac1a94dcbf2820a2f0f3f24700bd8967'
             '75ac17fee9438279620635026cefbf2ee03c072d7695c9ba5c5238c4e9ceabb1'
+            '1493275d1c8277b76a4028b00055b0cc671560ea4380461b5200ae0adbc3475a'
+            '6cda4d47432b2d0d6fe95ac2bddf173f348d41f1e6988db657f8448da816eaa0'
+            '3b3b0208e988cc7a694c2cecd1fd4e6621a3aca6123923082a0e098bd8069387'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb'
             '14af6e01a2fd6f593e815d917a2185da0337d1e82070597abdb3938f8890b698'
             'bd064e59e0608a9af1e70b95fb49697331d58088f09125d19023a1f48eabb7b5')
