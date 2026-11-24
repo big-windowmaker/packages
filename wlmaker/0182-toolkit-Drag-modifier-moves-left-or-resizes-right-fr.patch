@@ -1,4 +1,4 @@
-From 909923132d9ecd77190fa8e8f18c602efb6df54a Mon Sep 17 00:00:00 2001
+From 346982facd44241e86b794eeba278419efc08777 Mon Sep 17 00:00:00 2001
 From: ruscher <rruscher@gmail.com>
 Date: Tue, 24 Nov 2026 06:31:57 -0300
 Subject: [PATCH 182/184] toolkit: Drag modifier moves (left) or resizes
@@ -13,10 +13,11 @@ begun with the right button does not stay on until the next click.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- include/toolkit/window.h | 12 ++++++++++
- src/toolkit/window.c     | 47 ++++++++++++++++++++++++++++++++++++++++
- src/toolkit/workspace.c  |  5 ++++-
- 3 files changed, 63 insertions(+), 1 deletion(-)
+ include/toolkit/window.h    | 12 ++++++++++
+ include/toolkit/workspace.h | 11 +++++++++
+ src/toolkit/window.c        | 48 +++++++++++++++++++++++++++++++++++++
+ src/toolkit/workspace.c     | 17 ++++++++++++-
+ 4 files changed, 87 insertions(+), 1 deletion(-)
 
 diff --git a/include/toolkit/window.h b/include/toolkit/window.h
 index bfb911db..51b176fc 100644
@@ -41,8 +42,30 @@ index bfb911db..51b176fc 100644
  /**
   * Sets @ref wlmtk_window_t::workspace_ptr.
   *
+diff --git a/include/toolkit/workspace.h b/include/toolkit/workspace.h
+index a1b1cca4..f00b3674 100644
+--- a/include/toolkit/workspace.h
++++ b/include/toolkit/workspace.h
+@@ -249,6 +249,17 @@ void wlmtk_workspace_begin_window_resize(
+     wlmtk_window_t *window_ptr,
+     uint32_t edges);
+ 
++/**
++ * Sets the button whose release ends the next move or resize (BTN_LEFT by
++ * default; back to it when the move or resize ends).
++ *
++ * @param workspace_ptr
++ * @param button              linux/input-event-codes.h
++ */
++void wlmtk_workspace_set_release_button(
++    wlmtk_workspace_t *workspace_ptr,
++    uint32_t button);
++
+ /** Acticates `window_ptr`. Will de-activate an earlier window. */
+ void wlmtk_workspace_activate_window(
+     wlmtk_workspace_t *workspace_ptr,
 diff --git a/src/toolkit/window.c b/src/toolkit/window.c
-index 34a9e81e..27f9565d 100644
+index 34a9e81e..c842b85a 100644
 --- a/src/toolkit/window.c
 +++ b/src/toolkit/window.c
 @@ -110,6 +110,11 @@ struct _wlmtk_window_t {
@@ -72,7 +95,7 @@ index 34a9e81e..27f9565d 100644
  /* ------------------------------------------------------------------------- */
  void wlmtk_window_set_workspace(
      wlmtk_window_t *window_ptr,
-@@ -1146,6 +1159,40 @@ bool _wlmtk_window_element_pointer_button(
+@@ -1146,6 +1159,41 @@ bool _wlmtk_window_element_pointer_button(
          return rv;
      }
  
@@ -106,6 +129,7 @@ index 34a9e81e..27f9565d 100644
 +        if (fy < 1.0 / 3) edges |= WLR_EDGE_TOP;
 +        if (fy > 2.0 / 3) edges |= WLR_EDGE_BOTTOM;
 +        if (0 == edges) edges = WLR_EDGE_RIGHT | WLR_EDGE_BOTTOM;
++        wlmtk_workspace_set_release_button(ws_ptr, BTN_RIGHT);
 +        wlmtk_workspace_begin_window_resize(ws_ptr, window_ptr, edges);
 +        return true;
 +    }
@@ -114,21 +138,54 @@ index 34a9e81e..27f9565d 100644
      if (0 != window_ptr->move_modifier &&
          BTN_LEFT == button_event_ptr->button &&
 diff --git a/src/toolkit/workspace.c b/src/toolkit/workspace.c
-index 549ddab9..8dbe2d9b 100644
+index 549ddab9..1ddcc280 100644
 --- a/src/toolkit/workspace.c
 +++ b/src/toolkit/workspace.c
-@@ -967,7 +967,10 @@ bool _wlmtk_workspace_window_element_pointer_button(
+@@ -94,6 +94,8 @@ struct _wlmtk_workspace_t {
+     int                       initial_height;
+     /** Edges currently active for resizing: `enum wlr_edges`. */
+     uint32_t                  resize_edges;
++    /** Button whose release ends the move or resize (BTN_LEFT by default). */
++    uint32_t                  release_button;
+     /** Whether the grab is a move (signals @ref wlmtk_desktop_events_t). */
+     bool                      moving;
+     /** Whether an interactive resize is going on (for window_resize_end). */
+@@ -697,6 +699,14 @@ void wlmtk_workspace_begin_window_resize(
+     wlmtk_fsm_event(&workspace_ptr->fsm, PFSME_BEGIN_RESIZE, window_ptr);
+ }
+ 
++/* ------------------------------------------------------------------------- */
++void wlmtk_workspace_set_release_button(
++    wlmtk_workspace_t *workspace_ptr,
++    uint32_t button)
++{
++    workspace_ptr->release_button = button;
++}
++
+ /* ------------------------------------------------------------------------- */
+ /** Acticates `window_ptr`. Will de-activate an earlier window. */
+ void wlmtk_workspace_activate_window(
+@@ -967,7 +977,11 @@ bool _wlmtk_workspace_window_element_pointer_button(
      // the move, and then figure out the exit condition (button up? key? ...)
      // from there.
      // See xdg_toplevel::move doc at https://wayland.app/protocols/xdg-shell.
 -    if (button_event_ptr->button == BTN_LEFT &&
-+    // The right button ends it too: A resize begun by the drag modifier of
-+    // the window (eg. Ctrl+Alt + right button) ends when it is released.
-+    if ((button_event_ptr->button == BTN_LEFT ||
-+         button_event_ptr->button == BTN_RIGHT) &&
++    // The button that began it ends it: the left one by default, the right
++    // one for a resize begun by the window's drag modifier (Ctrl+Alt).
++    uint32_t release = 0 != workspace_ptr->release_button ?
++        workspace_ptr->release_button : BTN_LEFT;
++    if (button_event_ptr->button == release &&
          button_event_ptr->type == WLMTK_BUTTON_UP) {
          wlmtk_fsm_event(&workspace_ptr->fsm, PFSME_RELEASED, NULL);
      }
+@@ -1448,6 +1462,7 @@ bool pfsm_reset(wlmtk_fsm_t *fsm_ptr, __UNUSED__ void *ud_ptr)
+         fsm_ptr, wlmtk_workspace_t, fsm);
+ 
+     wlmtk_window_set_resize_edges(workspace_ptr->grabbed_window_ptr, 0);
++    workspace_ptr->release_button = BTN_LEFT;
+ 
+     if (workspace_ptr->moving) {
+         _wlmtk_workspace_emit_move(workspace_ptr, WLMTK_WS_MOVE_END);
 -- 
 2.56.0
 
