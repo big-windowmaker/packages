@@ -1,0 +1,104 @@
+From 9a1366f557e118cea41184eaea3b4044a7541040 Mon Sep 17 00:00:00 2001
+From: ruscher <rruscher@gmail.com>
+Date: Tue, 24 Nov 2026 18:05:42 -0300
+Subject: [PATCH] clip: A push that moves nothing refuses the drop, the icon
+ goes back.
+
+wlmaker_clip_push_icons() returns false when the icons could not move
+(no room, out of memory); the drop is then refused like a taken cell,
+instead of placing a second icon on that cell.
+---
+ src/clip.c      | 12 +++++++-----
+ src/clip.h      |  5 ++++-
+ src/tile_drag.c | 15 +++++++++++----
+ 3 files changed, 22 insertions(+), 10 deletions(-)
+
+diff --git a/src/clip.c b/src/clip.c
+index 9b5017cb..5d5c73ad 100644
+--- a/src/clip.c
++++ b/src/clip.c
+@@ -1240,24 +1240,25 @@ void wlmaker_clip_freeze_grid(wlmaker_server_t *server_ptr)
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+-void wlmaker_clip_push_icons(
++bool wlmaker_clip_push_icons(
+     wlmaker_server_t *server_ptr,
+     const wlmaker_clip_cell_t *cell_ptr,
+     size_t own)
+ {
+     wlmaker_clip_t *clip_ptr = server_ptr->clip_ptr;
+-    if (NULL == clip_ptr || NULL == clip_ptr->dockapps_ptr) return;
++    if (NULL == clip_ptr || NULL == clip_ptr->dockapps_ptr) return false;
+     _wlmaker_clip_update_grid(clip_ptr);
+     const wlmaker_clip_grid_t *g_ptr = &clip_ptr->grid;
+     size_t n = g_ptr->n, nl = clip_ptr->clip_launchers;
+-    if (0 == n || nl > n) return;
++    if (0 == n || nl > n) return false;
+     wlmaker_clip_cell_t *cells_ptr = logged_calloc(
+         n, sizeof(wlmaker_clip_cell_t));
+     bool *set_ptr = logged_calloc(n, sizeof(bool));
+     wlmaker_dockapps_cell_update_t *u_ptr = logged_calloc(
+         n, sizeof(wlmaker_dockapps_cell_update_t));
+-    if (NULL != cells_ptr && NULL != set_ptr && NULL != u_ptr &&
+-        wlmaker_clip_grid_push(g_ptr, cell_ptr, own, cells_ptr)) {
++    bool pushed = NULL != cells_ptr && NULL != set_ptr && NULL != u_ptr &&
++        wlmaker_clip_grid_push(g_ptr, cell_ptr, own, cells_ptr);
++    if (pushed) {
+         // All moved at once (the one moved there too): Storing re-arranges
+         // and replaces the grid, so the dock-apps' names come first.
+         bool any = false;
+@@ -1287,6 +1288,7 @@ void wlmaker_clip_push_icons(
+     if (NULL != set_ptr) free(set_ptr);
+     if (NULL != cells_ptr) free(cells_ptr);
+     _wlmaker_clip_arrange(clip_ptr);
++    return pushed;
+ }
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/src/clip.h b/src/clip.h
+index 66d3efb8..98f612e6 100644
+--- a/src/clip.h
++++ b/src/clip.h
+@@ -441,8 +441,11 @@ void wlmaker_clip_freeze_grid(wlmaker_server_t *server_ptr);
+  * from there on in its lane move one slot down, up to the first free cell
+  * (see @ref wlmaker_clip_grid_push). `own` is the icon being moved there
+  * (SIZE_MAX: one coming from elsewhere), which gets the cell. Stores it.
++ *
++ * @return false if nothing moved (no room, or out of memory): The cell is
++ *     still taken.
+  */
+-void wlmaker_clip_push_icons(
++bool wlmaker_clip_push_icons(
+     wlmaker_server_t *server_ptr,
+     const wlmaker_clip_cell_t *cell_ptr,
+     size_t own);
+diff --git a/src/tile_drag.c b/src/tile_drag.c
+index 9523551f..5791b69e 100644
+--- a/src/tile_drag.c
++++ b/src/tile_drag.c
+@@ -931,10 +931,17 @@ bool _wlmaker_tile_drag_apply_grid(wlmaker_tile_drag_t *tile_drag_ptr)
+         // The icons from the cell on move down, making room.
+         bs_log(BS_INFO, "Clip's cell %s taken: Moving the icons from there "
+                "down.", buf);
+-        wlmaker_clip_push_icons(
+-            server_ptr, &t_ptr->cell,
+-            tile_drag_ptr->has_origin ?
+-            _wlmaker_tile_drag_grid_icon(s_ptr, launchers) : SIZE_MAX);
++        if (!wlmaker_clip_push_icons(
++                server_ptr, &t_ptr->cell,
++                tile_drag_ptr->has_origin ?
++                _wlmaker_tile_drag_grid_icon(s_ptr, launchers) : SIZE_MAX)) {
++            // Nothing moved: Refused like a taken cell, it goes back.
++            bs_log(BS_WARNING, "Clip's cell %s still taken: Tile drag "
++                   "refused.", buf);
++            wlmaker_dock_fx_cover_hide(server_ptr->dock_fx_ptr);
++            if (NULL != s_ptr->lift) s_ptr->lift(s_ptr->lift_ud_ptr, false);
++            return true;
++        }
+     }
+ 
+     if (WLMAKER_TILE_DRAG_DOCKAPP == s_ptr->kind) {
+-- 
+2.56.0
+
