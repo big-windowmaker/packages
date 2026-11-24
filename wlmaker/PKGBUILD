@@ -421,13 +421,18 @@
 #         janela solta fora das zonas mantém o tamanho e sai da zona,
 #         DragModifier em cada janela
 #   0184  menu do wmake-zones-wl com a Rolagem (pt_BR)
+#   0185  Clip: soltar numa célula ocupada insere ali e empurra para baixo os
+#         ícones seguintes da coluna, até a primeira célula livre (antes a
+#         soltura era recusada e o ícone voltava)
+#   0186  Clip: se os ícones não puderem descer (sem espaço ou sem memória),
+#         a soltura é recusada e o ícone volta, sem dois ícones na mesma célula
 #   libbase-0003  plist: uma string só é escrita sem aspas com bytes de
 #         identificador ASCII (no pt_BR.UTF-8 a regex [a-z] casava "á": o menu
 #         do wlmtool e qualquer plist com acento escrito nesse idioma não eram
 #         lidos de volta; o check() falhava com LANG=pt_BR)
 pkgname=wlmaker
 pkgver=0.8.r96.g5576886
-pkgrel=10
+pkgrel=11
 epoch=1
 _commit=557688606d048acad951b1d6df02529f25bea7cf
 _libbase_commit=c64929f728804af44b1a06d6492efd5122465461
@@ -642,6 +647,8 @@ _patches=(
   0182-toolkit-Drag-modifier-moves-left-or-resizes-right-fr.patch
   0183-zones-Scrolling-scrollable-tiling-memory-per-mode-an.patch
   0184-share-Scrolling-in-the-menu-of-the-wmake-zones-wl-do.patch
+  0185-clip-A-drop-on-a-taken-cell-inserts-there-the-icons-.patch
+  0186-clip-A-push-that-moves-nothing-refuses-the-drop-the-.patch
 )
 source=(
   "git+https://github.com/phkaeser/wlmaker.git#commit=${_commit}"
@@ -829,6 +836,8 @@ sha256sums=('7b05e9cf7d18e1e32ea915ba1c8f171069d61c5adc2f9f295c28bc051d5f201a'
             '1493275d1c8277b76a4028b00055b0cc671560ea4380461b5200ae0adbc3475a'
             '6cda4d47432b2d0d6fe95ac2bddf173f348d41f1e6988db657f8448da816eaa0'
             '3b3b0208e988cc7a694c2cecd1fd4e6621a3aca6123923082a0e098bd8069387'
+            '5f7e139c987b71e5c0512046b3f2fed464a1aa34bf9144b51d6309c02e670426'
+            'a1d670724eca0734a372213be22fcd1022d066095b9a3cc60ef889b1a84f556a'
             '64abe5f8deb7d5dbe587c0459a6e8acb1e1e4bcf41deb3f0260eb83251af17cb'
             '14af6e01a2fd6f593e815d917a2185da0337d1e82070597abdb3938f8890b698'
             'bd064e59e0608a9af1e70b95fb49697331d58088f09125d19023a1f48eabb7b5')
