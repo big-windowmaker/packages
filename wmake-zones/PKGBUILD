@@ -24,7 +24,7 @@
 # WMAKE_ZONES_SOURCE troca a fonte (ex.: git+file:///caminho/wmake-zones
 # para compilar um clone local antes do push).
 pkgname=wmake-zones
-pkgver=0.5.2
+pkgver=0.5.3
 pkgrel=1
 pkgdesc='Window zones, automatic tiling and scrollable tiling for Window Maker and wlmaker, with the NeXTSTEP look'
 arch=(x86_64)
