@@ -24,9 +24,9 @@
 # WMAKE_ZONES_SOURCE troca a fonte (ex.: git+file:///caminho/wmake-zones
 # para compilar um clone local antes do push).
 pkgname=wmake-zones
-pkgver=0.4.1
+pkgver=0.5.0
 pkgrel=1
-pkgdesc='Window zones and automatic tiling for Window Maker and wlmaker, with the NeXTSTEP look'
+pkgdesc='Window zones, automatic tiling and scrollable tiling for Window Maker and wlmaker, with the NeXTSTEP look'
 arch=(x86_64)
 url='https://github.com/big-windowmaker/wmake-zones'
 license=('GPL-2.0-or-later')
