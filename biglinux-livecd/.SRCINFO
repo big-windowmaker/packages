@@ -1,7 +1,7 @@
 pkgbase = biglinux-livecd
 	pkgdesc = BigLinux live-session setup and Calamares installer integration
 	pkgver = 26.10.26
-	pkgrel = 19
+	pkgrel = 20
 	url = https://github.com/biglinux/biglinux-livecd
 	install = biglinux-livecd.install
 	arch = any
@@ -35,7 +35,7 @@ pkgbase = biglinux-livecd
 	optdepends = openssh: remote access to the live session with the sshenable boot argument
 	optdepends = shadow: set the temporary password the sshenable boot argument uses
 	optdepends = qt6-multimedia: sound effects of the NeuroDefender game in the bigwindowmaker installer
-	source = biglinux-livecd::git+https://github.com/big-windowmaker/biglinux-livecd.git#commit=e8dd99a35913962abedb481f26d97ae157f0c2aa
-	sha256sums = 1c28808f18052562f87c8b8bd61f8f13febbff393da361d8316dc4d6e90ee846
+	source = biglinux-livecd::git+https://github.com/big-windowmaker/biglinux-livecd.git#commit=b4533df7573052e4d2960227b9d8f939bc27a534
+	sha256sums = 7d80adfd94d917feb021d9c0cb2210db2af99403960c7323372e8a3360bd3d8c
 
 pkgname = biglinux-livecd
