@@ -1,7 +1,7 @@
 pkgbase = wdm
 	pkgdesc = WINGs Display Manager: login screen with the NeXT look, X11 and Wayland sessions
 	pkgver = 1.28
-	pkgrel = 15
+	pkgrel = 16
 	url = https://github.com/raorn/wdm
 	arch = x86_64
 	license = GPL-2.0-or-later AND X11
@@ -14,7 +14,7 @@ pkgbase = wdm
 	depends = libxmu
 	depends = pam
 	depends = sh
-	depends = windowmaker>=0.96.0.r130
+	depends = windowmaker>=1:0.96.0.r130
 	depends = xorg-server
 	depends = xorg-xrdb
 	optdepends = big-wm-themes: logo e papel de parede do Big WindowMaker na tela de login

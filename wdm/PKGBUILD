@@ -44,7 +44,7 @@ pkgname=wdm
 pkgver=1.28
 _debrel=27
 _snapshot=20230829T151102Z
-pkgrel=15
+pkgrel=16
 pkgdesc='WINGs Display Manager: login screen with the NeXT look, X11 and Wayland sessions'
 arch=(x86_64)
 url='https://github.com/raorn/wdm'
@@ -62,7 +62,7 @@ depends=(
   # libWINGs, libWUtil e libwraster do windowmaker do Big WindowMaker: o
   # 0.96.0 do Manjaro exporta LIBWRASTER7 com o mesmo soname, e o wdmLogin
   # compilado contra ele não abre com o nosso (e vice-versa).
-  'windowmaker>=0.96.0.r130'
+  'windowmaker>=1:0.96.0.r130'  # o do extra (0.96.0) não serve: ver windowmaker/PKGBUILD
   xorg-server  # o wdm executa o /usr/bin/X do Xservers
   xorg-xrdb    # recursos X da tela de login (Xresources)
 )

@@ -12,6 +12,11 @@
 # 0.96.0.rN.gHASH e regenere os checksums com ci/update-sums.sh (ver README).
 # Quando a tag wmaker-0.97.0 sair, trocar para `#tag=wmaker-0.97.0`.
 pkgname=windowmaker
+# epoch=1: o vercmp põe 0.96.0.r130.g558e67f ANTES de 0.96.0 (um segmento com
+# letra perde para o fim da versão), e o pamac trocava este pacote pelo
+# windowmaker 0.96.0 do extra. Com a época, o do extra nunca parece mais
+# novo e a ISO não precisa mais de IgnorePkg. Nunca remova.
+epoch=1
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
 pkgrel=26
