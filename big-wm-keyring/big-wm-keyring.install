@@ -1,0 +1,11 @@
+# Mesma forma do archlinux-keyring: só popula se o chaveiro do pacman já
+# existe (num chroot novo, o pacman-key --init vem antes e popula tudo).
+post_upgrade() {
+	if usr/bin/pacman-key -l >/dev/null 2>&1; then
+		usr/bin/pacman-key --populate big-wm
+	fi
+}
+
+post_install() {
+	post_upgrade
+}

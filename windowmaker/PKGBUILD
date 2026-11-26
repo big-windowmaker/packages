@@ -12,6 +12,11 @@
 # 0.96.0.rN.gHASH e regenere os checksums com ci/update-sums.sh (ver README).
 # Quando a tag wmaker-0.97.0 sair, trocar para `#tag=wmaker-0.97.0`.
 pkgname=windowmaker
+# epoch=1: o vercmp põe 0.96.0.r130.g558e67f ANTES de 0.96.0 (um segmento com
+# letra perde para o fim da versão), e o pamac trocava este pacote pelo
+# windowmaker 0.96.0 do extra. Com a época, o do extra nunca parece mais
+# novo e a ISO não precisa mais de IgnorePkg. Nunca remova.
+epoch=1
 _commit=558e67f30331eb03955d7bf3bf4a55c8520c64b6
 pkgver=0.96.0.r130.g558e67f
 pkgrel=26
@@ -82,6 +87,7 @@ source=(
   0029-dock-a-drawer-restored-on-a-taken-slot-moves-to-the-.patch
   0030-randr-draw-the-background-again-when-a-monitor-comes.patch
   0031-window-the-frame-of-an-undecorated-window-takes-the-.patch
+  0032-Makefile-ignore-enable-jobserver-in-the-configure-do.patch
 )
 sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '08c066aabb93d30db14e8cb3a27e8e858393a67e6e8c7e9318b810251e3bd337'
@@ -114,7 +120,8 @@ sha256sums=('a86074fcac28629ad66ad970f59d5ea1b7ea494880d61d0ed0ffa0d1b3f84dcf'
             '86b44ff26233cf240b64b150bbf0eb7a25043280ebb4a08eb7d87175d452ae57'
             'b8c08762a2db2a9dcd6fcd3123eb5ff770190e28127b80b47dc4c48c51fe87fc'
             'b864d18cac3e2b0622b0a04fecc5dec97a8c9c214b52c991b386a3d1a5bc3bac'
-            '860f85dd6ff3bad682584cfccba6004c6c7dead89f3526f9aa8daf572ea30f28')
+            '860f85dd6ff3bad682584cfccba6004c6c7dead89f3526f9aa8daf572ea30f28'
+            '15a36316fae83fe687561e7327e8ce8ad1df1ecc8a62cdb995d111fb02a61208')
 
 prepare() {
   cd wmaker
@@ -273,6 +280,11 @@ prepare() {
   # dela. O controle na tela do big-keyboard (tela inteira, entrada só nos
   # botões) engolia todos os cliques: Dock, dockapps e área de trabalho.
   patch -Np1 -i "${srcdir}/0031-window-the-frame-of-an-undecorated-window-takes-the-.patch"
+
+  # 0032: o check() compara as opções do configure com o INSTALL-WMAKER; o
+  # automake (jobserver.m4) passou a acrescentar --enable-jobserver a todo
+  # configure, e o check falhava. Enviar ao upstream (lista de ignoradas).
+  patch -Np1 -i "${srcdir}/0032-Makefile-ignore-enable-jobserver-in-the-configure-do.patch"
 
   # O master não define mais X-GDM-SessionRegisters no wmaker.desktop, então o
   # sed que o Arch faz na 0.96.0 não é necessário aqui.

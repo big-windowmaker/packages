@@ -1,0 +1,16 @@
+pkgbase = big-wm-keyring
+	pkgdesc = OpenPGP key of the Big WindowMaker package repository [big-wm]
+	pkgver = 20261126
+	pkgrel = 1
+	url = https://github.com/big-windowmaker/repo
+	install = big-wm-keyring.install
+	arch = any
+	license = GPL-3.0-or-later
+	source = big-wm.gpg
+	source = big-wm-trusted
+	source = big-wm-revoked
+	sha256sums = a25cdd0c6d1fbcaf4c3fbeaaf8caf954f560351ea6490ed23ddc340986c8ee4c
+	sha256sums = 8321c3201d4c65b21ce0d591cee8d142637d953d3ee6743eeeccf8d5eda7bdbe
+	sha256sums = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+pkgname = big-wm-keyring

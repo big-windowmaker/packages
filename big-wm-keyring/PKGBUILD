@@ -1,0 +1,28 @@
+# Maintainer: Rafael Ruscher <rruscher@gmail.com>
+# Big WindowMaker: https://github.com/big-windowmaker
+#
+# Chave OpenPGP do repositório pacman [big-wm]
+# (https://github.com/big-windowmaker/repo). O pacman-key --populate big-wm
+# importa a chave e dá confiança total (big-wm-trusted) à chave primária
+#   2F36 D64F 633B BA80 052F  4893 4AF5 FC29 61C2 E4AF
+# A primária fica offline; os pacotes e o banco são assinados pela subchave
+#   2C5B E454 0995 63AB 4C78  3205 173E 2C09 FC18 33B0
+# Ao trocar ou revogar uma subchave: atualize big-wm.gpg (gpg --armor
+# --export) e o pkgver (data); uma chave comprometida vai para big-wm-revoked.
+pkgname=big-wm-keyring
+pkgver=20261126
+pkgrel=1
+pkgdesc='OpenPGP key of the Big WindowMaker package repository [big-wm]'
+arch=(any)
+url='https://github.com/big-windowmaker/repo'
+license=('GPL-3.0-or-later')
+install=big-wm-keyring.install
+source=(big-wm.gpg big-wm-trusted big-wm-revoked)
+sha256sums=('a25cdd0c6d1fbcaf4c3fbeaaf8caf954f560351ea6490ed23ddc340986c8ee4c'
+            '8321c3201d4c65b21ce0d591cee8d142637d953d3ee6743eeeccf8d5eda7bdbe'
+            'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+
+package() {
+  install -Dm644 -t "${pkgdir}/usr/share/pacman/keyrings" \
+    big-wm.gpg big-wm-trusted big-wm-revoked
+}
