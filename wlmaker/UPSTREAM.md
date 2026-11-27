@@ -64,7 +64,7 @@ Os cinco primeiros foram rebaseados sobre o `main` do upstream (`5576886`), um c
 | 0037 | [phkaeser/wlmaker#577](https://github.com/phkaeser/wlmaker/pull/577) |
 | 0044 | [phkaeser/wlmaker#578](https://github.com/phkaeser/wlmaker/pull/578) |
 | 0076 | [phkaeser/wlmaker#579](https://github.com/phkaeser/wlmaker/pull/579): correção e funcionalidade juntas; separar se o upstream pedir |
-| 0158, 0085 | Aplicam sozinhos; próximos. |
+| 0158, 0085 | Prontos (2026-11-27): rebaseados sobre `5576886`, `ctest` 26/26, branches `upstream/pointer-grab-all-buttons` e `upstream/popup-grab-dismiss` no fork. O PR no upstream espera a primeira revisão dos cinco acima, para não acumular fila num projeto de um mantenedor só. |
 | Demais do grupo 1 | Dependem de outros patches: rebasear um a um. |
 
 Quando um patch entra no upstream, ele sai daqui no próximo
