@@ -5,8 +5,8 @@
 
 _pkgname=thunar
 pkgname=thunar-git
-_commit=6ec7ca8c017fda94e5a608aa8f3371a350b35da4
-pkgver=4.21.7+r143+g6ec7ca8c0
+_commit=da505b32049d9e15bfb3ffeeff3a0ae8232d600d
+pkgver=4.21.7+r154+gda505b320
 pkgrel=1
 pkgdesc='File manager for Xfce (master branch, pinned commit)'
 arch=('x86_64')
