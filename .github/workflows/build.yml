@@ -118,3 +118,22 @@ jobs:
           path: out/
           if-no-files-found: warn
           retention-days: 30
+
+  # Nome fixo para a proteção do main: os jobs de build mudam de nome com os
+  # pacotes alterados (Build <pacote>). Passa quando a detecção passou e cada
+  # build passou, ou foi pulado porque nenhum pacote mudou.
+  resultado:
+    name: Resultado
+    needs: [detect, build]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Todos os pacotes alterados compilaram
+        env:
+          DETECT: ${{ needs.detect.result }}
+          BUILD: ${{ needs.build.result }}
+        run: |
+          echo "detecção: $DETECT · build: $BUILD"
+          [ "$DETECT" = success ] || exit 1
+          case "$BUILD" in success | skipped) ;; *) exit 1 ;; esac
