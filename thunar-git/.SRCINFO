@@ -1,6 +1,6 @@
 pkgbase = thunar-git
 	pkgdesc = File manager for Xfce (master branch, pinned commit)
-	pkgver = 4.21.7+r143+g6ec7ca8c0
+	pkgver = 4.21.7+r154+gda505b320
 	pkgrel = 1
 	url = https://docs.xfce.org/xfce/thunar/start
 	arch = x86_64
@@ -35,7 +35,7 @@ pkgbase = thunar-git
 	provides = thunar=4.21.7
 	conflicts = thunar
 	replaces = thunar
-	source = thunar::git+https://gitlab.xfce.org/xfce/thunar.git#commit=6ec7ca8c017fda94e5a608aa8f3371a350b35da4
+	source = thunar::git+https://gitlab.xfce.org/xfce/thunar.git#commit=da505b32049d9e15bfb3ffeeff3a0ae8232d600d
 	sha256sums = SKIP
 
 pkgname = thunar-git
