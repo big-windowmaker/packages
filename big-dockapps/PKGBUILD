@@ -145,8 +145,9 @@ source=(
   "https://downloads.sourceforge.net/wmsystemtray/wmsystemtray-${_wmsystemtray_ver}.tar.gz"
   "${_zenwalk}/minidock-${_minidock_ver}.tar.gz"
   "${_zenwalk}/minicontrol-${_minicontrol_ver}.tar.gz"
-  # Sem HTTPS no servidor do autor; a integridade vem do sha256.
-  "http://tnemeth.free.fr/projets/programmes/wmapmload-${_wmapmload_ver}.tar.gz"
+  # O servidor do autor só tem http: cópia exata (mesmo sha256) no release
+  # fontes-externas deste repositório.
+  "https://github.com/big-windowmaker/packages/releases/download/fontes-externas/wmapmload-${_wmapmload_ver}.tar.gz"
   "https://downloads.sourceforge.net/project/mountapp/mountapp/${_mountapp_ver}/mountapp-${_mountapp_ver}.tar.gz"
   "https://people.debian.org/~godisch/wmweather/wmweather-${_wmweather_ver}.tar.gz"
   wmwifi-no-interface.patch
@@ -171,8 +172,9 @@ source=(
   wmcliphist-keep-the-owner.patch
   wmcliphist-last-copy.patch
   wmcube-read-all-events.patch
-  # Sem HTTPS no cache do FreeBSD; a integridade vem do sha256.
-  "wmeyes-${_wmeyes_ver}.tar.gz::http://distcache.FreeBSD.org/ports-distfiles/wmeyes-${_wmeyes_ver}.tar.gz"
+  # O cache do FreeBSD não tem https válido: cópia exata (mesmo sha256) no
+  # release fontes-externas deste repositório.
+  "wmeyes-${_wmeyes_ver}.tar.gz::https://github.com/big-windowmaker/packages/releases/download/fontes-externas/wmeyes-${_wmeyes_ver}.tar.gz"
   wmeyes-modern.patch
   wmsystemtray-symbolic-colors.patch
 )

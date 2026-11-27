@@ -23,7 +23,7 @@ url='http://www.vide.memoire.free.fr/pages/onestepback/onestepback.php'
 license=('GPL-3.0-only')
 optdepends=('gtk-engine-murrine: GTK 2 applications')
 makedepends=('imagemagick')
-source=("http://www.vide.memoire.free.fr/pages/onestepback/${_name}-v${pkgver}.zip"
+source=("https://github.com/big-windowmaker/packages/releases/download/fontes-externas/${_name}-v${pkgver}.zip"
         libadwaita.css
         libadwaita-widgets.css
         dark.sed
